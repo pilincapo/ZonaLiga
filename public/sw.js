@@ -1,5 +1,5 @@
 // Service worker: cache-first para assets estáticos, network-first para navegación.
-const CACHE = 'liga-static-v2';
+const CACHE = 'liga-static-v3';
 const ASSETS = [
   '/css/app.css',
   '/manifest.webmanifest',

@@ -199,6 +199,20 @@ tablas, goleadores y números del torneo.
   Los estáticos se sirven con *stale-while-revalidate*: aun sin tocar la versión,
   el próximo deploy se ve en la siguiente visita.
 
+## Changelog y versiones
+
+Cada cambio visible de la app se registra en **`src/changelog.ts`** (fuente única) y se puede
+consultar desde el sitio en **`/changelog`**: el pie de página muestra un chip chiquito con la
+versión actual (ej. `v0.1.0`) que lleva a la página de novedades, escrita en lenguaje sencillo
+para cualquiera de la liga.
+
+Para registrar una modificación:
+
+1. Agregá (o actualizá) la entrada más nueva de `CHANGELOG` en `src/changelog.ts`: ítems con
+   categoría `nuevo` / `mejora` / `arreglo` y texto simple, más nueva arriba.
+2. Subí `APP_VERSION` en el mismo archivo y la `version` de `package.json` (deben coincidir;
+   hay un test que lo verifica).
+
 ## Estructura
 
 ```
@@ -210,7 +224,8 @@ src/ui/             Vistas SSR (strings, sin build de frontend)
 src/routes/         Handlers del panel admin (admin.ts) y del delegado (delegate.ts)
 public/             CSS (tema claro), manifest PWA, service worker, íconos
 design/             Tema oscuro original, por si querés volver atrás
-test/               Vitest: 57 tests de la lógica crítica
+src/changelog.ts    Versión actual y entradas del changelog (página /changelog)
+test/               Vitest: tests de la lógica crítica + UI (tema, changelog)
 ```
 
 ## Quitar los datos de ejemplo
