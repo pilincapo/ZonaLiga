@@ -13,7 +13,8 @@ import {
   verifySessionToken,
 } from '../lib/auth.ts';
 import { slugify } from '../lib/slug.ts';
-import type { MatchStatus } from '../lib/types.ts';
+import type { Match, MatchStatus } from '../lib/types.ts';
+import { regeneratePairings, verifyPairings } from '../lib/fixture.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
 import { roundSlots, scheduleFromForm, scheduleOf, regenerateRound, plannedRoundDate } from '../lib/schedule.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
@@ -389,6 +390,81 @@ adminRoutes.post('/fixture/generar', async (c) => {
   }
   await c.env.DB.batch(stmts);
   return c.redirect('/admin/fixture?msg=' + encodeURIComponent(`Fixture generado: ${fixture.rounds.length} fechas`));
+});
+
+/**
+ * Regenera los cruces a mitad de torneo (equipo nuevo o participante que
+ * cambió) SIN tocar lo jugado. Al terminar verifica sobre la base que los
+ * partidos nuevos no pisen los ya jugados (cruces, jornadas ni canchas).
+ */
+adminRoutes.post('/fixture/regenerar', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  const mode = String(f['mode'] ?? 'single') === 'double' ? 'double' : 'single';
+  if (!Number.isFinite(tournamentId)) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const t = await resolveTournament(c.env.DB, undefined, tournamentId);
+  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(t.slug)}`;
+
+  const teamRows = await c.env.DB.prepare('SELECT id, name, active FROM teams ORDER BY id').all<{
+    id: number;
+    name: string;
+    active: number;
+  }>();
+  const names = new Map((teamRows.results ?? []).map((r) => [r.id, r.name]));
+  const activeTeamIds = (teamRows.results ?? []).filter((r) => r.active).map((r) => r.id);
+  if (activeTeamIds.length < 2) {
+    return c.redirect(`${dest}&err=` + encodeURIComponent('Necesitás al menos 2 equipos activos'));
+  }
+
+  const before = await c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id')
+    .bind(tournamentId)
+    .all<Match>();
+  const plan = regeneratePairings({
+    existing: before.results ?? [],
+    activeTeamIds,
+    mode,
+    schedule: scheduleOf(t.config),
+  });
+
+  const stmts: D1PreparedStatement[] = [];
+  for (const id of plan.removeMatchIds) {
+    stmts.push(
+      c.env.DB.prepare(
+        'DELETE FROM submission_events WHERE submission_id IN (SELECT id FROM submissions WHERE match_id = ?1)'
+      ).bind(id)
+    );
+    stmts.push(c.env.DB.prepare('DELETE FROM submissions WHERE match_id = ?1').bind(id));
+    stmts.push(c.env.DB.prepare('DELETE FROM events WHERE match_id = ?1').bind(id));
+    // Guarda extra: jamás borrar un partido con resultado.
+    stmts.push(
+      c.env.DB.prepare("DELETE FROM matches WHERE id = ?1 AND status NOT IN ('played', 'walkover')").bind(id)
+    );
+  }
+  for (const m of plan.create) {
+    stmts.push(
+      c.env.DB.prepare(
+        'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, played_on, kickoff_time, venue) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
+      ).bind(tournamentId, m.round, m.home, m.away, 'scheduled', m.played_on, m.kickoff_time, m.venue)
+    );
+  }
+  if (stmts.length) await c.env.DB.batch(stmts);
+
+  // Verificación real: se relee la base y se chequean los choques.
+  const after = await c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id')
+    .bind(tournamentId)
+    .all<Match>();
+  const issues = verifyPairings(after.results ?? [], mode, (id) => names.get(id) ?? `equipo ${id}`);
+  const resumen = `Cruce regenerado: ${plan.keptMatchIds.length} jugado(s) conservado(s), ${plan.create.length} nuevo(s), ${plan.removeMatchIds.length} pendiente(s) reemplazado(s)`;
+  if (issues.length) {
+    const detail = issues.slice(0, 6).join(' · ') + (issues.length > 6 ? ' …' : '');
+    return c.redirect(`${dest}&err=` + encodeURIComponent(`⚠ ${resumen}. Choques: ${detail}`));
+  }
+  return c.redirect(
+    `${dest}&msg=` + encodeURIComponent(`${resumen}. ✓ Verificado: los nuevos no pisan los jugados`)
+  );
 });
 
 adminRoutes.get('/fixture/:id/editar', async (c) => {

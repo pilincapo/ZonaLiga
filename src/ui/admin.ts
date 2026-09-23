@@ -544,7 +544,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
 ${flash('success', msg)}${flash('error', errMsg)}${gapsNote}
 ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, label: '+ Partido suelto' })}
 <section class="block"><div class="card"><div class="card-body">
-  <form method="post" action="/admin/fixture/generar" class="form-row" onsubmit="return confirm('Esto reemplaza el fixture actual (partidos jugados se pierden). ¿Continuar?')">
+  <form method="post" action="/admin/fixture/generar" class="form-row">
     <input type="hidden" name="tournament_id" value="${t.id}">
     <div class="field grow">
       <label>Generar fixture automático</label>
@@ -553,11 +553,14 @@ ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, 
         <option value="double">Ida y vuelta</option>
       </select>
     </div>
-    <div class="field" style="max-width:120px;align-self:flex-end">
-      <button class="btn btn-primary" type="submit">Generar</button>
+    <div class="field" style="align-self:flex-end">
+      <span style="display:flex;gap:8px">
+        <button class="btn btn-primary" type="submit" onclick="return confirm('Esto reemplaza TODO el fixture (los partidos jugados se pierden). ¿Continuar?')">Generar</button>
+        <button class="btn btn-ghost" type="submit" formaction="/admin/fixture/regenerar" onclick="return confirm('Se rearman SOLO los cruces pendientes: los partidos jugados y sus resultados quedan intactos. ¿Continuar?')">↻ Regenerar cruce</button>
+      </span>
     </div>
   </form>
-  <p class="hint">Usa los equipos activos (${teams.filter((x) => x.active).length}). El algoritmo del círculo equilibra localías; después podés editar cada partido.</p>
+  <p class="hint">Usa los equipos activos (${teams.filter((x) => x.active).length}). <strong>Generar</strong> arma todo de cero. <strong>Regenerar cruce</strong> es para cuando entró un equipo nuevo o cambió un participante a mitad de torneo: conserva lo jugado, rearma los pendientes y avisa si algún partido nuevo chocaría con uno ya jugado (cruces repetidos, equipo en dos partidos de la misma fecha o cancha doblemente reservada).</p>
 </div></div></section>
 <section class="block"><div class="card"><div class="card-body">
   <strong>Orden de partidos por fecha:</strong> <a href="/admin/fechas?t=${escUrl(t.slug)}">asignar día, hora y cancha →</a>

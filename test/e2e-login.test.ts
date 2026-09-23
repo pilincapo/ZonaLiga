@@ -234,6 +234,20 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     expect(html).toContain('fecha 1');
     expect(html).toContain('2 partidos');
     expect(html).toContain('slot falta');
+
+    // Dejo la config como estaba para los tests siguientes.
+    const restore = await admin.post(`/admin/torneos/${tournamentId}`, {
+      name: 'Copa E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'active',
+      venues: 'Cancha Norte\nCancha Sur',
+      kickoffs: '10:00, 12:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      play_weekday: '6',
+    });
+    expect(restore.status).toBe(302);
   });
 });
 
@@ -324,5 +338,49 @@ describe.skipIf(!has)('e2e: ajustes manuales de puntos', () => {
     expect(after).not.toContain('Sanción del comité de disciplina');
     const publicAfter = await (await fetch(`${BASE}/posiciones`)).text();
     expect(publicAfter).not.toContain('Ajustes de puntos');
+  });
+});
+
+describe.skipIf(!has)('e2e: regenerar cruce a mitad de torneo', () => {
+  it('equipo nuevo: conserva lo jugado, rearma pendientes y verifica choques', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Estado previo: el 3-1 del partido fue aprobado en el flujo delegado.
+    const add = await admin.post('/admin/equipos', {
+      name: 'Nuevo E2E',
+      short_name: 'NUE',
+      color: '#8b5cf6',
+      active: 'on',
+    });
+    expect(add.status).toBe(302);
+
+    const res = await admin.post('/admin/fixture/regenerar', {
+      tournament_id: tournamentId,
+      mode: 'double',
+    });
+    expect(res.status).toBe(302);
+    const loc = decodeURIComponent(res.headers.get('location') ?? '');
+    expect(loc).toContain('conservado');
+    expect(loc).toContain('pendiente');
+
+    // El flash de verificación llega a la página del fixture.
+    const page = await (await admin.get(loc)).text();
+    expect(page).toContain('Verificado');
+    expect(page).toContain('conservado');
+    expect(page).not.toContain('Choques');
+
+    // Lo jugado sigue publicado y el equipo nuevo figura en los cruces.
+    const publicHtml = await (await fetch(`${BASE}/`)).text();
+    expect(publicHtml).toContain('3 - 1');
+    const fx = await (await admin.get('/admin/fixture')).text();
+    expect(fx).toContain('Nuevo E2E');
+
+    // El delegado de Deportivo ve los cruces nuevos de su equipo.
+    const delegate = client();
+    await delegate.loginDelegate(delegateCode);
+    const home = await delegate.get('/delegado');
+    expect(home.status).toBe(200);
+    expect(await home.text()).toContain('Deportivo E2E');
   });
 });

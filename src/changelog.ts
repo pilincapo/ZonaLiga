@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.4';
+export const APP_VERSION = '0.2.5';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,15 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.5',
+    date: '2026-09-23',
+    title: 'Regenerar cruces a mitad de torneo',
+    items: [
+      { kind: 'nuevo', text: 'Botón “Regenerar cruce”: rearma los partidos pendientes cuando entra un equipo nuevo o cambió un participante, sin tocar lo jugado.' },
+      { kind: 'nuevo', text: 'Al regenerar se verifica todo el fixture: si algún partido nuevo chocara con uno ya jugado (cruce repetido, equipo en dos partidos de la fecha o cancha doble), se avisa en detalle.' },
+    ],
+  },
   {
     version: '0.2.4',
     date: '2026-09-23',

@@ -269,7 +269,7 @@ delegran el armado de HTML en `src/ui/`; la lógica de dominio vive en
 | `lib/standings` | `computeStandings` (acepta ajustes de puntos), `groupBy` | ui/public |
 | `ui/adminAjustes` | `adjustmentsAdminPage`: form de ajuste con motivo, historial con borrado | routes/admin |
 | `lib/suspensions` | `computeSuspensions` | ui/public, ui/admin |
-| `lib/fixture` | Generador round-robin (`generateRoundRobin`, `generateDoubleRoundRobin`) | routes/admin, ui/admin |
+| `lib/fixture` | Generador round-robin (`generateRoundRobin`, `generateDoubleRoundRobin`) + `regeneratePairings` (rearmar pendientes sin tocar lo jugado) y `verifyPairings` (choques de cruce/jornada/cancha) | routes/admin, ui/admin |
 | `lib/bracket` | `buildBracketColumns`, `matchShortLabel`, `sourceLabel`, labels | ui/public, ui/match, ui/admin, ui/adminEntregas, ui/delegate |
 | `lib/live` | Fases del partido, `buildLivePayload`, `leagueNow` (reloj UTC−3) | ui/live, ui/public |
 | `lib/share` | Textos y links de WhatsApp | ui/public, ui/admin |
