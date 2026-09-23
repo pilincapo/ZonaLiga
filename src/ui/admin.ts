@@ -699,7 +699,7 @@ ${pageHead('Planillas')}
   return adminLayout({ title: 'Planilla', active: 'planilla', body });
 }
 
-export async function sheetPage(db: D1Database, matchId: number, error?: string): Promise<string> {
+export async function sheetPage(db: D1Database, matchId: number, msg?: string, error?: string): Promise<string> {
   const m = await getMatch(db, matchId);
   if (!m) {
     return adminLayout({ title: 'Planilla', active: 'planilla', body: `${pageHead('Planilla')}<div class="error-box">Partido inexistente.</div>` });
@@ -750,6 +750,37 @@ export async function sheetPage(db: D1Database, matchId: number, error?: string)
     const players = side === 'home' ? homePlayers : awayPlayers;
     return `<div class="card-body">
   <h3 class="zone-title">${esc(label)}</h3>
+  <form method="post" action="/admin/planilla/${m.id}/goles">
+    <input type="hidden" name="team_id" value="${teamId ?? ''}">
+    <strong class="uppercase">Carga rápida de goles</strong>
+    <div class="field mt-3">
+      <label>¿Cuántos goles hizo?</label>
+      <div class="goal-count">
+        ${['1', '2', '3', '4']
+          .map(
+            (v) =>
+              `<label class="radio-chip"><input type="radio" name="count" value="${v}" ${v === '1' ? 'checked' : ''}> ${v}</label>`
+          )
+          .join('')}
+        <label class="radio-chip"><input type="radio" name="count" value="more"> Más de 4</label>
+        <input type="number" name="count_more" min="5" max="20" value="5" style="width:72px" title="Cantidad si elegís Más de 4">
+      </div>
+      <p class="hint">Tildá los goleadores abajo y cargá. El número de al lado se usa solo con “Más de 4”. Si uno hizo más de un gol, el extra va con “+ Agregar evento”.</p>
+    </div>
+    <div class="field">
+      <label>Goleadores (plantilla)</label>
+      ${players.length
+        ? players
+            .map(
+              (p) =>
+                `<label class="check-row"><input type="checkbox" name="scorer_${p.id}"> <span>${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}</span></label>`
+            )
+            .join('')
+        : '<p class="hint">Sin jugadores: sumalos en la sección Jugadores.</p>'}
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit">⚽ Cargar goles</button>
+  </form>
+  <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
   <form method="post" action="/admin/planilla/${m.id}/evento">
     <input type="hidden" name="team_id" value="${teamId ?? ''}">
     <div class="form-row">
@@ -776,7 +807,7 @@ export async function sheetPage(db: D1Database, matchId: number, error?: string)
 
   const submissionsBlock = await pendingForMatchBlock(db, m, teamMap);
   const body = `
-${flash('error', error)}
+${flash('success', msg)}${flash('error', error)}
 ${pageHead(`Planilla · ${home?.name ?? 'Por definir'} vs ${away?.name ?? 'Por definir'}`, { href: `/partido/${m.id}`, label: 'Ver ficha pública ↗' })}
 <section class="block"><div class="card"><div class="card-body">
   <form method="post" action="/admin/planilla/${m.id}">

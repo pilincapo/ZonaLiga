@@ -15,6 +15,7 @@ import {
 import { slugify } from '../lib/slug.ts';
 import type { Match, MatchStatus } from '../lib/types.ts';
 import { regeneratePairings, verifyPairings, slotConflicts, playedCount } from '../lib/fixture.ts';
+import { resolveScorers } from '../lib/sheet.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
 import {
   roundSlots,
@@ -631,7 +632,7 @@ adminRoutes.post('/fechas/guardar', async (c) => {
 adminRoutes.get('/planilla', (c) => admin.sheetListPage(c.env.DB, c.req.query('msg'), c.req.query('err')).then((h) => c.html(h)));
 
 adminRoutes.get('/planilla/:id', async (c) => {
-  return c.html(await admin.sheetPage(c.env.DB, Number(c.req.param('id'))));
+  return c.html(await admin.sheetPage(c.env.DB, Number(c.req.param('id')), c.req.query('msg'), c.req.query('err')));
 });
 
 adminRoutes.post('/planilla/:id', async (c) => {
@@ -657,6 +658,42 @@ adminRoutes.post('/planilla/:id', async (c) => {
     )
     .run();
   return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent('Planilla guardada'));
+});
+
+/** Carga rápida: N goles con los goleadores tildados en la plantilla. */
+adminRoutes.post('/planilla/:id/goles', async (c) => {
+  const id = Number(c.req.param('id'));
+  const f = await c.req.parseBody();
+  const m = await c.env.DB
+    .prepare('SELECT id, home_team_id, away_team_id FROM matches WHERE id = ?1')
+    .bind(id)
+    .first<{ id: number; home_team_id: number | null; away_team_id: number | null }>();
+  if (!m) {
+    return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
+  }
+  const teamId = Number(f['team_id']);
+  if (teamId !== m.home_team_id && teamId !== m.away_team_id) {
+    return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent('Ese equipo no juega este partido'));
+  }
+  const players = await c.env.DB.prepare('SELECT id FROM players WHERE team_id = ?1').bind(teamId).all<{ id: number }>();
+  const allowed = (players.results ?? []).map((p) => p.id);
+  const checked = Object.keys(f)
+    .filter((k) => k.startsWith('scorer_'))
+    .map((k) => Number(k.slice('scorer_'.length)));
+  const res = resolveScorers({
+    count: String(f['count'] ?? ''),
+    countMore: String(f['count_more'] ?? ''),
+    checked,
+    allowed,
+  });
+  if (!res.ok) {
+    return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(res.error));
+  }
+  const stmts: D1PreparedStatement[] = res.ids.map((pid) =>
+    c.env.DB.prepare("INSERT INTO events (match_id, team_id, player_id, type) VALUES (?1, ?2, ?3, 'goal')").bind(id, teamId, pid)
+  );
+  await c.env.DB.batch(stmts);
+  return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent(`Goles cargados: ${res.ids.length}`));
 });
 
 adminRoutes.post('/planilla/:id/evento', async (c) => {

@@ -564,3 +564,51 @@ describe.skipIf(!has)('e2e: fair play y valla en posiciones', () => {
     }
   });
 });
+
+describe.skipIf(!has)('e2e: carga rápida de goles en la planilla', () => {
+  it('carga goles con checks de la plantilla y valida la cantidad', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Dos goleadores nuevos en la plantilla de Deportivo.
+    for (const name of ['Goleador A E2E', 'Goleador B E2E']) {
+      const add = await admin.post('/admin/jugadores', { team_id: teamId, name, number: '9', position: 'DEL' });
+      expect(add.status).toBe(302);
+    }
+    const roster = await (await admin.get(`/admin/jugadores?team=${teamId}`)).text();
+    const idDe = (name: string) =>
+      new RegExp(`${name}[\\s\\S]*?\\/admin\\/jugadores\\/(\\d+)\\/eliminar`).exec(roster)?.[1] ?? '';
+    const idA = idDe('Goleador A E2E');
+    const idB = idDe('Goleador B E2E');
+    expect(idA, 'Goleador A debe estar en la plantilla').toBeTruthy();
+    expect(idB, 'Goleador B debe estar en la plantilla').toBeTruthy();
+
+    // Carga correcta: 2 goles con los 2 goleadores tildados.
+    const ok = await admin.post(`/admin/planilla/${matchId}/goles`, {
+      team_id: teamId,
+      count: '2',
+      [`scorer_${idA}`]: 'on',
+      [`scorer_${idB}`]: 'on',
+    });
+    expect(ok.status).toBe(302);
+    const okLoc = decodeURIComponent(ok.headers.get('location') ?? '');
+    expect(okLoc).toContain('Goles cargados: 2');
+
+    // La flash llega a la planilla y la ficha pública muestra a los goleadores.
+    const sheet = await (await admin.get(okLoc)).text();
+    expect(sheet).toContain('Goles cargados: 2');
+    const ficha = await (await fetch(`${BASE}/partido/${matchId}`)).text();
+    expect(ficha).toContain('Goleador A E2E');
+    expect(ficha).toContain('Goleador B E2E');
+
+    // Validación: cantidad 2 con solo 1 tildado → error, sin cargar nada.
+    const bad = await admin.post(`/admin/planilla/${matchId}/goles`, {
+      team_id: teamId,
+      count: '2',
+      [`scorer_${idA}`]: 'on',
+    });
+    expect(bad.status).toBe(302);
+    const badLoc = decodeURIComponent(bad.headers.get('location') ?? '');
+    expect(badLoc).toContain('Tildaste 1 goleador(es) para 2 gol(es)');
+  });
+});

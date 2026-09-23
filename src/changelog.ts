@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.8';
+export const APP_VERSION = '0.2.9';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,15 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.9',
+    date: '2026-09-23',
+    title: 'Carga rápida de goles en la planilla',
+    items: [
+      { kind: 'nuevo', text: 'En la planilla de cada partido hay una carga rápida: elegís cuántos goles hizo el equipo (1 a 4, o “Más de 4”) y tildás a los goleadores en la plantilla — sin escribir uno por uno.' },
+      { kind: 'mejora', text: 'La app controla que la cantidad de goles coincida con los goleadores tildados y que todos sean del equipo, y ahora muestra los avisos de éxito y de error de la planilla (antes no se veían).' },
+    ],
+  },
   {
     version: '0.2.8',
     date: '2026-09-23',
