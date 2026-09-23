@@ -6,7 +6,14 @@ import { parseRules, DEFAULT_RULES, POSITION_ORDER } from '../lib/types.ts';
 import type { Match, Rules, Team, Tournament } from '../lib/types.ts';
 import { generateDoubleRoundRobin, generateRoundRobin, shuffled } from '../lib/fixture.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
-import { EMPTY_SCHEDULE, plannedRoundDate, scheduleOf, type TournamentSchedule } from '../lib/schedule.ts';
+import {
+  EMPTY_SCHEDULE,
+  formatScheduleGaps,
+  plannedRoundDate,
+  scheduleGaps,
+  scheduleOf,
+  type TournamentSchedule,
+} from '../lib/schedule.ts';
 import { BRACKET_LABELS } from '../lib/bracket.ts';
 import { formatDateShort } from '../lib/format.ts';
 import {
@@ -487,6 +494,13 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   }
   const roundKeys = [...byRound.keys()].sort((a, b) => a - b);
 
+  // Aviso: si alguna fecha tiene más partidos que slots configurados.
+  const gaps = scheduleGaps(
+    scheduleOf(t.config),
+    roundKeys.map((round) => ({ round, count: byRound.get(round)!.length }))
+  );
+  const gapsNote = gaps.length ? `<div class="warning-box">${esc(formatScheduleGaps(gaps))}</div>` : '';
+
   const roundSections = roundKeys
     .map((r) => {
       const list = byRound.get(r)!;
@@ -516,7 +530,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     .join('');
 
   const body = `
-${flash('success', msg)}${flash('error', errMsg)}
+${flash('success', msg)}${flash('error', errMsg)}${gapsNote}
 ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, label: '+ Partido suelto' })}
 <section class="block"><div class="card"><div class="card-body">
   <form method="post" action="/admin/fixture/generar" class="form-row" onsubmit="return confirm('Esto reemplaza el fixture actual (partidos jugados se pierden). ¿Continuar?')">

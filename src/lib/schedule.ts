@@ -121,10 +121,53 @@ export function roundSlots(
   return Array.from({ length: count }, (_, i) => slots[i % slots.length]!);
 }
 
-/** true si los slots alcanzan para todos los partidos de una jornada. */
-export function scheduleCovers(s: TournamentSchedule, matchesPerRound: number): boolean {
-  if (matchesPerRound <= 0) return true;
-  return s.venues.length * Math.max(1, s.kickoffs.length) >= matchesPerRound;
+/** Slots por fecha que cubre la config actual. 0 = sin canchas ni horarios. */
+export function scheduleCapacity(s: TournamentSchedule): number {
+  if (s.venues.length === 0 && s.kickoffs.length === 0) return 0;
+  return Math.max(1, s.venues.length) * Math.max(1, s.kickoffs.length);
+}
+
+export interface ScheduleGap {
+  round: number;
+  /** Partidos de esa fecha en el fixture. */
+  needed: number;
+  /** Slots por fecha que cubre la config. */
+  capacity: number;
+  /** Cuántos slots faltan. */
+  missing: number;
+}
+
+/**
+ * Fechas cuyos partidos superan los slots disponibles. Vacío si la config
+ * alcanza o si el torneo no tiene canchas ni horarios (opción válida:
+ * el fixture sale sin cancha, sin aviso).
+ */
+export function scheduleGaps(
+  s: TournamentSchedule,
+  rounds: { round: number; count: number }[]
+): ScheduleGap[] {
+  const capacity = scheduleCapacity(s);
+  if (capacity === 0) return [];
+  const gaps: ScheduleGap[] = [];
+  for (const r of rounds) {
+    if (r.count > capacity) {
+      gaps.push({ round: r.round, needed: r.count, capacity, missing: r.count - capacity });
+    }
+  }
+  return gaps.sort((a, b) => a.round - b.round);
+}
+
+/** Aviso para la UI: qué fechas no entran y cuántos slots faltan. */
+export function formatScheduleGaps(gaps: ScheduleGap[]): string {
+  if (gaps.length === 0) return '';
+  const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
+  const detail = gaps
+    .map(
+      (g) =>
+        `fecha ${g.round}: ${plural(g.needed, 'partido', 'partidos')} — ${plural(g.missing, 'slot falta', 'slots faltan')}`
+    )
+    .join(' · ');
+  return `Las canchas y horarios no alcanzan (${gaps[0]!.capacity} slot(s) por fecha): ${detail}. Sumá canchas u horarios en el torneo; si no, los partidos de más repiten horario.`;
 }
 
 export interface RoundMatchInput {

@@ -6,8 +6,10 @@ import {
   plannedRoundDate,
   regenerateRound,
   roundSlots,
-  scheduleCovers,
+  scheduleCapacity,
   scheduleFromForm,
+  scheduleGaps,
+  formatScheduleGaps,
   scheduleOf,
 } from '../src/lib/schedule.ts';
 
@@ -118,11 +120,43 @@ describe('roundSlots', () => {
   });
 });
 
-describe('scheduleCovers', () => {
-  it('canchas × horarios vs partidos por jornada', () => {
-    expect(scheduleCovers({ ...EMPTY_SCHEDULE, venues: ['A', 'B'], kickoffs: ['09:00', '11:00'] }, 3)).toBe(true);
-    expect(scheduleCovers({ ...EMPTY_SCHEDULE, venues: ['A'], kickoffs: ['09:00'] }, 3)).toBe(false);
-    expect(scheduleCovers(EMPTY_SCHEDULE, 0)).toBe(true);
+describe('scheduleGaps / formatScheduleGaps', () => {
+  it('sin canchas ni horarios no avisa (opción válida)', () => {
+    expect(scheduleGaps(EMPTY_SCHEDULE, [{ round: 1, count: 4 }])).toEqual([]);
+    expect(formatScheduleGaps([])).toBe('');
+  });
+
+  it('todo entra (incluso exactamente lleno): sin avisos', () => {
+    const s = { ...EMPTY_SCHEDULE, venues: ['A', 'B'], kickoffs: ['10:00'] }; // 2 slots
+    expect(scheduleGaps(s, [{ round: 1, count: 2 }, { round: 2, count: 1 }])).toEqual([]);
+  });
+
+  it('las fechas que se pasan dicen cuántos slots faltan', () => {
+    const s = { ...EMPTY_SCHEDULE, venues: ['A'], kickoffs: ['10:00'] }; // 1 slot
+    const gaps = scheduleGaps(s, [
+      { round: 1, count: 1 },
+      { round: 2, count: 3 },
+      { round: 3, count: 2 },
+    ]);
+    expect(gaps).toEqual([
+      { round: 2, needed: 3, capacity: 1, missing: 2 },
+      { round: 3, needed: 2, capacity: 1, missing: 1 },
+    ]);
+  });
+
+  it('solo horarios sin canchas cuenta como 1 cancha fantasma', () => {
+    const s = { ...EMPTY_SCHEDULE, kickoffs: ['10:00', '12:00'] };
+    expect(scheduleCapacity(s)).toBe(2);
+    expect(scheduleGaps(s, [{ round: 1, count: 3 }])[0]!.missing).toBe(1);
+  });
+
+  it('el aviso nombra la fecha, los partidos y los slots que faltan', () => {
+    const text = formatScheduleGaps([{ round: 4, needed: 3, capacity: 2, missing: 1 }]);
+    expect(text).toContain('no alcanzan');
+    expect(text).toContain('fecha 4');
+    expect(text).toContain('3 partidos');
+    expect(text).toContain('slot falta');
+    expect(text).toContain('2 slot(s) por fecha');
   });
 });
 

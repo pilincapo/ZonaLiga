@@ -611,6 +611,17 @@ select {
   font-weight: 600;
 }
 
+.warning-box {
+  background: var(--warning-soft);
+  border: 1px solid #f6e0b8;
+  color: var(--warning-text);
+  padding: 11px 15px;
+  border-radius: var(--radius-xs);
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 /* ---------- Grids ---------- */
 
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
@@ -905,7 +916,8 @@ html[data-theme='dark'] .badge.green,
 html[data-theme='dark'] .success-box { border-color: rgba(34, 197, 94, 0.35); }
 html[data-theme='dark'] .badge.red,
 html[data-theme='dark'] .error-box { border-color: rgba(239, 68, 68, 0.35); }
-html[data-theme='dark'] .badge.amber { border-color: rgba(245, 158, 11, 0.35); }
+html[data-theme='dark'] .badge.amber,
+html[data-theme='dark'] .warning-box { border-color: rgba(245, 158, 11, 0.35); }
 html[data-theme='dark'] .badge.info { border-color: rgba(59, 130, 246, 0.35); }
 
 html[data-theme='dark'] .status-tag.scheduled { border-color: rgba(59, 130, 246, 0.35); }

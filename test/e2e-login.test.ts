@@ -80,15 +80,20 @@ beforeAll(async () => {
   tournamentId = /name="tournament_id" value="(\d+)"/.exec(fixtureHtml)?.[1] ?? '';
   expect(tournamentId, 'fixture debe exponer tournament_id').toBeTruthy();
 
-  // Dos equipos activos.
+  // Cuatro equipos activos: cada fecha del fixture doble tiene 2 partidos.
   await admin.post('/admin/equipos', { name: 'Deportivo E2E', short_name: 'DEP', color: '#22c55e', active: 'on' });
   await admin.post('/admin/equipos', { name: 'Atlético E2E', short_name: 'ATE', color: '#0ea5e9', active: 'on' });
+  await admin.post('/admin/equipos', { name: 'Villa E2E', short_name: 'VIL', color: '#f59e0b', active: 'on' });
+  await admin.post('/admin/equipos', { name: 'Norte E2E', short_name: 'NOR', color: '#ef4444', active: 'on' });
   const teamsHtml = await (await admin.get('/admin/equipos')).text();
   const ids = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!);
   expect(ids.length).toBeGreaterThanOrEqual(2);
-  teamId = ids[0]!;
+  // El id del delegado se busca por nombre: la página ordena alfabéticamente
+  // y el orden de creación no es confiable.
+  teamId = /Deportivo E2E[\s\S]*?\/admin\/equipos\/(\d+)">Editar/.exec(teamsHtml)?.[1] ?? '';
+  expect(teamId, 'el id de Deportivo E2E debe estar en la página').toBeTruthy();
 
-  // Fixture doble round robin con 2 equipos = 2 fechas (para probar el calendario).
+  // Fixture doble round robin con 4 equipos = 6 fechas de 2 partidos.
   const gen = await admin.post('/admin/fixture/generar', { tournament_id: tournamentId, mode: 'double' });
   expect(gen.status).toBe(302);
 
@@ -195,6 +200,37 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     const after = await admin.get('/admin');
     expect(after.status).toBe(302);
     expect(after.headers.get('location')).toContain('/admin/login');
+  });
+
+  it('avisa si las canchas y horarios no alcanzan para alguna fecha', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Con la config completa (2 canchas × 2 horarios = 4 slots, 2 partidos
+    // por fecha) no hay aviso.
+    const okHtml = await (await admin.get('/admin/fixture')).text();
+    expect(okHtml).not.toContain('no alcanzan');
+
+    // Dejo 1 cancha × 1 horario = 1 slot por fecha, para fechas de 2 partidos.
+    const edit = await admin.post(`/admin/torneos/${tournamentId}`, {
+      name: 'Copa E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+    });
+    expect(edit.status).toBe(302);
+
+    const html = await (await admin.get('/admin/fixture')).text();
+    expect(html).toContain('warning-box');
+    expect(html).toContain('no alcanzan');
+    expect(html).toContain('1 slot(s) por fecha');
+    expect(html).toContain('fecha 1');
+    expect(html).toContain('2 partidos');
+    expect(html).toContain('slot falta');
   });
 });
 
