@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createDelegateToken,
   createSessionToken,
   safeEqual,
-  sign,
-  verify,
+  verifyDelegateToken,
   verifySessionToken,
 } from '../src/lib/auth.ts';
 import { buildBracketColumns, matchShortLabel, matchWinnerLoser, sourceLabel } from '../src/lib/bracket.ts';
@@ -11,22 +11,6 @@ import type { Match } from '../src/lib/types.ts';
 
 describe('auth', () => {
   const secret = 'test-secret';
-
-  it('sign/verify roundtrip', async () => {
-    const token = await sign('payload-de-prueba', secret);
-    expect(await verify(token, secret)).toBe('payload-de-prueba');
-  });
-
-  it('verificar con otra clave falla', async () => {
-    const token = await sign('hola', secret);
-    expect(await verify(token, 'otra-clave')).toBeNull();
-  });
-
-  it('token manipulado falla', async () => {
-    const token = await sign('exp:9999999999.abc', secret);
-    const manipulated = token.replace('9999999999', '9999999999');
-    expect(await verify(manipulated.replace('exp:', 'exp1:'), secret)).toBeNull();
-  });
 
   it('sesión creada ahora es válida', async () => {
     const token = await createSessionToken(secret);
@@ -38,12 +22,53 @@ describe('auth', () => {
     expect(await verifySessionToken(token, 'otro')).toBe(false);
   });
 
+  it('token manipulado falla', async () => {
+    const token = await createSessionToken(secret);
+    expect(await verifySessionToken(token.replace('exp:', 'exp1:'), secret)).toBe(false);
+  });
+
+  it('sesión de delegado: ida y vuelta', async () => {
+    const token = await createDelegateToken(secret, 7, '0123456789abcdef0123456789abcdef');
+    const session = await verifyDelegateToken(token, secret);
+    expect(session).toEqual({ teamId: 7, codeHash: '0123456789abcdef' });
+  });
+
+  it('sesión de delegado con hash recortado a la longitud exacta', async () => {
+    // El módulo recorta el hash al prefijo que viaja en el token.
+    const token = await createDelegateToken(secret, 3, 'abc');
+    const session = await verifyDelegateToken(token, secret);
+    expect(session).toEqual({ teamId: 3, codeHash: 'abc' });
+  });
+
+  it('sesión de delegado con otro secreto es inválida', async () => {
+    const token = await createDelegateToken(secret, 7, '0123456789abcdef');
+    expect(await verifyDelegateToken(token, 'otro')).toBeNull();
+  });
+
+  it('sesión de delegado con código regenerado queda invalidada', async () => {
+    // Comportamiento real: si el admin regenera el código, el hash guardado
+    // cambia y la sesión anterior no coincide.
+    const hashViejo = await hashPassword('codigo-viejo');
+    const hashNuevo = await hashPassword('codigo-nuevo');
+    const token = await createDelegateToken(secret, 7, hashViejo);
+    const currentHash = hashNuevo.slice(0, 16);
+    const session = await verifyDelegateToken(token, secret);
+    expect(session).not.toBeNull();
+    expect(session!.codeHash).not.toBe(currentHash);
+  });
+
   it('safeEqual detecta diferencias', () => {
     expect(safeEqual('abc', 'abc')).toBe(true);
     expect(safeEqual('abc', 'abd')).toBe(false);
     expect(safeEqual('abc', 'ab')).toBe(false);
   });
 });
+
+function hashPassword(password: string): Promise<string> {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(password)).then((d) =>
+    Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('')
+  );
+}
 
 function mkMatch(partial: Partial<Match>): Match {
   return {

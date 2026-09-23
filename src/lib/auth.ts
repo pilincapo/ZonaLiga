@@ -4,8 +4,8 @@
 const SESSION_COOKIE = 'zl_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 días
 
-/** Clave de desarrollo cuando no hay ADMIN_PASSWORD configurado (local). */
-export const DEV_SECRET_FALLBACK = 'zonaliga-dev-secret-change-me';
+/** Clave de desarrollo cuando no hay ADMIN_PASSWORD configurado (local). Detalle interno: el resto del mundo usa sessionSecret(). */
+const DEV_SECRET_FALLBACK = 'zonaliga-dev-secret-change-me';
 
 /** Secreto de firma de sesiones (admin y delegados). */
 export function sessionSecret(env: { ADMIN_PASSWORD?: string }): string {
@@ -33,15 +33,15 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }
 
-/** Firma `payload` como "payloadHex.hmacB64url" (hex para evitar problemas de encoding). */
-export async function sign(payload: string, secret: string): Promise<string> {
+/** Firma `payload` como "payload.hmacB64url". Detalle interno: la sesión se usa vía create/verifySessionToken y create/verifyDelegateToken. */
+async function sign(payload: string, secret: string): Promise<string> {
   const key = await hmacKey(secret);
   const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
   return `${payload}.${b64urlEncode(new Uint8Array(sig))}`;
 }
 
-/** Verifica un token firmado y devuelve el payload original, o null si es inválido. */
-export async function verify(token: string, secret: string): Promise<string | null> {
+/** Verifica un token firmado y devuelve el payload original, o null si es inválido. Detalle interno: ídem sign. */
+async function verify(token: string, secret: string): Promise<string | null> {
   const idx = token.lastIndexOf('.');
   if (idx <= 0) return null;
   const payload = token.slice(0, idx);
@@ -97,7 +97,8 @@ export function clearSessionCookieHeader(): string {
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
-export function getCookieValue(request: Request, name: string): string | undefined {
+/** Detalle interno: lo consumen getSessionCookie y getDelegateCookie. */
+function getCookieValue(request: Request, name: string): string | undefined {
   const cookie = request.headers.get('Cookie') ?? '';
   for (const part of cookie.split(';')) {
     const [k, ...rest] = part.trim().split('=');
@@ -124,9 +125,12 @@ export interface DelegateSession {
  * El token incluye el hash del código de acceso: si el admin regenera o revoca
  * el código, las sesiones de ese equipo quedan invalidadas automáticamente.
  */
+/** El token lleva solo este prefijo del hash del código. */
+const CODE_HASH_SLICE = 16;
+
 export async function createDelegateToken(secret: string, teamId: number, codeHash: string): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + DELEGATE_TTL_SECONDS;
-  return sign(`team:${teamId}:${codeHash.slice(0, 16)}:${exp}`, secret);
+  return sign(`team:${teamId}:${codeHash.slice(0, CODE_HASH_SLICE)}:${exp}`, secret);
 }
 
 export async function verifyDelegateToken(
@@ -136,7 +140,9 @@ export async function verifyDelegateToken(
   if (!token) return null;
   const payload = await verify(token, secret);
   if (!payload) return null;
-  const m = /^team:(\d+):([0-9a-f]{16}):(\d+)$/.exec(payload);
+  // Acepta exactamente lo que produce createDelegateToken: el prefijo del hash
+  // (hasta CODE_HASH_SLICE caracteres hex).
+  const m = new RegExp(`^team:(\\d+):([0-9a-f]{1,${CODE_HASH_SLICE}}):(\\d+)$`).exec(payload);
   if (!m) return null;
   const exp = Number(m[3]);
   if (!Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000)) return null;
