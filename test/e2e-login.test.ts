@@ -72,6 +72,7 @@ beforeAll(async () => {
     kickoffs: '10:00, 12:00',
     start_date: '2026-10-05',
     round_gap: '7',
+    play_weekday: '6', // liga de sábados
   });
   expect(t.status).toBe(302);
 
@@ -127,13 +128,14 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     expect(html).toContain('10:00');
   });
 
-  it('el día de cada fecha avanza desde la fecha de inicio del torneo', async () => {
+  it('el día de cada fecha cae en el día de juego elegido (sábado)', async () => {
     const admin = client();
     await admin.loginAdmin(ADMIN_PASSWORD);
     const html = await (await admin.get('/admin/fechas')).text();
-    // Fecha 1 = inicio; fecha 2 = inicio + 7 días.
-    expect(html).toContain('value="2026-10-05"');
-    expect(html).toContain('value="2026-10-12"');
+    // Inicio lunes 2026-10-05 → con día de juego sábado: 2026-10-10 y 2026-10-17.
+    expect(html).toContain('value="2026-10-10"');
+    expect(html).toContain('value="2026-10-17"');
+    expect(html).not.toContain('value="2026-10-05"');
     expect(html).toContain('Fecha 1');
     expect(html).toContain('Fecha 2');
   });
@@ -221,6 +223,7 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
       kickoffs: '10:00',
       start_date: '2026-10-05',
       round_gap: '7',
+      play_weekday: '6',
     });
     expect(edit.status).toBe(302);
 

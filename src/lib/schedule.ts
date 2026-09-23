@@ -11,9 +11,20 @@ export interface TournamentSchedule {
   startDate: string;
   /** Días de separación entre jornadas (7 = misma semana). */
   roundGapDays: number;
+  /** Día de juego preferido (0=domingo … 6=sábado). null = sin preferencia. */
+  playWeekday: number | null;
 }
 
-export const EMPTY_SCHEDULE: TournamentSchedule = { venues: [], kickoffs: [], startDate: '', roundGapDays: 7 };
+export const EMPTY_SCHEDULE: TournamentSchedule = {
+  venues: [],
+  kickoffs: [],
+  startDate: '',
+  roundGapDays: 7,
+  playWeekday: null,
+};
+
+/** Etiquetas en español, indexadas como Date.getUTCDay (0=domingo). */
+export const WEEKDAY_LABELS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
 const MAX_ITEMS = 12;
 const MAX_VENUE_LEN = 60;
@@ -63,6 +74,12 @@ function normalizeGap(raw: unknown): number {
   return Number.isFinite(n) && n >= 1 && n <= 30 ? n : 7;
 }
 
+/** Día de juego: '0'…'6' (0=domingo); cualquier otra cosa = sin preferencia. */
+function normalizeWeekday(raw: unknown): number | null {
+  const s = String(raw ?? '').trim();
+  return /^[0-6]$/.test(s) ? Number(s) : null;
+}
+
 /** Lee canchas, horarios y calendario desde los campos del formulario del torneo. */
 export function scheduleFromForm(form: Record<string, unknown>): TournamentSchedule {
   return {
@@ -70,6 +87,7 @@ export function scheduleFromForm(form: Record<string, unknown>): TournamentSched
     kickoffs: parseList(String(form['kickoffs'] ?? ''), normalizeKickoff),
     startDate: normalizeDate(String(form['start_date'] ?? '')) ?? '',
     roundGapDays: normalizeGap(form['round_gap']),
+    playWeekday: normalizeWeekday(form['play_weekday']),
   };
 }
 
@@ -89,17 +107,29 @@ export function scheduleOf(configJson: string): TournamentSchedule {
     kickoffs: list(raw['kickoffs']),
     startDate: normalizeDate(String(raw['startDate'] ?? '')) ?? '',
     roundGapDays: normalizeGap(raw['roundGapDays'] ?? 7),
+    playWeekday: normalizeWeekday(raw['playWeekday']),
   };
+}
+
+/** Primer día `weekday` (0=dom…) en o después de `isoDate`. */
+function nextWeekdayOnOrAfter(isoDate: string, weekday: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  const diff = (weekday - d.getUTCDay() + 7) % 7;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
 }
 
 /**
  * Fecha calendario de una jornada: la de inicio, avanzando `roundGapDays`
- * por jornada (fecha 1 = inicio, fecha 2 = inicio + gap, …). Vacío si el
+ * por jornada (fecha 1 = inicio, fecha 2 = inicio + gap, …). Si el torneo
+ * tiene día de juego, cada jornada se corre al primer ese día en o después
+ * del cálculo (una liga de sábados siempre cae en sábado). Vacío si el
  * torneo no tiene fecha de inicio o la ronda no existe.
  */
 export function plannedRoundDate(s: TournamentSchedule, round: number): string {
   if (!s.startDate || !Number.isFinite(round) || round < 1) return '';
-  return shiftDate(s.startDate, (Math.trunc(round) - 1) * s.roundGapDays);
+  const base = shiftDate(s.startDate, (Math.trunc(round) - 1) * s.roundGapDays);
+  return s.playWeekday != null ? nextWeekdayOnOrAfter(base, s.playWeekday) : base;
 }
 
 /**

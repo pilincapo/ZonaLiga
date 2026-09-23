@@ -49,6 +49,14 @@ describe('scheduleFromForm', () => {
     expect(scheduleFromForm({}).roundGapDays).toBe(7);
   });
 
+  it('día de juego desde el form: 0–6, vacío o basura = sin preferencia', () => {
+    expect(scheduleFromForm({ play_weekday: '6' }).playWeekday).toBe(6);
+    expect(scheduleFromForm({ play_weekday: '0' }).playWeekday).toBe(0); // domingo, distinto de vacío
+    expect(scheduleFromForm({ play_weekday: '' }).playWeekday).toBeNull();
+    expect(scheduleFromForm({ play_weekday: 'sab' }).playWeekday).toBeNull();
+    expect(scheduleFromForm({}).playWeekday).toBeNull();
+  });
+
   it('sin datos: listas vacías', () => {
     expect(scheduleFromForm({})).toEqual(EMPTY_SCHEDULE);
   });
@@ -85,6 +93,13 @@ describe('scheduleOf', () => {
     expect(scheduleOf(config)).toEqual({ ...EMPTY_SCHEDULE, startDate: '2026-10-05', roundGapDays: 10 });
     expect(scheduleOf(JSON.stringify({ startDate: '2026-13-40' })).startDate).toBe('');
     expect(scheduleOf(JSON.stringify({ roundGapDays: 0 })).roundGapDays).toBe(7);
+  });
+
+  it('lee el día de juego y tolera valores viejos o basura', () => {
+    expect(scheduleOf(JSON.stringify({ playWeekday: 6 })).playWeekday).toBe(6);
+    expect(scheduleOf('{}').playWeekday).toBeNull();
+    expect(scheduleOf(JSON.stringify({ playWeekday: 'sábado' })).playWeekday).toBeNull();
+    expect(scheduleOf(JSON.stringify({ playWeekday: 9 })).playWeekday).toBeNull();
   });
 });
 
@@ -181,6 +196,27 @@ describe('plannedRoundDate', () => {
     expect(plannedRoundDate(EMPTY_SCHEDULE, 1)).toBe('');
     expect(plannedRoundDate(s, 0)).toBe('');
     expect(plannedRoundDate(s, NaN)).toBe('');
+  });
+
+  it('con día de juego, todas las jornadas caen en ese día (liga de sábados)', () => {
+    // 2026-10-05 es lunes; con playWeekday 6 (sábado) la 1ª es 2026-10-10.
+    const sab = { ...s, playWeekday: 6 };
+    expect(plannedRoundDate(sab, 1)).toBe('2026-10-10');
+    expect(plannedRoundDate(sab, 2)).toBe('2026-10-17');
+    expect(plannedRoundDate(sab, 5)).toBe('2026-11-07');
+    for (const n of [1, 2, 5]) {
+      expect(new Date(`${plannedRoundDate(sab, n)}T00:00:00Z`).getUTCDay()).toBe(6);
+    }
+  });
+
+  it('si la fecha de inicio ya es el día elegido, no se corre', () => {
+    expect(plannedRoundDate({ ...s, startDate: '2026-10-03', playWeekday: 6 }, 1)).toBe('2026-10-03');
+    expect(plannedRoundDate({ ...s, startDate: '2026-10-03', playWeekday: 6 }, 2)).toBe('2026-10-10');
+  });
+
+  it('día de juego null mantiene el comportamiento anterior', () => {
+    expect(plannedRoundDate({ ...s, playWeekday: null }, 1)).toBe('2026-10-05');
+    expect(plannedRoundDate(s, 2)).toBe('2026-10-12');
   });
 });
 

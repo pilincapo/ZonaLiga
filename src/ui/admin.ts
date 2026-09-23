@@ -8,6 +8,7 @@ import { generateDoubleRoundRobin, generateRoundRobin, shuffled } from '../lib/f
 import { computeSuspensions } from '../lib/suspensions.ts';
 import {
   EMPTY_SCHEDULE,
+  WEEKDAY_LABELS,
   formatScheduleGaps,
   plannedRoundDate,
   scheduleGaps,
@@ -183,8 +184,18 @@ function scheduleFields(schedule: TournamentSchedule): string {
     <input id="round_gap" name="round_gap" type="number" min="1" max="30" value="${schedule.roundGapDays}" style="width:100px">
     <p class="hint">7 = cada fecha una semana después. Usá 3 o 4 si jugás a mitad de semana.</p>
   </div>
+  <div class="field">
+    <label for="play_weekday">Día de juego</label>
+    <select id="play_weekday" name="play_weekday">
+      <option value="" ${schedule.playWeekday == null ? 'selected' : ''}>Sin preferencia</option>
+      ${WEEKDAY_LABELS.map(
+        (label, i) => `<option value="${i}" ${schedule.playWeekday === i ? 'selected' : ''}>${label[0]!.toUpperCase() + label.slice(1)}</option>`,
+      ).join('')}
+    </select>
+    <p class="hint">Las fechas se agarran a este día (ej.: sábado).</p>
+  </div>
 </div>
-<p class="hint">Al generar el fixture, los partidos de cada fecha toman su día (según la fecha de inicio) y rotan entre estas canchas y horarios: primera hora en todas las canchas, después la siguiente hora, y así. Si la configuración no alcanza para todos los partidos de una fecha, los últimos repiten horario.</p>`;
+<p class="hint">Al generar el fixture, los partidos de cada fecha toman su día (según la fecha de inicio y el día de juego) y rotan entre estas canchas y horarios: primera hora en todas las canchas, después la siguiente hora, y así. Si la configuración no alcanza para todos los partidos de una fecha, los últimos repiten horario.</p>`;
 }
 
 function rulesFields(rules: Rules): string {
