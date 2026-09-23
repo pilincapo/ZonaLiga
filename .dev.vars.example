@@ -1,0 +1,3 @@
+# Copiá este archivo como .dev.vars para desarrollo local (está en .gitignore).
+# Si no existe, el panel usa la clave de desarrollo: zonaliga-dev-secret-change-me
+ADMIN_PASSWORD=tu-clave-local

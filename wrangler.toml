@@ -1,0 +1,16 @@
+name = "liga-amateur"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "liga-amateur"
+database_id = "8f8b91c7-7473-4d50-88fd-d996dbd2583e"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[observability]
+enabled = true

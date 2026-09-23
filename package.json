@@ -1,0 +1,29 @@
+{
+  "name": "liga-amateur",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "App de control de ligas de fútbol amateur — Cloudflare Workers + D1 + Hono",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:seed:local": "wrangler d1 execute DB --local --file=./seed.sql",
+    "db:seed:remote": "wrangler d1 execute DB --remote --file=./seed.sql",
+    "db:unseed:local": "wrangler d1 execute DB --local --file=./unseed.sql",
+    "db:unseed:remote": "wrangler d1 execute DB --remote --file=./unseed.sql"
+  },
+  "dependencies": {
+    "hono": "^4.9.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260921.1",
+    "@cloudflare/vitest-pool-workers": "^0.8.19",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.42.0"
+  }
+}

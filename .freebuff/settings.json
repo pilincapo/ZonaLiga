@@ -1,0 +1,8 @@
+{
+  "preview": {
+    "serve": {
+      "run": "npx wrangler dev --port 8787",
+      "url": "http://localhost:8787"
+    }
+  }
+}

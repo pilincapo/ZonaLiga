@@ -1,0 +1,9 @@
+# Normaliza finales de línea: el repo guarda LF (Cloudflare/Workers corre en Linux)
+# y evita que Git reescriba todo el árbol de trabajo en cada checkout.
+* text=auto eol=lf
+
+# Binarios
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
