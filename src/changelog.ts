@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.10';
+export const APP_VERSION = '0.2.11';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,15 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.11',
+    date: '2026-09-23',
+    title: 'Planilla: listas por gol y marcador sin dobles cargas',
+    items: [
+      { kind: 'mejora', text: 'La carga rápida ahora muestra una lista desplegable por gol: elegís al autor (o “En contra”) — sin tildes ni escritura. La cantidad abre y cierra las listas.' },
+      { kind: 'arreglo', text: 'Se sacaron los casilleros “Goles local/visitante” de la planilla: el marcador se muestra y se arma solo desde los goles cargados, así nunca difiere de los eventos. El walkover conserva su carga especial.' },
+    ],
+  },
   {
     version: '0.2.10',
     date: '2026-09-23',

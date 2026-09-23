@@ -15,7 +15,7 @@ import {
 import { slugify } from '../lib/slug.ts';
 import type { Match, MatchStatus } from '../lib/types.ts';
 import { regeneratePairings, verifyPairings, slotConflicts, playedCount } from '../lib/fixture.ts';
-import { resolveScorers, scoreFromEvents } from '../lib/sheet.ts';
+import { resolveGoalPicks, scoreFromEvents, MAX_GOALS } from '../lib/sheet.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
 import {
   roundSlots,
@@ -641,6 +641,35 @@ adminRoutes.post('/planilla/:id', async (c) => {
   const status = String(f['status'] ?? 'scheduled') as MatchStatus;
   const homePts = String(f['home_points'] ?? '').trim();
   const awayPts = String(f['away_points'] ?? '').trim();
+  // Los goles salen de los eventos (carga rápida y sueltos): se recalculan
+  // para que el marcador y los eventos siempre coincidan. Salvo walkover,
+  // donde el marcador legal manda.
+  const mRow = await c.env.DB
+    .prepare('SELECT home_team_id, away_team_id FROM matches WHERE id = ?1')
+    .bind(id)
+    .first<{ home_team_id: number | null; away_team_id: number | null }>();
+  let homeGoals: number;
+  let awayGoals: number;
+  if (status === 'walkover') {
+    const cur = await c.env.DB
+      .prepare('SELECT home_goals, away_goals FROM matches WHERE id = ?1')
+      .bind(id)
+      .first<{ home_goals: number; away_goals: number }>();
+    homeGoals = cur?.home_goals ?? 0;
+    awayGoals = cur?.away_goals ?? 0;
+  } else {
+    const evs = await c.env.DB
+      .prepare('SELECT team_id, type FROM events WHERE match_id = ?1')
+      .bind(id)
+      .all<{ team_id: number | null; type: string }>();
+    const score = scoreFromEvents(
+      (evs.results ?? []).map((e) => ({ teamId: e.team_id, type: e.type })),
+      mRow?.home_team_id ?? null,
+      mRow?.away_team_id ?? null
+    );
+    homeGoals = score.home;
+    awayGoals = score.away;
+  }
   await c.env.DB.prepare(
     'UPDATE matches SET status = ?1, played_on = ?2, kickoff_time = ?3, venue = ?4, home_goals = ?5, away_goals = ?6, home_points = ?7, away_points = ?8, notes = ?9 WHERE id = ?10'
   )
@@ -649,15 +678,15 @@ adminRoutes.post('/planilla/:id', async (c) => {
       String(f['played_on'] ?? ''),
       String(f['kickoff_time'] ?? ''),
       String(f['venue'] ?? ''),
-      Number(f['home_goals'] ?? 0),
-      Number(f['away_goals'] ?? 0),
+      homeGoals,
+      awayGoals,
       homePts ? Number(homePts) : null,
       awayPts ? Number(awayPts) : null,
       String(f['notes'] ?? ''),
       id
     )
     .run();
-  return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent('Planilla guardada'));
+  return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent('Planilla guardada. Marcador desde los eventos'));
 });
 
 /** Carga rápida: N goles con los goleadores tildados en la plantilla. */
@@ -677,20 +706,26 @@ adminRoutes.post('/planilla/:id/goles', async (c) => {
   }
   const players = await c.env.DB.prepare('SELECT id FROM players WHERE team_id = ?1').bind(teamId).all<{ id: number }>();
   const allowed = (players.results ?? []).map((p) => p.id);
-  const checked = Object.keys(f)
-    .filter((k) => k.startsWith('scorer_'))
-    .map((k) => Number(k.slice('scorer_'.length)));
-  const res = resolveScorers({
+  const picks: (number | null)[] = [];
+  for (let i = 1; i <= MAX_GOALS; i++) {
+    const v = String(f[`g${i}`] ?? '').trim();
+    if (!v) continue;
+    if (v === 'own') picks.push(null);
+    else picks.push(Number(v));
+  }
+  const res = resolveGoalPicks({
     count: String(f['count'] ?? ''),
     countMore: String(f['count_more'] ?? ''),
-    checked,
+    picks,
     allowed,
   });
   if (!res.ok) {
     return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(res.error));
   }
-  const stmts: D1PreparedStatement[] = res.ids.map((pid) =>
-    c.env.DB.prepare("INSERT INTO events (match_id, team_id, player_id, type) VALUES (?1, ?2, ?3, 'goal')").bind(id, teamId, pid)
+  const stmts: D1PreparedStatement[] = res.picks.map((pid) =>
+    pid == null
+      ? c.env.DB.prepare("INSERT INTO events (match_id, team_id, player_id, type) VALUES (?1, ?2, NULL, 'own_goal')").bind(id, teamId)
+      : c.env.DB.prepare("INSERT INTO events (match_id, team_id, player_id, type) VALUES (?1, ?2, ?3, 'goal')").bind(id, teamId, pid)
   );
   await c.env.DB.batch(stmts);
 
@@ -712,7 +747,7 @@ adminRoutes.post('/planilla/:id/goles', async (c) => {
       .run();
   }
 
-  return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent(`Goles cargados: ${res.ids.length}. Marcador actualizado`));
+  return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent(`Goles cargados: ${res.picks.length}. Marcador actualizado`));
 });
 
 adminRoutes.post('/planilla/:id/evento', async (c) => {

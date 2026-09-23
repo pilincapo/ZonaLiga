@@ -566,7 +566,7 @@ describe.skipIf(!has)('e2e: fair play y valla en posiciones', () => {
 });
 
 describe.skipIf(!has)('e2e: carga rápida de goles en la planilla', () => {
-  it('carga goles con checks de la plantilla y valida la cantidad', async () => {
+  it('carga goles con listas por gol y valida la selección', async () => {
     const admin = client();
     await admin.loginAdmin(ADMIN_PASSWORD);
 
@@ -583,12 +583,23 @@ describe.skipIf(!has)('e2e: carga rápida de goles en la planilla', () => {
     expect(idA, 'Goleador A debe estar en la plantilla').toBeTruthy();
     expect(idB, 'Goleador B debe estar en la plantilla').toBeTruthy();
 
-    // Carga correcta: 2 goles con los 2 goleadores tildados.
+    // La página muestra una lista por gol y el marcador derivado de eventos.
+    const before = await (await admin.get(`/admin/planilla/${matchId}`)).text();
+    expect(before).toContain('name="g1"');
+    expect(before).toContain('data-pick');
+    expect(before).toContain('<option value="">Elegí…</option>');
+    expect(before).toContain('name="g20"');
+    expect(before).not.toContain('name="home_goals"'); // ya no es un input
+    expect(before).toContain('Marcador:');
+
+    // Carga correcta: 2 goles de A (g1 y g2) con un select oculto que igual viaja.
     const ok = await admin.post(`/admin/planilla/${matchId}/goles`, {
       team_id: teamId,
       count: '2',
-      [`scorer_${idA}`]: 'on',
-      [`scorer_${idB}`]: 'on',
+      g1: idA,
+      g2: idA,
+      g3: '',
+      g4: '',
     });
     expect(ok.status).toBe(302);
     const okLoc = decodeURIComponent(ok.headers.get('location') ?? '');
@@ -598,20 +609,19 @@ describe.skipIf(!has)('e2e: carga rápida de goles en la planilla', () => {
     // La flash llega a la planilla y el marcador quedó 2-0 para Deportivo.
     const sheet = await (await admin.get(okLoc)).text();
     expect(sheet).toContain('Goles cargados: 2');
-    expect(sheet).toMatch(/name="home_goals"[^>]*value="2"/);
-    expect(sheet).toMatch(/name="away_goals"[^>]*value="0"/);
+    expect(sheet).toMatch(/Marcador:<\/strong> Deportivo E2E 2 — 0 /);
     const ficha = await (await fetch(`${BASE}/partido/${matchId}`)).text();
     expect(ficha).toContain('Goleador A E2E');
-    expect(ficha).toContain('Goleador B E2E');
 
-    // Validación: cantidad 2 con solo 1 tildado → error, sin cargar nada.
+    // Validación: cantidad 2 con la segunda lista sin completar → error.
     const bad = await admin.post(`/admin/planilla/${matchId}/goles`, {
       team_id: teamId,
       count: '2',
-      [`scorer_${idA}`]: 'on',
+      g1: idA,
+      g2: '',
     });
     expect(bad.status).toBe(302);
     const badLoc = decodeURIComponent(bad.headers.get('location') ?? '');
-    expect(badLoc).toContain('Tildaste 1 goleador(es) para 2 gol(es)');
+    expect(badLoc).toContain('Elegiste 1 de 2 gol(es): completá las listas.');
   });
 });
