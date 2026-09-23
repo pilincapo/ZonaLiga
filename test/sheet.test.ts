@@ -1,108 +1,100 @@
+// Tests del dominio de la declaración de goles (lib/sheet.ts).
 import { describe, expect, it } from 'vitest';
-import { MAX_GOALS, resolveGoalPicks, scoreFromEvents } from '../src/lib/sheet.ts';
+import {
+  MAX_GOALS,
+  picksWithoutRoster,
+  picksFromEvents,
+  resolveGoalPlan,
+  scorerOptions,
+} from '../src/lib/sheet.ts';
 
-const ALLOWED = [10, 11, 12, 13];
+const P = [11, 22, 33];
 
-describe('resolveGoalPicks', () => {
-  it('cantidades fijas 1..4 con las listas completas', () => {
-    expect(resolveGoalPicks({ count: '1', picks: [10], allowed: ALLOWED })).toEqual({ ok: true, picks: [10] });
-    expect(resolveGoalPicks({ count: '3', picks: [12, null, 11], allowed: ALLOWED })).toEqual({
-      ok: true,
-      picks: [12, null, 11],
-    });
+describe('resolveGoalPlan', () => {
+  it('0 goles: sin picks y sin requerir listas', () => {
+    expect(resolveGoalPlan({ goals: 0, raws: [], allowed: P })).toEqual({ ok: true, picks: [] });
   });
 
-  it('acepta "en contra" (null) mezclado con jugadores', () => {
-    const r = resolveGoalPicks({ count: '2', picks: [null, 10], allowed: ALLOWED });
-    expect(r).toEqual({ ok: true, picks: [null, 10] });
+  it('cantidad cubierta por jugadores del equipo', () => {
+    const r = resolveGoalPlan({ goals: 2, raws: ['11', '22'], allowed: P });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.picks).toEqual([{ kind: 'player', id: 11 }, { kind: 'player', id: 22 }]);
   });
 
-  it('"más de 4": acepta entre 5 y el tope', () => {
-    const five = [1, 2, 3, 4, 5];
-    expect(resolveGoalPicks({ count: 'more', countMore: '5', picks: five, allowed: five })).toEqual({
-      ok: true,
-      picks: [1, 2, 3, 4, 5],
-    });
-    expect(resolveGoalPicks({ count: 'more', countMore: String(MAX_GOALS), picks: five, allowed: five }).ok).toBe(false);
+  it('acepta "own" y "none"', () => {
+    const r = resolveGoalPlan({ goals: 2, raws: ['own', 'none'], allowed: P });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.picks).toEqual([{ kind: 'own' }, { kind: 'anon' }]);
   });
 
-  it('"más de 4" fuera de rango o ilegible se rechaza', () => {
-    for (const bad of ['', '4', 'x', '2.5', '0', '-1', '21']) {
-      const r = resolveGoalPicks({ count: 'more', countMore: bad, picks: [], allowed: ALLOWED });
-      expect(r.ok, `countMore=${bad}`).toBe(false);
-    }
+  it('lista vacía = falta elegir (error con cantidad faltante)', () => {
+    const r = resolveGoalPlan({ goals: 3, raws: ['11', '', '22'], allowed: P });
+    expect(r).toEqual({ ok: false, error: 'Completá las listas: falta el autor de 1 gol(es)' });
   });
 
-  it('cantidad no elegida o inválida', () => {
-    expect(resolveGoalPicks({ count: '', picks: [], allowed: ALLOWED })).toEqual({
+  it('todas vacías con goles > 0: falta el autor de todos', () => {
+    const r = resolveGoalPlan({ goals: 2, raws: ['', ''], allowed: P });
+    expect(r).toEqual({ ok: false, error: 'Completá las listas: falta el autor de 2 gol(es)' });
+  });
+
+  it('raws de más se ignoran', () => {
+    const r = resolveGoalPlan({ goals: 1, raws: ['11', '22'], allowed: P });
+    expect(r.ok).toBe(true);
+  });
+
+  it('valor raro (id ajeno) es error', () => {
+    expect(resolveGoalPlan({ goals: 1, raws: ['999'], allowed: P })).toEqual({
       ok: false,
-      error: 'Elegí cuántos goles hizo el equipo',
+      error: 'Hay un autor inválido en las listas de goles',
     });
-    expect(resolveGoalPicks({ count: '7', picks: [], allowed: ALLOWED }).ok).toBe(false);
   });
 
-  it('las listas tienen que estar completas: ni más ni menos', () => {
-    const corto = resolveGoalPicks({ count: '2', picks: [10], allowed: ALLOWED });
-    expect(corto).toEqual({ ok: false, error: 'Elegiste 1 de 2 gol(es): completá las listas.' });
-    const sobra = resolveGoalPicks({ count: '1', picks: [10, 11], allowed: ALLOWED });
-    expect(sobra).toEqual({ ok: false, error: 'Elegiste 2 de 1 gol(es): completá las listas.' });
-    const vacio = resolveGoalPicks({ count: '1', picks: [], allowed: ALLOWED });
-    expect(vacio.ok).toBe(false);
-  });
-
-  it('rechaza jugadores de otro equipo o basura', () => {
-    expect(resolveGoalPicks({ count: '1', picks: [99], allowed: ALLOWED })).toEqual({
-      ok: false,
-      error: 'Ese jugador no es de la plantilla de este equipo',
-    });
-    expect(resolveGoalPicks({ count: '1', picks: [Number.NaN], allowed: ALLOWED }).ok).toBe(false);
+  it('goles negativos y por encima del tope son error', () => {
+    expect(resolveGoalPlan({ goals: -1, raws: [], allowed: P }).ok).toBe(false);
+    expect(resolveGoalPlan({ goals: MAX_GOALS + 1, raws: [], allowed: P }).ok).toBe(false);
   });
 });
 
-describe('scoreFromEvents', () => {
-  const H = 1;
-  const A = 2;
-
-  it('cada gol suma para el equipo que lo cargó', () => {
-    const score = scoreFromEvents(
-      [
-        { teamId: H, type: 'goal' },
-        { teamId: H, type: 'goal' },
-        { teamId: A, type: 'goal' },
-      ],
-      H,
-      A
-    );
-    expect(score).toEqual({ home: 2, away: 1 });
+describe('picksWithoutRoster', () => {
+  it('sin plantilla: goles anónimos salvo los marcados "en contra"', () => {
+    expect(picksWithoutRoster(['own', '', 'own'], 3)).toEqual([
+      { kind: 'own' },
+      { kind: 'anon' },
+      { kind: 'own' },
+    ]);
   });
 
-  it('el gol en contra favorece al rival', () => {
-    const score = scoreFromEvents(
-      [
-        { teamId: A, type: 'own_goal' }, // en contra de la visita: gol local
-        { teamId: H, type: 'own_goal' }, // en contra del local: gol visita
-      ],
-      H,
-      A
-    );
-    expect(score).toEqual({ home: 1, away: 1 });
+  it('recorta a la cantidad declarada', () => {
+    expect(picksWithoutRoster(['own', 'own', 'own'], 2)).toEqual([{ kind: 'own' }, { kind: 'own' }]);
+    expect(picksWithoutRoster([], 3)).toEqual([]);
+  });
+});
+
+describe('scorerOptions', () => {
+  it('placeholder numerado, en contra, sin autor y la plantilla', () => {
+    const opts = scorerOptions({ index: 1, teamName: 'Racing', players: [{ id: 7, name: 'Juan', number: 9 }] });
+    expect(opts.map((o) => o.value)).toEqual(['', 'own', 'none', '7']);
+    expect(opts[0]!.label).toBe('Gol 2: elegí…');
+    expect(opts[1]!.label).toContain('Racing');
+    expect(opts[3]!.label).toBe('#9 Juan');
   });
 
-  it('ignora eventos sin equipo, de terceros y que no son goles', () => {
-    const score = scoreFromEvents(
-      [
-        { teamId: null, type: 'goal' },
-        { teamId: 99, type: 'goal' },
-        { teamId: H, type: 'yellow' },
-        { teamId: A, type: 'red' },
-      ],
-      H,
-      A
-    );
-    expect(score).toEqual({ home: 0, away: 0 });
+  it('sin número de camiseta no agrega el "#"', () => {
+    const opts = scorerOptions({ index: 0, teamName: 'X', players: [{ id: 1, name: 'Ana', number: null }] });
+    expect(opts[3]!.label).toBe('Ana');
   });
+});
 
-  it('sin eventos: 0-0', () => {
-    expect(scoreFromEvents([], H, A)).toEqual({ home: 0, away: 0 });
+describe('picksFromEvents', () => {
+  it('mapea goles y en contra del equipo', () => {
+    const evs = [
+      { teamId: 1, type: 'goal', playerId: 11 },
+      { teamId: 1, type: 'goal', playerId: null },
+      { teamId: 1, type: 'own_goal', playerId: null },
+      { teamId: 1, type: 'yellow', playerId: 11 },
+      { teamId: 2, type: 'goal', playerId: 5 },
+    ];
+    expect(picksFromEvents(evs, 1)).toEqual(['11', 'none', 'own']);
+    expect(picksFromEvents(evs, null)).toEqual([]);
   });
 });

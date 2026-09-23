@@ -1,57 +1,106 @@
-// Carga rápida de goles en la planilla: dominio puro.
+// Declaración de goles en la planilla: dominio puro.
 //
-// El form ofrece cantidad (1-4 o "más") y una lista de jugador por gol
-// (o "en contra", que favorece al equipo que la carga). Además, el marcador
-// del partido se puede recalcular desde los eventos.
+// El marcador se declara en el form principal (Goles local / Goles
+// visitante) y, si hay goles, debajo se despliegan listas para elegir el
+// autor de cada uno. Guardar REEMPLAZA los eventos de gol del partido con lo
+// declarado: cargar de nuevo no duplica ni suma.
 
-/** Tope de goles por carga. */
+/** Tope de goles por equipo. */
 export const MAX_GOALS = 20;
 
-export type ScorerResult = { ok: true; picks: (number | null)[] } | { ok: false; error: string };
+/** Valor de la lista para "en contra" (gol en el arco propio). */
+export const PICK_OWN = 'own';
+/** Valor de la lista para gol sin autor. */
+export const PICK_ANON = 'none';
+
+export type GoalPick = { kind: 'player'; id: number } | { kind: 'own' } | { kind: 'anon' };
+
+/** Parsea un valor de la lista: id de jugador, "own" (en contra) o "none" (sin autor). */
+export function parseGoalPick(raw: string, allowed: ReadonlySet<number>): GoalPick | null {
+  const v = String(raw).trim();
+  if (v === PICK_OWN) return { kind: 'own' };
+  if (v === PICK_ANON) return { kind: 'anon' };
+  const id = Number(v);
+  if (Number.isInteger(id) && allowed.has(id)) return { kind: 'player', id };
+  return null;
+}
 
 /**
- * Valida la selección de goles: la cantidad elegida (1-4 o "más", entre 5 y
- * el tope) tiene que coincidir con las listas completadas; todo jugador
- * elegido debe ser de la plantilla del equipo. `null` = gol en contra.
+ * Valida la declaración de una camiseta: la cantidad declarada tiene que
+ * estar cubierta por las listas (los valores de más se ignoran) y cada
+ * autor debe ser válido (jugador del equipo, "own" o "none").
+ * Una lista vacía cuenta como "falta elegir"; un valor raro, como error.
  */
-export function resolveGoalPicks(opts: {
-  /** Valor del radio: '1'..'4' o 'more'. */
-  count: string;
-  /** Cantidad escrita cuando count === 'more'. */
-  countMore?: string;
-  /** Elecciones en orden: id de jugador o null para "en contra". */
-  picks: readonly (number | null)[];
-  /** Plantilla (ids) del equipo que anota. */
+export function resolveGoalPlan(opts: {
+  goals: number;
+  raws: readonly string[];
   allowed: readonly number[];
-}): ScorerResult {
-  const { count, countMore, picks, allowed } = opts;
+}): { ok: true; picks: GoalPick[] } | { ok: false; error: string } {
+  const goals = Math.trunc(opts.goals);
+  if (!Number.isFinite(goals) || goals < 0) return { ok: false, error: 'Cantidad de goles inválida' };
+  if (goals === 0) return { ok: true, picks: [] };
+  if (goals > MAX_GOALS) return { ok: false, error: `Como máximo ${MAX_GOALS} goles por equipo` };
 
-  let n: number;
-  if (count === '1' || count === '2' || count === '3' || count === '4') {
-    n = Number(count);
-  } else if (count === 'more') {
-    n = Math.round(Number(countMore));
-    if (!Number.isFinite(n) || n < 5 || n > MAX_GOALS) {
-      return { ok: false, error: `La cantidad "más de 4" tiene que estar entre 5 y ${MAX_GOALS}` };
-    }
-  } else {
-    return { ok: false, error: 'Elegí cuántos goles hizo el equipo' };
+  const allowedSet = new Set(opts.allowed);
+  const picks: GoalPick[] = [];
+  for (const raw of opts.raws) {
+    if (picks.length >= goals) break; // valores de más: ignorados
+    const v = String(raw).trim();
+    if (v === '') continue; // sin elegir todavía
+    const p = parseGoalPick(v, allowedSet);
+    if (!p) return { ok: false, error: 'Hay un autor inválido en las listas de goles' };
+    picks.push(p);
   }
+  if (picks.length < goals) {
+    return { ok: false, error: `Completá las listas: falta el autor de ${goals - picks.length} gol(es)` };
+  }
+  return { ok: true, picks };
+}
 
-  const allowedSet = new Set(allowed);
-  for (const p of picks) {
-    if (p != null && (!Number.isInteger(p) || !allowedSet.has(p))) {
-      return { ok: false, error: 'Ese jugador no es de la plantilla de este equipo' };
-    }
+/**
+ * Sin plantilla cargada no hay listas que envíen valores: los goles quedan
+ * como anónimos, salvo los marcados "en contra" (ese valor viaja igual).
+ */
+export function picksWithoutRoster(raws: readonly string[], goals: number): GoalPick[] {
+  const out: GoalPick[] = [];
+  for (const raw of raws) {
+    if (out.length >= goals) break;
+    out.push(String(raw).trim() === PICK_OWN ? { kind: 'own' } : { kind: 'anon' });
   }
+  return out;
+}
 
-  if (picks.length !== n) {
-    return {
-      ok: false,
-      error: `Elegiste ${picks.length} de ${n} gol(es): completá las listas.`,
-    };
+/** Opciones de una lista de autores: placeholder, "en contra" y la plantilla. */
+export function scorerOptions(opts: {
+  index: number; // 0-based
+  teamName: string;
+  players: ReadonlyArray<{ id: number; name: string; number: number | null }>;
+}): ReadonlyArray<{ value: string; label: string }> {
+  const n = opts.index + 1;
+  const out: { value: string; label: string }[] = [
+    { value: '', label: `Gol ${n}: elegí…` },
+    { value: PICK_OWN, label: `🔁 En contra (gol en el arco de ${opts.teamName})` },
+    { value: PICK_ANON, label: 'Sin autor' },
+  ];
+  for (const p of opts.players) {
+    out.push({ value: String(p.id), label: `${p.number != null ? `#${p.number} ` : ''}${p.name}` });
   }
-  return { ok: true, picks: [...picks] };
+  return out;
+}
+
+/** Selección cruda para prellenar las listas desde los eventos del equipo. */
+export function picksFromEvents(
+  events: ReadonlyArray<{ teamId: number | null; type: string; playerId: number | null }>,
+  teamId: number | null
+): string[] {
+  if (teamId == null) return [];
+  const out: string[] = [];
+  for (const e of events) {
+    if (e.teamId !== teamId) continue;
+    if (e.type === 'own_goal') out.push(PICK_OWN);
+    else if (e.type === 'goal') out.push(e.playerId != null ? String(e.playerId) : PICK_ANON);
+  }
+  return out;
 }
 
 /**

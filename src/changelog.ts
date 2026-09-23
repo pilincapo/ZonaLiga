@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.11';
+export const APP_VERSION = '0.2.12';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,16 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.12',
+    date: '2026-09-23',
+    title: 'Planilla: los goles se declaran junto al marcador',
+    items: [
+      { kind: 'mejora', text: 'Goles local/visitante volvieron al form de la planilla y, al declararlos, se despliegan las listas para elegir el autor de cada gol: jugador de la plantilla, “En contra” o “Sin autor”. Se carga una sola vez — guardar reemplaza la declaración, nunca duplica.' },
+      { kind: 'arreglo', text: 'Las listas de autores viven dentro del form principal: marcador y goleadores se guardan juntos. Las listas quedan prellenadas con lo ya cargado y, si un equipo no tiene plantilla, sus goles quedan “Sin autor” (salvo los “En contra”). El apartado de tarjetas queda solo para eventos sueltos.' },
+      { kind: 'arreglo', text: 'Los “En contra” se registran a nombre del equipo cuyo arco recibió el gol — el rival —, como en la planilla de papel.' },
+    ],
+  },
   {
     version: '0.2.11',
     date: '2026-09-23',

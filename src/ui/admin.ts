@@ -31,7 +31,7 @@ import {
   pendingSubmissions,
   submissionEvents,
 } from '../lib/submissions.ts';
-import { scoreFromEvents, MAX_GOALS } from '../lib/sheet.ts';
+import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
@@ -745,64 +745,33 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
       .join('');
   };
 
-  const evForm = (side: 'home' | 'away') => {
+  // Listas de autores DENTRO del form principal: un <select> por gol,
+  // prellenado con lo que ya está cargado del equipo. Se despliegan solas
+  // según la cantidad de goles declarada (mini-script al pie del form).
+  const goalPicks = (side: 'home' | 'away') => {
     const teamId = side === 'home' ? m.home_team_id : m.away_team_id;
     const label = side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante');
     const players = side === 'home' ? homePlayers : awayPlayers;
-    // Una lista por gol (hasta el tope): se muestran según la cantidad elegida.
-    const goalList = (i: number) => {
-      const opts = [
-        '<option value="">Elegí…</option>',
-        `<option value="own">🔁 En contra (gol para ${esc(label)})</option>`,
-        ...players.map((p) => `<option value="${p.id}">${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}</option>`),
-      ].join('');
-      return `<div class="field" data-pick hidden><label>Gol ${i + 1}</label><select name="g${i + 1}">${opts}</select></div>`;
+    const prefix = side === 'home' ? 'hg' : 'ag';
+    const pre = picksFromEvents(
+      events.map((e) => ({ teamId: e.team_id, type: e.type, playerId: e.player_id })),
+      teamId
+    );
+    const goalSelect = (i: number) => {
+      const sel = pre[i] ?? '';
+      const opts = scorerOptions({ index: i, teamName: label, players })
+        .map((o) => `<option value="${o.value}"${o.value !== '' && o.value === sel ? ' selected' : ''}>${esc(o.label)}</option>`)
+        .join('');
+      return `<div class="field" data-pick><label>Gol ${i + 1} · ${esc(label)}</label><select name="${prefix}${i + 1}">${opts}</select></div>`;
     };
-    const pickLists = players.length ? Array.from({ length: MAX_GOALS }, (_, i) => goalList(i)).join('') : '';
+    return `<div class="goal-picks" data-goal-picks="${prefix}">${Array.from({ length: MAX_GOALS }, (_, i) => goalSelect(i)).join('')}</div>`;
+  };
+
+  const evBlock = (side: 'home' | 'away') => {
+    const teamId = side === 'home' ? m.home_team_id : m.away_team_id;
+    const players = side === 'home' ? homePlayers : awayPlayers;
     return `<div class="card-body">
-  <h3 class="zone-title">${esc(label)}</h3>
-  <form method="post" action="/admin/planilla/${m.id}/goles" data-goal-form id="goal-form-${side}">
-    <input type="hidden" name="team_id" value="${teamId ?? ''}">
-    <strong class="uppercase">Carga rápida de goles</strong>
-    <div class="field mt-3">
-      <label>¿Cuántos goles hizo?</label>
-      <div class="goal-count">
-        ${['1', '2', '3', '4']
-          .map(
-            (v) =>
-              `<label class="radio-chip"><input type="radio" name="count" value="${v}" ${v === '1' ? 'checked' : ''}> ${v}</label>`
-          )
-          .join('')}
-        <label class="radio-chip"><input type="radio" name="count" value="more"> Más</label>
-        <input type="number" name="count_more" min="5" max="20" value="5" style="width:72px" title="Cantidad si elegís Más">
-      </div>
-    </div>
-    <div class="field">
-      <label>¿Quién los hizo?</label>
-      <div class="goal-picks">${pickLists}</div>
-      ${players.length ? '' : '<p class="hint">Sin jugadores: sumalos en la sección Jugadores.</p>'}
-    </div>
-    <p class="hint">Con “En contra” el gol suma para ${esc(label)}. Si un jugador hizo más de un gol, elegilo en dos listas.</p>
-    <button class="btn btn-primary btn-sm" type="submit">⚽ Cargar goles</button>
-  </form>
-  <script>
-    (function () {
-      var form = document.getElementById('goal-form-${side}');
-      if (!form) return;
-      var radios = form.querySelectorAll('input[name="count"]');
-      var lists = form.querySelectorAll('[data-pick]');
-      var sync = function () {
-        var n = 1;
-        for (var i = 0; i < radios.length; i++) {
-          if (radios[i].checked) { n = radios[i].value === 'more' ? lists.length : parseInt(radios[i].value, 10); break; }
-        }
-        for (var j = 0; j < lists.length; j++) lists[j].hidden = j >= n;
-      };
-      for (var r = 0; r < radios.length; r++) radios[r].addEventListener('change', sync);
-      sync();
-    })();
-  </script>
-  <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+  <h3 class="zone-title">Tarjetas y goles sueltos · ${esc(side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante'))}</h3>
   <form method="post" action="/admin/planilla/${m.id}/evento">
     <input type="hidden" name="team_id" value="${teamId ?? ''}">
     <div class="form-row">
@@ -828,13 +797,6 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   };
 
   const submissionsBlock = await pendingForMatchBlock(db, m, teamMap);
-  // Marcador derivado de los eventos: la fuente de verdad de los goles es la
-  // carga de abajo; acá solo se muestra y se explica.
-  const goalsScore = scoreFromEvents(
-    events.map((e) => ({ teamId: e.team_id, type: e.type })),
-    m.home_team_id,
-    m.away_team_id
-  );
   const body = `
 ${flash('success', msg)}${flash('error', error)}
 ${pageHead(`Planilla · ${home?.name ?? 'Por definir'} vs ${away?.name ?? 'Por definir'}`, { href: `/partido/${m.id}`, label: 'Ver ficha pública ↗' })}
@@ -853,7 +815,30 @@ ${pageHead(`Planilla · ${home?.name ?? 'Por definir'} vs ${away?.name ?? 'Por d
       <div class="field"><label>Hora</label><input type="time" name="kickoff_time" value="${esc(m.kickoff_time ?? '')}"></div>
       <div class="field"><label>Cancha</label><input type="text" name="venue" value="${esc(m.venue ?? '')}"></div>
     </div>
-    <p class="hint" style="margin:4px 0 0"><strong>Marcador:</strong> ${esc(home?.name ?? 'Local')} ${goalsScore.home} — ${goalsScore.away} ${esc(away?.name ?? 'Visitante')} <span class="faint">(se arma solo con los goles y en contra cargados abajo)</span></p>
+    <div class="form-row">
+      <div class="field"><label>Goles local</label><input type="number" name="home_goals" min="0" max="20" value="${m.home_goals}"></div>
+      <div class="field"><label>Goles visitante</label><input type="number" name="away_goals" min="0" max="20" value="${m.away_goals}"></div>
+    </div>
+    <p class="hint"><strong>¿Quién hizo los goles?</strong> Elegí el autor de cada uno: jugador de la plantilla, “En contra” (gol en el arco propio, suma para el rival) o “Sin autor”.</p>
+    ${goalPicks('home')}
+    ${goalPicks('away')}
+    <p class="hint">Al guardar, los goles del partido se reemplazan con lo declarado acá: nunca se duplican ni se suman de más. Si un equipo no tiene plantilla cargada, sus goles quedan sin autor (salvo los “En contra”).</p>
+    <script>
+      (function () {
+        function sync(prefix, input) {
+          var n = Math.max(0, Math.min(parseInt(input.value || '0', 10) || 0, 20));
+          var picks = document.querySelectorAll('[data-goal-picks="' + prefix + '"] [data-pick]');
+          for (var i = 0; i < picks.length; i++) picks[i].hidden = i >= n;
+        }
+        [['hg', 'home_goals'], ['ag', 'away_goals']].forEach(function (pair) {
+          var input = document.getElementsByName(pair[1])[0];
+          if (!input) return;
+          var update = function () { sync(pair[0], input); };
+          input.addEventListener('input', update);
+          update();
+        });
+      })();
+    </script>
     <div class="form-row">
       <div class="field"><label>Puntos local (override)</label><input type="number" name="home_points" min="0" max="3" value="${m.home_points ?? ''}" placeholder="auto"></div>
       <div class="field"><label>Puntos visitante (override)</label><input type="number" name="away_points" min="0" max="3" value="${m.away_points ?? ''}" placeholder="auto"></div>
@@ -864,8 +849,8 @@ ${pageHead(`Planilla · ${home?.name ?? 'Por definir'} vs ${away?.name ?? 'Por d
 </div></div></section>
 ${submissionsBlock}
 <section class="block grid-2">
-  <div class="card">${evForm('home')}</div>
-  <div class="card">${evForm('away')}</div>
+  <div class="card">${evBlock('home')}</div>
+  <div class="card">${evBlock('away')}</div>
 </section>`;
   return adminLayout({ title: 'Planilla', active: 'planilla', body });
 }
