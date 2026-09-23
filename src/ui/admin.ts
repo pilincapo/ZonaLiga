@@ -6,7 +6,7 @@ import { parseRules, DEFAULT_RULES, POSITION_ORDER } from '../lib/types.ts';
 import type { Match, Rules, Team, Tournament } from '../lib/types.ts';
 import { generateDoubleRoundRobin, generateRoundRobin, shuffled } from '../lib/fixture.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
-import { EMPTY_SCHEDULE, scheduleOf, type TournamentSchedule } from '../lib/schedule.ts';
+import { EMPTY_SCHEDULE, plannedRoundDate, scheduleOf, type TournamentSchedule } from '../lib/schedule.ts';
 import { BRACKET_LABELS } from '../lib/bracket.ts';
 import { formatDateShort } from '../lib/format.ts';
 import {
@@ -165,7 +165,19 @@ function scheduleFields(schedule: TournamentSchedule): string {
     <p class="hint">Uno por línea o separados por comas (máximo 12). Acepta “9” o “9:30”.</p>
   </div>
 </div>
-<p class="hint">Al generar el fixture, los partidos de cada fecha rotan entre estas canchas y horarios: primera hora en todas las canchas, después la siguiente hora, y así. Si la configuración no alcanza para todos los partidos de una fecha, los últimos repiten horario.</p>`;
+<div class="form-row">
+  <div class="field">
+    <label for="start_date">Fecha de inicio</label>
+    <input id="start_date" name="start_date" type="date" value="${esc(schedule.startDate)}">
+    <p class="hint">Primer día de juego. Al generar el fixture, cada fecha avanza el calendario desde acá.</p>
+  </div>
+  <div class="field">
+    <label for="round_gap">Días entre fechas</label>
+    <input id="round_gap" name="round_gap" type="number" min="1" max="30" value="${schedule.roundGapDays}" style="width:100px">
+    <p class="hint">7 = cada fecha una semana después. Usá 3 o 4 si jugás a mitad de semana.</p>
+  </div>
+</div>
+<p class="hint">Al generar el fixture, los partidos de cada fecha toman su día (según la fecha de inicio) y rotan entre estas canchas y horarios: primera hora en todas las canchas, después la siguiente hora, y así. Si la configuración no alcanza para todos los partidos de una fecha, los últimos repiten horario.</p>`;
 }
 
 function rulesFields(rules: Rules): string {
@@ -770,6 +782,9 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
   const matches = view?.matches ?? [];
   const teams = view?.teams ?? [];
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
+  // Calendario del torneo: para partidos aún sin día, la página muestra la
+  // fecha planificada de su jornada (se consolida al "Guardar fecha").
+  const schedule = scheduleOf(t.config);
 
   const byRound = new Map<number, Match[]>();
   for (const m of matches) {
@@ -786,7 +801,7 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
         .map(
           (m) => `<tr>
       <td>${esc(teamMap.get(m.home_team_id ?? -1)?.name ?? '—')} <span class="faint">vs</span> ${esc(teamMap.get(m.away_team_id ?? -1)?.name ?? '—')}</td>
-      <td><input type="date" name="d_${m.id}" value="${esc(m.played_on)}"></td>
+      <td><input type="date" name="d_${m.id}" value="${esc(m.played_on || plannedRoundDate(schedule, r))}"></td>
       <td><input type="time" name="t_${m.id}" value="${esc(m.kickoff_time)}" style="width:110px"></td>
       <td><input type="text" name="v_${m.id}" value="${esc(m.venue)}" placeholder="Cancha" style="width:130px"></td>
     </tr>`

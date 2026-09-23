@@ -62,7 +62,7 @@ beforeAll(async () => {
   const login = await admin.loginAdmin(ADMIN_PASSWORD);
   expect(login.status).toBe(302);
 
-  // Torneo activo, con canchas y horarios para el fixture.
+  // Torneo activo, con canchas, horarios y fecha de inicio para el calendario.
   const t = await admin.post('/admin/torneos', {
     name: 'Copa E2E',
     season: '2026',
@@ -70,6 +70,8 @@ beforeAll(async () => {
     status: 'active',
     venues: 'Cancha Norte\nCancha Sur',
     kickoffs: '10:00, 12:00',
+    start_date: '2026-10-05',
+    round_gap: '7',
   });
   expect(t.status).toBe(302);
 
@@ -86,8 +88,8 @@ beforeAll(async () => {
   expect(ids.length).toBeGreaterThanOrEqual(2);
   teamId = ids[0]!;
 
-  // Fixture single round robin con 2 equipos = 1 partido.
-  const gen = await admin.post('/admin/fixture/generar', { tournament_id: tournamentId, mode: 'single' });
+  // Fixture doble round robin con 2 equipos = 2 fechas (para probar el calendario).
+  const gen = await admin.post('/admin/fixture/generar', { tournament_id: tournamentId, mode: 'double' });
   expect(gen.status).toBe(302);
 
   // Delegado habilitado + código (viene en el redirect del form de código).
@@ -118,6 +120,17 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     const html = await (await admin.get('/admin/fechas')).text();
     expect(html).toContain('Cancha Norte');
     expect(html).toContain('10:00');
+  });
+
+  it('el día de cada fecha avanza desde la fecha de inicio del torneo', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const html = await (await admin.get('/admin/fechas')).text();
+    // Fecha 1 = inicio; fecha 2 = inicio + 7 días.
+    expect(html).toContain('value="2026-10-05"');
+    expect(html).toContain('value="2026-10-12"');
+    expect(html).toContain('Fecha 1');
+    expect(html).toContain('Fecha 2');
   });
 
   it('regenerar una fecha: re-slotea hora y cancha y corre el día', async () => {

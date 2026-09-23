@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_SCHEDULE,
   normalizeKickoff,
+  normalizeDate,
+  plannedRoundDate,
   regenerateRound,
   roundSlots,
   scheduleCovers,
@@ -34,8 +36,29 @@ describe('scheduleFromForm', () => {
     expect(s.kickoffs).toEqual(['09:00', '10:30', '11:00']);
   });
 
+  it('lee fecha de inicio y días entre jornadas con defaults sanos', () => {
+    expect(scheduleFromForm({ start_date: '2026-10-05', round_gap: '10' })).toEqual({
+      ...EMPTY_SCHEDULE,
+      startDate: '2026-10-05',
+      roundGapDays: 10,
+    });
+    // Fecha imposible o gap fuera de rango → defaults (sin fecha / 7 días).
+    expect(scheduleFromForm({ start_date: '2026-02-30', round_gap: '99' })).toEqual(EMPTY_SCHEDULE);
+    expect(scheduleFromForm({}).roundGapDays).toBe(7);
+  });
+
   it('sin datos: listas vacías', () => {
     expect(scheduleFromForm({})).toEqual(EMPTY_SCHEDULE);
+  });
+});
+
+describe('normalizeDate', () => {
+  it('acepta fechas reales y rechaza imposibles', () => {
+    expect(normalizeDate('2026-10-05')).toBe('2026-10-05');
+    expect(normalizeDate(' 2026-1-5 ')).toBeNull(); // formato estricto
+    expect(normalizeDate('2026-02-30')).toBeNull(); // no existe
+    expect(normalizeDate('mañana')).toBeNull();
+    expect(normalizeDate('')).toBeNull();
   });
 });
 
@@ -49,15 +72,23 @@ describe('scheduleOf', () => {
   it('lee desde el mismo JSON donde viven las reglas', () => {
     const config = JSON.stringify({ win: 3, venues: ['Cancha 1', 'Cancha 2'], kickoffs: ['09:00', '11:00'] });
     expect(scheduleOf(config)).toEqual({
+      ...EMPTY_SCHEDULE,
       venues: ['Cancha 1', 'Cancha 2'],
       kickoffs: ['09:00', '11:00'],
     });
+  });
+
+  it('lee la fecha de inicio y valida fechas imposibles', () => {
+    const config = JSON.stringify({ startDate: '2026-10-05', roundGapDays: 10 });
+    expect(scheduleOf(config)).toEqual({ ...EMPTY_SCHEDULE, startDate: '2026-10-05', roundGapDays: 10 });
+    expect(scheduleOf(JSON.stringify({ startDate: '2026-13-40' })).startDate).toBe('');
+    expect(scheduleOf(JSON.stringify({ roundGapDays: 0 })).roundGapDays).toBe(7);
   });
 });
 
 describe('roundSlots', () => {
   it('recorre canchas y luego horarios (hora completa en todas las canchas)', () => {
-    const s = { venues: ['A', 'B'], kickoffs: ['09:00', '11:00'] };
+    const s = { ...EMPTY_SCHEDULE, venues: ['A', 'B'], kickoffs: ['09:00', '11:00'] };
     const slots = roundSlots(5, s);
     expect(slots.slice(0, 4)).toEqual([
       { venue: 'A', kickoff: '09:00' },
@@ -69,14 +100,14 @@ describe('roundSlots', () => {
   });
 
   it('sin canchas: asigna solo horarios', () => {
-    expect(roundSlots(2, { venues: [], kickoffs: ['10:00'] })).toEqual([
+    expect(roundSlots(2, { ...EMPTY_SCHEDULE, kickoffs: ['10:00'] })).toEqual([
       { venue: '', kickoff: '10:00' },
       { venue: '', kickoff: '10:00' },
     ]);
   });
 
   it('sin horarios: asigna solo canchas', () => {
-    expect(roundSlots(2, { venues: ['La cancha'], kickoffs: [] })).toEqual([
+    expect(roundSlots(2, { ...EMPTY_SCHEDULE, venues: ['La cancha'] })).toEqual([
       { venue: 'La cancha', kickoff: '' },
       { venue: 'La cancha', kickoff: '' },
     ]);
@@ -89,14 +120,38 @@ describe('roundSlots', () => {
 
 describe('scheduleCovers', () => {
   it('canchas × horarios vs partidos por jornada', () => {
-    expect(scheduleCovers({ venues: ['A', 'B'], kickoffs: ['09:00', '11:00'] }, 3)).toBe(true);
-    expect(scheduleCovers({ venues: ['A'], kickoffs: ['09:00'] }, 3)).toBe(false);
+    expect(scheduleCovers({ ...EMPTY_SCHEDULE, venues: ['A', 'B'], kickoffs: ['09:00', '11:00'] }, 3)).toBe(true);
+    expect(scheduleCovers({ ...EMPTY_SCHEDULE, venues: ['A'], kickoffs: ['09:00'] }, 3)).toBe(false);
     expect(scheduleCovers(EMPTY_SCHEDULE, 0)).toBe(true);
   });
 });
 
+describe('plannedRoundDate', () => {
+  const s = { ...EMPTY_SCHEDULE, startDate: '2026-10-05', roundGapDays: 7 };
+
+  it('la fecha 1 es el inicio y cada jornada avanza el gap', () => {
+    expect(plannedRoundDate(s, 1)).toBe('2026-10-05');
+    expect(plannedRoundDate(s, 2)).toBe('2026-10-12');
+    expect(plannedRoundDate(s, 5)).toBe('2026-11-02');
+  });
+
+  it('respeta gaps que no son 7 (mitad de semana)', () => {
+    expect(plannedRoundDate({ ...s, roundGapDays: 3 }, 3)).toBe('2026-10-11');
+  });
+
+  it('cruza meses y años', () => {
+    expect(plannedRoundDate({ ...s, startDate: '2026-12-28' }, 2)).toBe('2027-01-04');
+  });
+
+  it('sin fecha de inicio o ronda inválida: vacío', () => {
+    expect(plannedRoundDate(EMPTY_SCHEDULE, 1)).toBe('');
+    expect(plannedRoundDate(s, 0)).toBe('');
+    expect(plannedRoundDate(s, NaN)).toBe('');
+  });
+});
+
 describe('regenerateRound', () => {
-  const sched = { venues: ['Cancha Norte', 'Cancha Sur'], kickoffs: ['10:00', '12:00'] };
+  const sched = { ...EMPTY_SCHEDULE, venues: ['Cancha Norte', 'Cancha Sur'], kickoffs: ['10:00', '12:00'] };
   const mk = (id: number, over: Partial<import('../src/lib/schedule.ts').RoundMatchInput> = {}) => ({
     id,
     played_on: '2026-10-05',

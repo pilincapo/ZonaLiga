@@ -7,9 +7,13 @@ export interface TournamentSchedule {
   venues: string[];
   /** Horarios de inicio (HH:MM 24h), en orden. Vacío = sin horario. */
   kickoffs: string[];
+  /** Fecha de inicio del torneo (YYYY-MM-DD). Vacío = sin calendario automático. */
+  startDate: string;
+  /** Días de separación entre jornadas (7 = misma semana). */
+  roundGapDays: number;
 }
 
-export const EMPTY_SCHEDULE: TournamentSchedule = { venues: [], kickoffs: [] };
+export const EMPTY_SCHEDULE: TournamentSchedule = { venues: [], kickoffs: [], startDate: '', roundGapDays: 7 };
 
 const MAX_ITEMS = 12;
 const MAX_VENUE_LEN = 60;
@@ -44,11 +48,28 @@ function parseList(raw: string, normalize: (v: string) => string | null): string
   return out.slice(0, MAX_ITEMS);
 }
 
-/** Lee canchas y horarios desde los campos del formulario del torneo. */
+/** Valida una fecha YYYY-MM-DD real (mes/día coherentes). Devuelve null si no. */
+export function normalizeDate(raw: string): string | null {
+  const s = raw.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s) return null;
+  return s;
+}
+
+/** Días entre jornadas: entero 1–30; cualquier otra cosa da el default 7. */
+function normalizeGap(raw: unknown): number {
+  const n = Math.trunc(Number(raw));
+  return Number.isFinite(n) && n >= 1 && n <= 30 ? n : 7;
+}
+
+/** Lee canchas, horarios y calendario desde los campos del formulario del torneo. */
 export function scheduleFromForm(form: Record<string, unknown>): TournamentSchedule {
   return {
     venues: parseList(String(form['venues'] ?? ''), normalizeVenue),
     kickoffs: parseList(String(form['kickoffs'] ?? ''), normalizeKickoff),
+    startDate: normalizeDate(String(form['start_date'] ?? '')) ?? '',
+    roundGapDays: normalizeGap(form['round_gap']),
   };
 }
 
@@ -66,7 +87,19 @@ export function scheduleOf(configJson: string): TournamentSchedule {
   return {
     venues: list(raw['venues']),
     kickoffs: list(raw['kickoffs']),
+    startDate: normalizeDate(String(raw['startDate'] ?? '')) ?? '',
+    roundGapDays: normalizeGap(raw['roundGapDays'] ?? 7),
   };
+}
+
+/**
+ * Fecha calendario de una jornada: la de inicio, avanzando `roundGapDays`
+ * por jornada (fecha 1 = inicio, fecha 2 = inicio + gap, …). Vacío si el
+ * torneo no tiene fecha de inicio o la ronda no existe.
+ */
+export function plannedRoundDate(s: TournamentSchedule, round: number): string {
+  if (!s.startDate || !Number.isFinite(round) || round < 1) return '';
+  return shiftDate(s.startDate, (Math.trunc(round) - 1) * s.roundGapDays);
 }
 
 /**

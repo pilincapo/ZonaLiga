@@ -15,7 +15,7 @@ import {
 import { slugify } from '../lib/slug.ts';
 import type { MatchStatus } from '../lib/types.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
-import { roundSlots, scheduleFromForm, scheduleOf, regenerateRound } from '../lib/schedule.ts';
+import { roundSlots, scheduleFromForm, scheduleOf, regenerateRound, plannedRoundDate } from '../lib/schedule.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
 import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
@@ -375,12 +375,14 @@ adminRoutes.post('/fixture/generar', async (c) => {
   let round = 1;
   for (const pairs of fixture.rounds) {
     const slots = roundSlots(pairs.length, schedule);
+    // Día de la jornada: avanza el calendario desde la fecha de inicio del torneo.
+    const day = plannedRoundDate(schedule, round);
     for (const [i, p] of pairs.entries()) {
       const slot = slots[i];
       stmts.push(
         c.env.DB.prepare(
-          'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)'
-        ).bind(tournamentId, round, p.home, p.away, 'scheduled', slot?.venue ?? '', slot?.kickoff ?? '')
+          'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
+        ).bind(tournamentId, round, p.home, p.away, 'scheduled', slot?.venue ?? '', slot?.kickoff ?? '', day)
       );
     }
     round += 1;

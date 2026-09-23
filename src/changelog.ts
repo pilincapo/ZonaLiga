@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.1';
+export const APP_VERSION = '0.2.2';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,15 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.2',
+    date: '2026-09-23',
+    title: 'Calendario automático',
+    items: [
+      { kind: 'nuevo', text: 'Cargá la fecha de inicio del torneo (y los días entre fechas): el fixture nace con el día de cada jornada calculado.' },
+      { kind: 'mejora', text: 'En Fechas, los partidos sin día muestran su fecha planificada; al guardar, queda registrada.' },
+    ],
+  },
   {
     version: '0.2.1',
     date: '2026-09-23',
