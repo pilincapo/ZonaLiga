@@ -249,6 +249,104 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     });
     expect(restore.status).toBe(302);
   });
+
+  it('hora y cancha por lista desplegable y regeneración sin choques', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const page = await (await admin.get('/admin/fechas')).text();
+    // La hora y la cancha salen de listas armadas con la config del torneo.
+    expect(page).toContain('<select name="t_');
+    expect(page).toContain('<select name="v_');
+    expect(page).toContain('>12:00</option>');
+    expect(page).toContain('>Cancha Sur</option>');
+
+    // Ids: [f1m1, f1m2, f2m1, …]; el día de la fecha 1 sale del input.
+    const mIds = [...page.matchAll(/name="d_(\d+)"/g)].map((m) => m[1]!);
+    expect(mIds.length).toBeGreaterThanOrEqual(4);
+    const r1m1 = mIds[0]!;
+    const r2m1 = mIds[2]!;
+    const day1 = new RegExp(`name="d_${r1m1}" value="([\\d-]+)"`).exec(page)?.[1] ?? '';
+    expect(day1, 'la fecha 1 debe tener día').toBeTruthy();
+
+    const fullConfig = {
+      name: 'Copa E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'active',
+      venues: 'Cancha Norte\nCancha Sur',
+      kickoffs: '10:00, 12:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      play_weekday: '6',
+    };
+
+    // El finally restaura la config completa aunque cualquier expect falle:
+    // la configuración compartida no debe arrastrarse a los tests siguientes.
+    try {
+      // Le doy el día y el slot de la fecha 1 a un partido de la fecha 2.
+      const clash = await admin.post('/admin/fechas/guardar', {
+        tournament_id: tournamentId,
+        round: '2',
+        [`d_${r2m1}`]: day1,
+        [`t_${r2m1}`]: '10:00',
+        [`v_${r2m1}`]: 'Cancha Norte',
+      });
+      expect(clash.status).toBe(302);
+
+      // Regenerar la fecha 1 esquiva ese slot: mismo día, pero otra hora/cancha.
+      const regen = await admin.post('/admin/fechas/regenerar', {
+        tournament_id: tournamentId,
+        round: '1',
+        shift_days: '0',
+      });
+      expect(regen.status).toBe(302);
+      const loc = decodeURIComponent(regen.headers.get('location') ?? '');
+      expect(loc).toContain('Fecha 1 regenerada');
+      expect(loc).toContain('Sin choques');
+
+      // Con 1 cancha × 1 horario el choque es inevitable: se avisa con detalle.
+      const tight = await admin.post(`/admin/torneos/${tournamentId}`, {
+        name: 'Copa E2E',
+        season: '2026',
+        format: 'round_robin',
+        status: 'active',
+        venues: 'Cancha Norte',
+        kickoffs: '10:00',
+        start_date: '2026-10-05',
+        round_gap: '7',
+        play_weekday: '6',
+      });
+      expect(tight.status).toBe(302);
+      const regen2 = await admin.post('/admin/fechas/regenerar', {
+        tournament_id: tournamentId,
+        round: '1',
+        shift_days: '0',
+      });
+      expect(regen2.status).toBe(302);
+      const loc2 = decodeURIComponent(regen2.headers.get('location') ?? '');
+      expect(loc2).toContain('Choques');
+      expect(loc2).toContain('Cancha Norte tiene 2 partidos');
+
+      // Restauro la config y regenero para dejar el calendario sin choques.
+      const restore = await admin.post(`/admin/torneos/${tournamentId}`, fullConfig);
+      expect(restore.status).toBe(302);
+      const regen3 = await admin.post('/admin/fechas/regenerar', {
+        tournament_id: tournamentId,
+        round: '1',
+        shift_days: '0',
+      });
+      expect(regen3.status).toBe(302);
+      expect(decodeURIComponent(regen3.headers.get('location') ?? '')).toContain('Sin choques');
+    } finally {
+      await admin.post(`/admin/torneos/${tournamentId}`, fullConfig);
+      await admin.post('/admin/fechas/regenerar', {
+        tournament_id: tournamentId,
+        round: '1',
+        shift_days: '0',
+      });
+    }
+  });
 });
 
 describe.skipIf(!has)('e2e: sesión delegado end-to-end', () => {

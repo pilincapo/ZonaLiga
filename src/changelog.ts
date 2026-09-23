@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.5';
+export const APP_VERSION = '0.2.6';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,15 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.6',
+    date: '2026-09-23',
+    title: 'Hora y cancha desde la configuración del torneo',
+    items: [
+      { kind: 'nuevo', text: 'En Fechas, la hora y la cancha de cada partido ahora se eligen con listas desplegables que toman los datos cargados en la configuración del torneo.' },
+      { kind: 'mejora', text: 'Al regenerar una fecha, la app verifica que la cancha y el horario no se dupliquen con otro partido del mismo día: evita lo ocupado y, si no alcanzan las canchas, lo avisa con detalle.' },
+    ],
+  },
   {
     version: '0.2.5',
     date: '2026-09-23',

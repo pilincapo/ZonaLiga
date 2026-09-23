@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { regeneratePairings, verifyPairings, type NewMatch } from '../src/lib/fixture.ts';
+import { regeneratePairings, verifyPairings, slotConflicts, type NewMatch } from '../src/lib/fixture.ts';
 import type { Match } from '../src/lib/types.ts';
 import { EMPTY_SCHEDULE, type TournamentSchedule } from '../src/lib/schedule.ts';
 
@@ -199,7 +199,7 @@ describe('verifyPairings', () => {
       'single',
       name
     );
-    expect(issues.some((i) => i.includes('La cancha Norte'))).toBe(true);
+    expect(issues.some((i) => i.includes('Norte tiene 2 partidos'))).toBe(true);
     // Día distinto no choca.
     expect(
       verifyPairings(
@@ -237,5 +237,48 @@ describe('verifyPairings', () => {
         name
       )
     ).toEqual([]);
+  });
+});
+
+describe('slotConflicts', () => {
+  it('reporta cancha + hora + día repetidos', () => {
+    const issues = slotConflicts([
+      mk({ played_on: '2026-10-10', kickoff_time: '10:00', venue: 'Norte' }),
+      mk({ played_on: '2026-10-10', kickoff_time: '10:00', venue: 'Norte' }),
+    ]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain('Norte tiene 2 partidos el 2026-10-10 a las 10:00');
+  });
+
+  it('mismo día y cancha pero distinta hora no es choque; otro día tampoco', () => {
+    expect(
+      slotConflicts([
+        mk({ played_on: '2026-10-10', kickoff_time: '10:00', venue: 'Norte' }),
+        mk({ played_on: '2026-10-10', kickoff_time: '12:00', venue: 'Norte' }),
+        mk({ played_on: '2026-10-17', kickoff_time: '10:00', venue: 'Norte' }),
+      ])
+    ).toEqual([]);
+  });
+
+  it('partidos sin día, hora o cancha se ignoran', () => {
+    expect(
+      slotConflicts([
+        mk({ played_on: '', kickoff_time: '10:00', venue: 'Norte' }),
+        mk({ played_on: '2026-10-10', kickoff_time: '', venue: 'Norte' }),
+        mk({ played_on: '2026-10-10', kickoff_time: '10:00', venue: '' }),
+      ])
+    ).toEqual([]);
+  });
+
+  it('con inScope: atribuye solo los choques que tocan a la jornada', () => {
+    const inR1 = mk({ round: 1, played_on: '2026-10-10', kickoff_time: '10:00', venue: 'Norte' });
+    const inR2 = mk({ round: 2, played_on: '2026-10-17', kickoff_time: '10:00', venue: 'Norte' });
+    const outR2 = mk({ round: 3, played_on: '2026-10-17', kickoff_time: '10:00', venue: 'Norte' });
+    const inScope = (m: { round: number | null }) => m.round === 1;
+    // Choque ajeno a la ronda 1: no se reporta.
+    expect(slotConflicts([inR1, inR2, outR2], inScope)).toEqual([]);
+    // Choque que involucra a la ronda 1: se reporta.
+    const other = mk({ round: 4, played_on: '2026-10-10', kickoff_time: '10:00', venue: 'Norte' });
+    expect(slotConflicts([inR1, inR2, outR2, other], inScope)).toHaveLength(1);
   });
 });

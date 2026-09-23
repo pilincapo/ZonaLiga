@@ -14,9 +14,16 @@ import {
 } from '../lib/auth.ts';
 import { slugify } from '../lib/slug.ts';
 import type { Match, MatchStatus } from '../lib/types.ts';
-import { regeneratePairings, verifyPairings } from '../lib/fixture.ts';
+import { regeneratePairings, verifyPairings, slotConflicts } from '../lib/fixture.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
-import { roundSlots, scheduleFromForm, scheduleOf, regenerateRound, plannedRoundDate } from '../lib/schedule.ts';
+import {
+  roundSlots,
+  scheduleFromForm,
+  scheduleOf,
+  regenerateRound,
+  isRegenerable,
+  plannedRoundDate,
+} from '../lib/schedule.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
 import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
@@ -521,17 +528,30 @@ adminRoutes.post('/fechas/regenerar', async (c) => {
   if (!t) return c.redirect('/admin/fechas?err=' + encodeURIComponent('Torneo inexistente'));
   const slugQ = `?t=${encodeURIComponent(t.slug)}`;
 
-  const rows = await c.env.DB.prepare(
-    'SELECT id, played_on, kickoff_time, venue, status FROM matches WHERE tournament_id = ?1 AND round = ?2 ORDER BY id'
-  )
-    .bind(tournamentId, round)
-    .all<{ id: number; played_on: string; kickoff_time: string; venue: string; status: string }>();
-  const matches = rows.results ?? [];
-  if (matches.length === 0) {
+  const sel =
+    'SELECT id, round, played_on, kickoff_time, venue, status FROM matches WHERE tournament_id = ?1 ORDER BY id';
+  const all = ((await c.env.DB.prepare(sel).bind(tournamentId).all<{
+    id: number;
+    round: number | null;
+    played_on: string;
+    kickoff_time: string;
+    venue: string;
+    status: string;
+  }>()).results ?? []);
+  const roundMatches = all.filter((m) => m.round === round);
+  if (roundMatches.length === 0) {
     return c.redirect(`/admin/fechas${slugQ}&err=` + encodeURIComponent(`La fecha ${round} no tiene partidos`));
   }
 
-  const updates = regenerateRound(matches, scheduleOf(t.config), shift);
+  // Slots tomados por otros partidos del torneo: el re-sloteo no puede pisarlos.
+  const pendingIds = new Set(roundMatches.filter((m) => isRegenerable(m.status)).map((m) => m.id));
+  const occupied = new Set(
+    all
+      .filter((m) => !pendingIds.has(m.id) && m.played_on && m.kickoff_time && m.venue)
+      .map((m) => `${m.played_on}|${m.kickoff_time}|${m.venue}`)
+  );
+
+  const updates = regenerateRound(roundMatches, scheduleOf(t.config), shift, occupied);
   const stmts: D1PreparedStatement[] = updates.map((u) =>
     c.env.DB.prepare('UPDATE matches SET played_on = ?1, kickoff_time = ?2, venue = ?3 WHERE id = ?4')
       .bind(u.played_on, u.kickoff, u.venue, u.id)
@@ -539,9 +559,24 @@ adminRoutes.post('/fechas/regenerar', async (c) => {
   if (stmts.length) await c.env.DB.batch(stmts);
 
   const day = shift !== 0 ? (shift > 0 ? ` (+${shift} día${shift > 1 ? 's' : ''})` : ` (${shift} día)`) : '';
+  const resumen = `Fecha ${round} regenerada: ${updates.length} partido(s)${day}`;
+
+  // Verificación: que la cancha y el horario no queden duplicados ese día.
+  const after = (await c.env.DB.prepare(sel).bind(tournamentId).all<{
+    id: number;
+    round: number | null;
+    played_on: string;
+    kickoff_time: string;
+    venue: string;
+    status: string;
+  }>()).results ?? [];
+  const conflicts = slotConflicts(after, (m) => m.round === round);
+  if (conflicts.length) {
+    const detail = conflicts.slice(0, 4).join(' · ') + (conflicts.length > 4 ? ' …' : '');
+    return c.redirect(`/admin/fechas${slugQ}&err=` + encodeURIComponent(`⚠ ${resumen}. Choques: ${detail}`));
+  }
   return c.redirect(
-    `/admin/fechas${slugQ}&msg=` +
-      encodeURIComponent(`Fecha ${round} regenerada: ${updates.length} partido(s)${day}`)
+    `/admin/fechas${slugQ}&msg=` + encodeURIComponent(`${resumen}. ✓ Sin choques de cancha u horario`)
   );
 });
 

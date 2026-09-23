@@ -800,6 +800,30 @@ ${submissionsBlock}
 
 /* ============================== FECHAS (día/hora/cancha) ============================== */
 
+/** Hora desde la config del torneo (lista desplegable); campo libre si no hay config. */
+function kickoffCell(m: Match, kickoffs: string[]): string {
+  if (kickoffs.length === 0) {
+    return `<input type="time" name="t_${m.id}" value="${esc(m.kickoff_time)}" style="width:110px">`;
+  }
+  const opts: string[] = ['', ...(m.kickoff_time && !kickoffs.includes(m.kickoff_time) ? [m.kickoff_time, ...kickoffs] : kickoffs)];
+  const o = opts
+    .map((v) => `<option value="${esc(v)}" ${v === m.kickoff_time ? 'selected' : ''}>${v ? esc(v) : '—'}</option>`)
+    .join('');
+  return `<select name="t_${m.id}" style="width:110px">${o}</select>`;
+}
+
+/** Cancha desde la config del torneo (lista desplegable); campo libre si no hay config. */
+function venueCell(m: Match, venues: string[]): string {
+  if (venues.length === 0) {
+    return `<input type="text" name="v_${m.id}" value="${esc(m.venue)}" placeholder="Cancha" style="width:130px">`;
+  }
+  const opts: string[] = ['', ...(m.venue && !venues.includes(m.venue) ? [m.venue, ...venues] : venues)];
+  const o = opts
+    .map((v) => `<option value="${esc(v)}" ${v === m.venue ? 'selected' : ''}>${v ? esc(v) : '— sin cancha —'}</option>`)
+    .join('');
+  return `<select name="v_${m.id}" style="width:130px">${o}</select>`;
+}
+
 export async function roundsSchedulePage(db: D1Database, slugParam: string | undefined, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
@@ -830,8 +854,8 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
           (m) => `<tr>
       <td>${esc(teamMap.get(m.home_team_id ?? -1)?.name ?? '—')} <span class="faint">vs</span> ${esc(teamMap.get(m.away_team_id ?? -1)?.name ?? '—')}</td>
       <td><input type="date" name="d_${m.id}" value="${esc(m.played_on || plannedRoundDate(schedule, r))}"></td>
-      <td><input type="time" name="t_${m.id}" value="${esc(m.kickoff_time)}" style="width:110px"></td>
-      <td><input type="text" name="v_${m.id}" value="${esc(m.venue)}" placeholder="Cancha" style="width:130px"></td>
+      <td>${kickoffCell(m, schedule.kickoffs)}</td>
+      <td>${venueCell(m, schedule.venues)}</td>
     </tr>`
         )
         .join('');
@@ -842,7 +866,7 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
       <button class="btn btn-primary btn-sm" type="submit">Guardar fecha ${r}</button>
       <span style="display:flex;gap:6px;align-items:center">
         <input type="number" name="shift_days" value="0" min="-30" max="30" style="width:64px" title="Días a correr el inicio de la fecha (0 = solo re-slotea hora y cancha)">
-        <button class="btn btn-ghost btn-sm" type="submit" formaction="/admin/fechas/regenerar" formmethod="post" title="Re-slotea hora y cancha con las canchas y horarios del torneo; el número corre el día de todos los partidos pendientes" onclick="return confirm('Se van a pisar hora y cancha de la fecha ${r} con el patrón del torneo. ¿Continuar?')">↻ Regenerar fecha</button>
+        <button class="btn btn-ghost btn-sm" type="submit" formaction="/admin/fechas/regenerar" formmethod="post" title="Re-slotea hora y cancha de los pendientes (esquivando la cancha y hora ocupadas ese día) y verifica que no se dupliquen; el número corre el día de todos los pendientes" onclick="return confirm('Se van a pisar hora y cancha de la fecha ${r} con el patrón del torneo. ¿Continuar?')">↻ Regenerar fecha</button>
       </span>
     </div></form>`;
     })

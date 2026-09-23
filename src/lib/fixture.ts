@@ -310,7 +310,22 @@ export function verifyPairings(
   }
 
   // 3) Una cancha no puede tener dos partidos el mismo día a la misma hora.
-  const slotMap = new Map<string, Match[]>();
+  issues.push(...slotConflicts(matches));
+
+  return issues;
+}
+
+/** Campos mínimos para detectar un choque de cancha y hora. */
+export type SlotLike = Pick<Match, 'played_on' | 'kickoff_time' | 'venue'>;
+
+/**
+ * Partidos que comparten cancha, hora y día (doble reserva). Con `inScope`
+ * solo reporta grupos que incluyen un partido que lo cumple — para atribuir
+ * el choque a la jornada que se está regenerando.
+ */
+export function slotConflicts<T extends SlotLike>(matches: T[], inScope?: (m: T) => boolean): string[] {
+  const issues: string[] = [];
+  const slotMap = new Map<string, T[]>();
   for (const m of matches) {
     if (!m.played_on || !m.kickoff_time || !m.venue) continue;
     const k = `${m.played_on}|${m.kickoff_time}|${m.venue}`;
@@ -319,11 +334,10 @@ export function verifyPairings(
     else slotMap.set(k, [m]);
   }
   for (const [k, list] of slotMap) {
-    if (list.length > 1) {
+    if (list.length > 1 && (!inScope || list.some(inScope))) {
       const [day, kickoff, venue] = k.split('|');
-      issues.push(`La cancha ${venue} tiene ${list.length} partidos el ${day} a las ${kickoff}`);
+      issues.push(`${venue} tiene ${list.length} partidos el ${day} a las ${kickoff}`);
     }
   }
-
   return issues;
 }

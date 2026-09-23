@@ -223,29 +223,66 @@ function shiftDate(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Estado que la regeneración puede mover: no lo jugado ni los bye. */
+export function isRegenerable(status: string): boolean {
+  return status !== 'played' && status !== 'walkover' && status !== 'bye';
+}
+
 /**
  * Regenera los horarios y canchas de UNA jornada: corre el día `shiftDays`
- * (negativo = adelanta) y re-slotea hora y cancha con `roundSlots` sobre los
- * partidos pendientes, en orden. Los ya jugados (y los bye) no se tocan;
- * sin canchas ni horarios configurados, conserva los actuales.
+ * (negativo = adelanta) y re-slotea hora y cancha agrupando por día, por el
+ * catálogo completo de la config, esquivando los slots en `occupied`
+ * (claves `día|hora|cancha` de otros partidos del torneo). Los ya jugados
+ * (y los bye) no se tocan; sin canchas ni horarios configurados, conserva
+ * los actuales. Si no queda ningún slot libre, repite y la verificación lo
+ * reporta.
  */
 export function regenerateRound(
   matches: RoundMatchInput[],
   s: TournamentSchedule,
-  shiftDays = 0
+  shiftDays = 0,
+  occupied: ReadonlySet<string> = new Set()
 ): RoundSlotUpdate[] {
   const shift = Math.trunc(shiftDays);
-  const pending = matches.filter((m) => m.status !== 'played' && m.status !== 'walkover' && m.status !== 'bye');
-  const slots = roundSlots(pending.length, s);
-  const updates: RoundSlotUpdate[] = [];
-  pending.forEach((m, i) => {
-    const slot = slots[i];
-    updates.push({
-      id: m.id,
-      played_on: shift !== 0 ? shiftDate(m.played_on, shift) : m.played_on,
-      kickoff: slot ? slot.kickoff : m.kickoff_time,
-      venue: slot ? slot.venue : m.venue,
-    });
+  const pending = matches.filter((m) => isRegenerable(m.status));
+  // Catálogo con todos los slots únicos de la config (horario × cancha).
+  const catalog = roundSlots(scheduleCapacity(s), s);
+
+  // Partidos agrupados por su día (tras el corrimiento): cada día reparte
+  // los slots desde el principio, como si fuera una fecha propia.
+  const groups = new Map<string, RoundMatchInput[]>();
+  for (const m of pending) {
+    const day = shift !== 0 ? shiftDate(m.played_on, shift) : m.played_on;
+    const g = groups.get(day);
+    if (g) g.push(m);
+    else groups.set(day, [m]);
+  }
+
+  const assigned = new Map<number, { day: string; kickoff: string; venue: string }>();
+  for (const [day, group] of groups) {
+    const used = new Set<string>(); // slots ya asignados en este día
+    let cursor = 0;
+    for (const m of group) {
+      if (catalog.length === 0) {
+        assigned.set(m.id, { day, kickoff: m.kickoff_time, venue: m.venue });
+        continue;
+      }
+      let slot = catalog[cursor % catalog.length]!;
+      cursor += 1;
+      // Esquiva ocupados por terceros ese día y ya asignados en el grupo.
+      for (let tries = 0; tries < catalog.length; tries++) {
+        const key = `${day}|${slot.kickoff}|${slot.venue}`;
+        if (!occupied.has(key) && !used.has(key)) break;
+        slot = catalog[cursor % catalog.length]!;
+        cursor += 1;
+      }
+      used.add(`${day}|${slot.kickoff}|${slot.venue}`);
+      assigned.set(m.id, { day, kickoff: slot.kickoff, venue: slot.venue });
+    }
+  }
+
+  return pending.map((m) => {
+    const a = assigned.get(m.id)!;
+    return { id: m.id, played_on: a.day, kickoff: a.kickoff, venue: a.venue };
   });
-  return updates;
 }

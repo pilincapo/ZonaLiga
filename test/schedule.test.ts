@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_SCHEDULE,
+  isRegenerable,
   normalizeKickoff,
   normalizeDate,
   plannedRoundDate,
@@ -269,5 +270,43 @@ describe('regenerateRound', () => {
   it('corre el día de fechas vacías sin romper', () => {
     const out = regenerateRound([mk(1, { played_on: '' })], sched, 1);
     expect(out[0]!.played_on).toBe('');
+  });
+
+  it('esquiva un slot ocupado ese día por otro partido', () => {
+    const occupied = new Set(['2026-10-05|10:00|Cancha Norte']);
+    const out = regenerateRound([mk(1), mk(2)], sched, 0, occupied);
+    expect(out.map((u) => [u.kickoff, u.venue])).toEqual([
+      ['10:00', 'Cancha Sur'],
+      ['12:00', 'Cancha Norte'],
+    ]);
+  });
+
+  it('un ocupado de otro día no molesta', () => {
+    const occupied = new Set(['2026-10-06|10:00|Cancha Norte']);
+    const out = regenerateRound([mk(1)], sched, 0, occupied);
+    expect([out[0]!.kickoff, out[0]!.venue]).toEqual(['10:00', 'Cancha Norte']);
+  });
+
+  it('esquiva ocupados por día: cada grupo reparte desde el principio', () => {
+    const occupied = new Set(['2026-10-07|10:00|Cancha Norte']);
+    const out = regenerateRound([mk(1, { played_on: '2026-10-07' }), mk(2)], sched, 0, occupied);
+    expect([out[0]!.kickoff, out[0]!.venue]).toEqual(['10:00', 'Cancha Sur']);
+    expect([out[1]!.kickoff, out[1]!.venue]).toEqual(['10:00', 'Cancha Norte']);
+  });
+
+  it('si no queda slot libre repite (lo reporta la verificación)', () => {
+    const s = { ...EMPTY_SCHEDULE, venues: ['Cancha Norte'], kickoffs: ['10:00'] };
+    const occupied = new Set(['2026-10-05|10:00|Cancha Norte']);
+    const out = regenerateRound([mk(1), mk(2)], s, 0, occupied);
+    expect(out).toHaveLength(2);
+    expect(out.every((u) => u.kickoff === '10:00' && u.venue === 'Cancha Norte')).toBe(true);
+  });
+
+  it('isRegenerable: jugado y bye no; lo demás sí', () => {
+    expect(isRegenerable('played')).toBe(false);
+    expect(isRegenerable('walkover')).toBe(false);
+    expect(isRegenerable('bye')).toBe(false);
+    expect(isRegenerable('scheduled')).toBe(true);
+    expect(isRegenerable('postponed')).toBe(true);
   });
 });
