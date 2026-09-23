@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.14';
+export const APP_VERSION = '0.2.15';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,16 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.15',
+    date: '2026-09-23',
+    title: 'Panel de administración plano y compacto',
+    items: [
+      { kind: 'mejora', text: 'El panel hereda el nuevo look flat con densidad extra: títulos de página más contenidos, formularios con campos más bajos y etiquetas más chicas.' },
+      { kind: 'mejora', text: 'Los botones repetidos por fila (Cargar planilla) pasaron al verde suave: el verde fuerte queda reservado para la acción principal de cada página.' },
+      { kind: 'mejora', text: 'En celular, la bandeja de planillas muestra Partido y acción sin columnas de más: nada se corta ni desborda.' },
+    ],
+  },
   {
     version: '0.2.14',
     date: '2026-09-23',

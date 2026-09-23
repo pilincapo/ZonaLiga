@@ -677,7 +677,7 @@ export async function sheetListPage(db: D1Database, msg?: string, errMsg?: strin
     <td><div class="flex">${crest(h, 'sm')} ${esc(h?.name ?? 'Por definir')} <span class="faint">vs</span> ${esc(a?.name ?? 'Por definir')} ${crest(a, 'sm')}${pendingMatches.has(m.id) ? ' <span class="badge amber">Entrega</span>' : ''}</div></td>
     <td class="num">${esc(score)}</td>
     <td>${m.played_on ? esc(formatDateShort(m.played_on)) : ''}</td>
-    <td class="actions-cell"><a class="btn btn-primary btn-sm" href="/admin/planilla/${m.id}">Cargar planilla</a></td>
+    <td class="actions-cell"><a class="btn btn-row btn-sm" href="/admin/planilla/${m.id}">Cargar planilla</a></td>
   </tr>`;
   };
 
@@ -685,14 +685,14 @@ export async function sheetListPage(db: D1Database, msg?: string, errMsg?: strin
 ${flash('success', msg)}${flash('error', errMsg)}
 ${pageHead('Planillas')}
 <section class="block"><div class="card">${`<div class="card-head"><h2>Pendientes</h2><span class="muted small">${pending.length} partidos</span></div>`}
-  <div class="table-wrap"><table class="data">
+  <div class="table-wrap"><table class="data planillas-pend">
   <thead><tr><th></th><th>Partido</th><th class="num">Res.</th><th>Día</th><th></th></tr></thead>
   <tbody>${pending.map(row).join('') || '<tr><td colspan="5" class="empty-note">Nada pendiente 🎉</td></tr>'}</tbody>
   </table></div>
 </div></section>
 <section class="block"><div class="card">
   <div class="card-head"><h2>Últimos cargados</h2><span class="muted small">${esc(t.name)}</span></div>
-  <div class="table-wrap"><table class="data">
+  <div class="table-wrap"><table class="data planillas-done">
   <thead><tr><th></th><th>Partido</th><th class="num">Res.</th><th>Día</th><th></th></tr></thead>
   <tbody>${done.map(row).join('') || '<tr><td colspan="5" class="empty-note">Todavía no hay resultados.</td></tr>'}</tbody>
   </table></div>

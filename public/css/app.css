@@ -579,6 +579,22 @@ select {
 
 .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 
+/* ---------- Panel admin: densidad extra ---------- */
+
+/* Título de página del panel más contenido que el hero público */
+.admin-header ~ main h1, .admin-header ~ main .hero h1 { font-size: clamp(1.25rem, 3.4vw, 1.6rem); }
+
+/* Acción por fila: ghost verde (el primario queda para la acción
+   principal de la página, no para repetirse en 16 filas) */
+.btn-row { background: var(--accent-soft); color: var(--accent-dark) !important; }
+.btn-row:hover { background: var(--accent); color: #fff !important; text-decoration: none; }
+html[data-theme='dark'] .btn-row { color: var(--accent-strong) !important; }
+html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #04120a !important; }
+
+/* Forms del panel: campos un poco más bajos y etiquetas más chicas */
+.field { margin-bottom: 10px; }
+.field label { font-size: 0.7rem; margin-bottom: 4px; }
+
 /* Declaración de goles en la planilla */
 .goal-picks { display: flex; flex-wrap: wrap; gap: 10px 14px; }
 .goal-picks [data-pick] { min-width: 180px; flex: 0 1 220px; }
@@ -849,6 +865,15 @@ select {
   td.num, th.num { width: auto; padding-left: 3px; padding-right: 3px; }
   .team-cell { gap: 6px; }
   .team-cell .tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Panel en móvil: acciones por fila compactas, sin overflow */
+  .actions-cell .btn { padding: 5px 7px; font-size: 0.68rem; white-space: nowrap; }
+  .actions-cell { padding-right: 6px; }
+  table.data td { padding: 6px 4px; }
+  /* Bandeja de planillas: fuera Res. y Día (viven en fixture y planilla) */
+  .planillas-pend th:nth-child(3), .planillas-pend td:nth-child(3),
+  .planillas-done th:nth-child(3), .planillas-done td:nth-child(3),
+  .planillas-pend th:nth-child(4), .planillas-pend td:nth-child(4),
+  .planillas-done th:nth-child(4), .planillas-done td:nth-child(4) { display: none; }
   /* Tabla de posiciones completa: solo #, Equipo, PJ, DIF, PTS (y FP) */
   .standings th:nth-child(4), .standings td:nth-child(4),
   .standings th:nth-child(5), .standings td:nth-child(5),
