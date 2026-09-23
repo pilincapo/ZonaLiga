@@ -13,7 +13,7 @@ import {
   type SubmissionRow,
 } from '../lib/delegates.ts';
 import type { Match, Player, Team } from '../lib/types.ts';
-import type { MatchWithTournament, OwnSubmission } from '../lib/queries.ts';
+import type { MatchWithTournament, OwnSubmission } from '../lib/submissions.ts';
 import { crest, emptyNote, layout, type NavItem } from './components.ts';
 
 const DELEGATE_NAV: NavItem[] = [

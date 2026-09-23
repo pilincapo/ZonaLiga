@@ -9,11 +9,8 @@ import {
   type LivePayload,
   type LiveSide,
 } from '../lib/live.ts';
-import {
-  eventsForMatches,
-  listPlayers,
-  pendingForTournament,
-} from '../lib/queries.ts';
+import { eventsForMatches, listPlayers } from '../lib/queries.ts';
+import { pendingForTournament } from '../lib/submissions.ts';
 import { loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import type { Tournament } from '../lib/types.ts';
 import { crest, emptyNote, layout } from './components.ts';

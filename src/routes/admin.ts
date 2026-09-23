@@ -15,7 +15,8 @@ import {
 import { slugify } from '../lib/slug.ts';
 import type { MatchStatus } from '../lib/types.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
-import { getMatch, getSubmission, getTeam } from '../lib/queries.ts';
+import { getMatch, getTeam } from '../lib/queries.ts';
+import { getSubmission } from '../lib/submissions.ts';
 import * as admin from '../ui/admin.ts';
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();

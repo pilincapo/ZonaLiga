@@ -9,17 +9,19 @@ import { computeSuspensions } from '../lib/suspensions.ts';
 import { BRACKET_LABELS } from '../lib/bracket.ts';
 import { formatDateShort } from '../lib/format.ts';
 import {
-  countPendingSubmissions,
   getMatch,
   getTeam,
   listEvents,
   listPlayers,
   listTeams,
   listTournaments,
+} from '../lib/queries.ts';
+import {
+  countPendingSubmissions,
   matchIdsWithPendingSubmissions,
   pendingSubmissions,
   submissionEvents,
-} from '../lib/queries.ts';
+} from '../lib/submissions.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';

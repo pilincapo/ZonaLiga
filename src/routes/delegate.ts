@@ -15,18 +15,15 @@ import {
   verifyDelegateToken,
 } from '../lib/auth.ts';
 import { canSubmitFor, maxEvents, normalizeCode, parseEvent, parseSubmission } from '../lib/delegates.ts';
+import { getMatch, getTeam, listPlayers, listTeams } from '../lib/queries.ts';
 import {
-  getMatch,
-  getTeam,
   getTeamByDelegateCode,
-  listPlayers,
   listSubmissionsForMatch,
-  listTeams,
   matchesForTeam,
   pendingSubmission,
   submissionEvents,
   submissionsForTeam,
-} from '../lib/queries.ts';
+} from '../lib/submissions.ts';
 import * as view from '../ui/delegate.ts';
 
 type DelegateEnv = { Bindings: Env; Variables: { team: Team } };

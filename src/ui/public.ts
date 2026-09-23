@@ -27,11 +27,9 @@ import {
   topCards,
   playerStatsAcrossTournaments,
   tournamentStats,
-  searchTeams,
-  searchPlayers,
-  searchTournaments,
   type ScorersRow,
 } from '../lib/queries.ts';
+import { searchPlayers, searchTeams, searchTournaments } from '../lib/search.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
