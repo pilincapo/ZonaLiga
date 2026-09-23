@@ -213,19 +213,96 @@ Para registrar una modificación:
 2. Subí `APP_VERSION` en el mismo archivo y la `version` de `package.json` (deben coincidir;
    hay un test que lo verifica).
 
-## Estructura
+## Arquitectura
+
+SSR por strings, sin build de frontend: `src/index.ts` (Hono) despacha las
+rutas; las rutas manejan **sesión y autorización** (cookies firmadas HMAC) y
+delegran el armado de HTML en `src/ui/`; la lógica de dominio vive en
+`src/lib/` y el acceso a datos es D1 directa con SQL preparado.
 
 ```
-migrations/         Esquema D1 (0001_init, 0002_delegados)
-seed.sql            Torneo de ejemplo (fictional)
-src/lib/            Lógica pura: tipos+reglas, standings, fixture (algoritmo del círculo),
-                    bracket, suspensiones, delegates, auth HMAC, share WhatsApp, queries D1
-src/ui/             Vistas SSR (strings, sin build de frontend)
-src/routes/         Handlers del panel admin (admin.ts) y del delegado (delegate.ts)
-public/             CSS (tema claro), manifest PWA, service worker, íconos
-design/             Tema oscuro original, por si querés volver atrás
-src/changelog.ts    Versión actual y entradas del changelog (página /changelog)
-test/               Vitest: tests de la lógica crítica + UI (tema, changelog)
+              ┌───────────────────────────────────────────────┐
+              │ index.ts (Hono): público, /changelog, /api/vivo│
+              └──────────────┬─────────────────┬──────────────┘
+                             │                 │
+        ┌────────────────────▼───┐   ┌─────────▼──────────────┐
+        │ routes/admin.ts        │   │ routes/delegate.ts     │
+        │ guardia + cookie admin │   │ guardia + cookie deleg.│
+        └───────┬────────────────┘   └─────────┬──────────────┘
+                │  armado de HTML (SSR strings)│
+   ┌────────────▼──────────────────────────────▼────────────┐
+   │ ui/public (sitio)   ui/admin (panel)   ui/delegate     │
+   │ ui/live (en vivo)   ui/adminEntregas (bandeja)         │
+   │ ui/components: chrome (layout, nav, tema, footer)      │
+   │ ui/match: piezas de partido    ui/icons: SVG           │
+   └────────────────────────┬───────────────────────────────┘
+                            │ datos y dominio
+┌───────────────────────────▼───────────────────────────────────┐
+│ lib/tournamentView  torneo+partidos+equipos armados, 1 llamada │
+│ lib/queries  SQL transversal     lib/submissions  entregas     │
+│ lib/search   /buscar             lib/rules  reglas del torneo  │
+│ lib/standings · suspensions · fixture · bracket · live ·      │
+│ lib/delegates · share                     (dominio puro)       │
+│ lib/auth (tokens+cookies HMAC) · html · format · slug  (base)  │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                      [ D1 (SQLite) ]
+```
+
+### Qué expone cada módulo y quién lo consume
+
+| Módulo | Interfaz | Consumido por |
+|---|---|---|
+| `lib/tournamentView` | `loadTournamentView(db, {id?, slug?, events?, scorers?, includeInactiveTeams?})`, `listTournamentViews(db)`, `resolveTournament` | ui/public, ui/admin, ui/live |
+| `lib/queries` | ~18 consultas D1 transversales (`getMatch`, `listTeams`, `listTournaments`, `topScorers`, `playerStatsAcrossTournaments`…) | ui/*, routes/*, tournamentView |
+| `lib/submissions` | Consultas del cluster de entregas: `pendingSubmissions`, `submissionEvents`, `matchesForTeam`, `getTeamByDelegateCode`… | routes/admin, routes/delegate, ui/admin, ui/adminEntregas, ui/delegate, ui/live |
+| `lib/search` | `searchTeams`, `searchPlayers`, `searchTournaments` | ui/public (`/buscar`) |
+| `lib/rules` | `rulesOf(t)` | ui/public, ui/admin |
+| `lib/auth` | Sesión admin y delegado: `createSessionToken`, `verifySessionToken`, `createDelegateToken`, `verifyDelegateToken`, cookies, `hashPassword`, `safeEqual`, `sessionSecret` | routes/admin, routes/delegate, test/auth-bracket |
+| `lib/delegates` | Negocio de entregas: `parseSubmission`, `parseEvent`, `canSubmitFor`, `generateDelegateCode`, labels | routes/*, ui/admin, ui/adminEntregas, ui/delegate, lib/submissions |
+| `lib/standings` | `computeStandings`, `groupBy` | ui/public |
+| `lib/suspensions` | `computeSuspensions` | ui/public, ui/admin |
+| `lib/fixture` | Generador round-robin (`generateRoundRobin`, `generateDoubleRoundRobin`) | routes/admin, ui/admin |
+| `lib/bracket` | `buildBracketColumns`, `matchShortLabel`, `sourceLabel`, labels | ui/public, ui/match, ui/admin, ui/adminEntregas, ui/delegate |
+| `lib/live` | Fases del partido, `buildLivePayload`, `leagueNow` (reloj UTC−3) | ui/live, ui/public |
+| `lib/share` | Textos y links de WhatsApp | ui/public, ui/admin |
+| `lib/html` / `format` / `slug` | `esc`/`escUrl`, fechas en español, `slugify` | todos |
+| `ui/components` | Chrome: `layout`, `NavItem`, `shareBar`, `emptyNote` | las tres capas |
+| `ui/match` | Piezas de partido: `crest`, `teamCell`, `statusTag`, `matchRow`, `bracketColumn`, `eventRow` | ui/* (cuando dibujan fútbol) |
+| `ui/icons` | `icon(name)`, SVG inline sin dependencias | ui/components, ui/public |
+
+### Reglas de diseño que mantiene el grafo
+
+- **Dominio puro**: `standings`, `suspensions`, `fixture`, `bracket`, `live` y
+  `rules` no tocan la base; sus tests corren sin D1.
+- **Las consultas viven junto a su feature**: el SQL de entregas está en
+  `lib/submissions` (su único consumidor es el mundo delegados) y el de
+  búsqueda en `lib/search` (solo `/buscar`). `queries` queda con lo
+  transversal.
+- **El ensamblado de la vista de torneo está en un solo lugar**
+  (`lib/tournamentView`): las páginas piden el paquete armado, sin N+1.
+- **Las rutas son la única puerta de las sesiones**: guardia, cookies y
+  autorización; la UI no decide quién entra.
+- **Chrome vs piezas**: `ui/components` (lo que ven las tres capas) está
+  separado de las piezas de partido (`ui/match`) y de los íconos.
+
+### Estructura de archivos
+
+```
+migrations/          Esquema D1 (0001_init, 0002_delegados)
+seed.sql             Torneo de ejemplo (ficticio)
+src/index.ts         Rutas públicas, /changelog y /api/vivo
+src/routes/          Sesiones y autorización: admin.ts y delegate.ts
+src/ui/              Vistas SSR: public, admin, adminEntregas, delegate, live,
+                     components (chrome), match (piezas), icons
+src/lib/             Dominio y datos: tournamentView, queries, submissions,
+                     search, rules, standings, suspensions, fixture, bracket,
+                     live, delegates, auth, share, html, format, slug, types
+src/changelog.ts     Versión actual y entradas del changelog (/changelog)
+public/              CSS (tema claro + oscuro), manifest PWA, service worker, íconos
+design/              Tema oscuro original, por si querés volver atrás
+scripts/test-e2e.mjs Orquestador del test E2E (server + D1 local efímera)
+test/                Vitest: dominio, UI (tema, changelog) y E2E de sesiones
 ```
 
 ## Quitar los datos de ejemplo
