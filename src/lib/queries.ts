@@ -1,6 +1,5 @@
 // Helpers de consultas D1 (todas preparadas para binding de parámetros).
 
-import { parseRules } from './types.ts';
 import type { Event, EventType, Match, Player, Rules, Team, Tournament } from './types.ts';
 import type { SubmissionEventRow, SubmissionRow } from './delegates.ts';
 
@@ -324,9 +323,7 @@ export async function tournamentEvents(db: D1Database, tournamentId: number): Pr
   return results ?? [];
 }
 
-export function rulesOf(t: Tournament): Rules {
-  return parseRules(t.config);
-}
+
 
 /* ---------- Delegados y entregas ---------- */
 

@@ -30,9 +30,9 @@ import {
   searchTeams,
   searchPlayers,
   searchTournaments,
-  rulesOf,
   type ScorersRow,
 } from '../lib/queries.ts';
+import { rulesOf } from '../lib/rules.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
 import type { Match, Team, Tournament } from '../lib/types.ts';

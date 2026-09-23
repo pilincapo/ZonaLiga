@@ -18,9 +18,9 @@ import {
   listTournaments,
   matchIdsWithPendingSubmissions,
   pendingSubmissions,
-  rulesOf,
   submissionEvents,
 } from '../lib/queries.ts';
+import { rulesOf } from '../lib/rules.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
 import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
