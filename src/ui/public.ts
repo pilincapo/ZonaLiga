@@ -407,7 +407,7 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
         })
         .join('');
       return `${title ? `<h3 class="zone-title">${esc(title)}</h3>` : ''}
-  <div class="card"><div class="table-wrap"><table class="data">
+  <div class="card"><div class="table-wrap"><table class="data standings">
     <thead><tr><th></th><th>Equipo</th><th class="num">PJ</th><th class="num">G</th><th class="num">E</th><th class="num">P</th><th class="num">GF</th><th class="num">GC</th><th class="num">DIF</th><th class="num">PTS</th>${showAdv ? '<th class="num" title="Fair play: amarilla 1, roja 3 — gana el que menos tiene">FP</th>' : ''}</tr></thead>
     <tbody>${body}</tbody>
   </table></div></div>`;

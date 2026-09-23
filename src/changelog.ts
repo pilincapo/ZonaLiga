@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.12';
+export const APP_VERSION = '0.2.13';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,16 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.13',
+    date: '2026-09-23',
+    title: 'Diseño flat y compacto (estilo apps de resultados)',
+    items: [
+      { kind: 'mejora', text: 'Nuevo look flat: se fueron degradados, sombras y bordes redondeados de más. Todo queda con bordes de 1px, colores planos y radios chicos — como FotMob o SofaScore.' },
+      { kind: 'mejora', text: 'Todo más denso: filas de tabla más bajas, header de 52px, tarjetas y formularios con menos aire. En celular la tabla de posiciones muestra #, Equipo, PJ, DIF, PTS y FP sin scroll horizontal (las demás columnas aparecen en desktop).' },
+      { kind: 'mejora', text: 'Números tabulares: las columnas de la tabla quedan alineadas en vertical. Escudos y botones más chicos y planos.' },
+    ],
+  },
   {
     version: '0.2.12',
     date: '2026-09-23',
