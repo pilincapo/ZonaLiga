@@ -31,22 +31,12 @@ import {
 } from '../lib/queries.ts';
 import { searchPlayers, searchTeams, searchTournaments } from '../lib/search.ts';
 import { rulesOf } from '../lib/rules.ts';
+import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow } from './match.ts';
+import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
 import type { Match, Team, Tournament } from '../lib/types.ts';
-import {
-  layout,
-  crest,
-  teamCell,
-  matchRow,
-  statusTag,
-  bracketColumn,
-  eventRow,
-  shareBar,
-  emptyNote,
-  icon,
-  type NavItem,
-} from './components.ts';
+import { layout, shareBar, emptyNote, type NavItem } from './components.ts';
 
 export const PUBLIC_NAV: NavItem[] = [
   { href: '/', label: 'Inicio', match: 'home' },

@@ -14,7 +14,8 @@ import {
 } from '../lib/delegates.ts';
 import type { Match, Player, Team } from '../lib/types.ts';
 import type { MatchWithTournament, OwnSubmission } from '../lib/submissions.ts';
-import { crest, emptyNote, layout, type NavItem } from './components.ts';
+import { crest } from './match.ts';
+import { emptyNote, layout, type NavItem } from './components.ts';
 
 const DELEGATE_NAV: NavItem[] = [
   { href: '/delegado', label: 'Mis partidos', match: 'delegado' },

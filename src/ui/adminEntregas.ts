@@ -14,7 +14,8 @@ import {
 import type { Match, Team } from '../lib/types.ts';
 import type { PendingSubmissionRow } from '../lib/submissions.ts';
 import { listSubmissionsForMatch, submissionEvents } from '../lib/submissions.ts';
-import { crest, emptyNote } from './components.ts';
+import { crest } from './match.ts';
+import { emptyNote } from './components.ts';
 
 export interface SubmissionCardData {
   sub: PendingSubmissionRow;

@@ -13,7 +13,8 @@ import { eventsForMatches, listPlayers } from '../lib/queries.ts';
 import { pendingForTournament } from '../lib/submissions.ts';
 import { loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import type { Tournament } from '../lib/types.ts';
-import { crest, emptyNote, layout } from './components.ts';
+import { crest } from './match.ts';
+import { emptyNote, layout } from './components.ts';
 import { PUBLIC_NAV } from './public.ts';
 
 /** Cada cuántos segundos se refresca la vista. */

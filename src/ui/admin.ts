@@ -28,7 +28,8 @@ import type { SubmissionEventRow } from '../lib/delegates.ts';
 import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
 import { waLink } from '../lib/share.ts';
 import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
-import { layout, crest, type NavItem } from './components.ts';
+import { crest } from './match.ts';
+import { layout, type NavItem } from './components.ts';
 
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Resumen', match: 'admin' },
