@@ -3,8 +3,7 @@
 import { esc, escUrl } from '../lib/html.ts';
 import { formatDateShort, formatDateLong } from '../lib/format.ts';
 import { leagueNow } from '../lib/live.ts';
-import { groupBy } from '../lib/standings.ts';
-import { computeStandings } from '../lib/standings.ts';
+import { groupBy, computeStandings, computeFairPlay, computeValla, FAIR_PLAY } from '../lib/standings.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
 import { buildBracketColumns, hasBracket, matchShortLabel, matchWinnerLoser, BRACKET_LABELS } from '../lib/bracket.ts';
 import {
@@ -25,6 +24,7 @@ import {
   listTeams,
   topScorers,
   topCards,
+  teamCards,
   playerStatsAcrossTournaments,
   tournamentStats,
   type ScorersRow,
@@ -356,11 +356,22 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
   const matches = view.matches;
   const teams = view.teams;
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
-  const standings = computeStandings(
-    matches,
-    teams.map((tm) => ({ id: tm.id, name: tm.name })),
-    rulesOf(t)
-  );
+  const rules = rulesOf(t);
+  const teamRows = teams.map((tm) => ({ id: tm.id, name: tm.name }));
+  const standings = computeStandings(matches, teamRows, rules);
+
+  // Fair play y valla menos vencida (columna y líderes, según la regla).
+  const showAdv = rules.showAdvanced;
+  const cards = showAdv ? await teamCards(db, t.id) : [];
+  const fairPlay = showAdv
+    ? computeFairPlay(
+        cards.map((c) => ({ teamId: c.team_id, type: c.type })),
+        teamRows
+      )
+    : [];
+  const valla = showAdv ? computeValla(standings, teamRows) : [];
+  const fpByTeam = new Map(fairPlay.map((r) => [r.teamId, r]));
+  const nameOf = (id: number) => teamMap.get(id)?.name ?? '';
 
   // Agrupar por zona usando el zone de los partidos.
   const zoneOf = new Map<number, string>();
@@ -383,6 +394,7 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
       const body = rows
         .map(({ row: r }, i) => {
           const tm = teamMap.get(r.teamId);
+          const fp = fpByTeam.get(r.teamId);
           return `<tr>
       <td class="pos-num">${i + 1}</td>
       <td>${teamCell(tm)}</td>
@@ -390,33 +402,42 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
       <td class="num">${r.goalsFor}</td><td class="num">${r.goalsAgainst}</td>
       <td class="num">${r.diff > 0 ? '+' + r.diff : r.diff}</td>
       <td class="num"><strong>${r.points}</strong></td>
+      ${showAdv ? `<td class="num" title="${fp ? `${fp.yellows} amarilla(s), ${fp.reds} roja(s)` : 'Sin tarjetas'}">${fp?.points ?? 0}</td>` : ''}
     </tr>`;
         })
         .join('');
       return `${title ? `<h3 class="zone-title">${esc(title)}</h3>` : ''}
   <div class="card"><div class="table-wrap"><table class="data">
-    <thead><tr><th></th><th>Equipo</th><th class="num">PJ</th><th class="num">G</th><th class="num">E</th><th class="num">P</th><th class="num">GF</th><th class="num">GC</th><th class="num">DIF</th><th class="num">PTS</th></tr></thead>
+    <thead><tr><th></th><th>Equipo</th><th class="num">PJ</th><th class="num">G</th><th class="num">E</th><th class="num">P</th><th class="num">GF</th><th class="num">GC</th><th class="num">DIF</th><th class="num">PTS</th>${showAdv ? '<th class="num" title="Fair play: amarilla 1, roja 3 — gana el que menos tiene">FP</th>' : ''}</tr></thead>
     <tbody>${body}</tbody>
   </table></div></div>`;
     })
-    .join('');
-
-  const adjustments = await adjustmentsForTournament(db, t.id);
+    .join('');  const adjustments = await adjustmentsForTournament(db, t.id);
   const adjustmentsNote = adjustments.length
     ? `<section class="block"><div class="card"><div class="card-body">
   <strong class="uppercase">Ajustes de puntos</strong>
   <ul class="hint" style="margin:8px 0 0 18px">${adjustments
     .map(
       (a) =>
-        `<li>${esc(a.team_name)}: <strong>${a.delta > 0 ? '+' : ''}${a.delta}</strong> pt(s) — ${esc(a.reason)}${a.created_at ? ` <span class="faint">(${formatDateShort(a.created_at.slice(0, 10))})</span>` : ''}</li>`
+        `<li>${esc(a.team_name)}: <strong>${a.delta > 0 ? '+' : ''}${a.delta}</strong> pt(s) — ${esc(a.reason)} ${a.created_at ? ` <span class="faint">(${formatDateShort(a.created_at.slice(0, 10))})</span>` : ''}</li>`
     )
     .join('')}</ul>
 </div></div></section>`
     : '';
 
+  // Líderes de fair play y valla menos vencida (solo con datos).
+  const leaders =
+    showAdv && (cards.length > 0 || valla.length > 0)
+      ? `<section class="block"><div class="card"><div class="card-body">
+  ${valla.length ? `<p style="margin:0 0 6px"><strong>Valla menos vencida:</strong> ${esc(nameOf(valla[0]!.teamId))} <span class="faint">(${valla[0]!.gc} goles en contra)</span></p>` : ''}
+  ${cards.length && fairPlay.length ? `<p style="margin:0"><strong>Fair Play:</strong> ${esc(nameOf(fairPlay[0]!.teamId))} <span class="faint">(${fairPlay[0]!.points} pts — amarilla ${FAIR_PLAY.yellow}, roja ${FAIR_PLAY.red})</span></p>` : ''}
+</div></div></section>`
+      : '';
+
   const body = `
 <section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Posiciones</h1></section>
 ${tables || emptyNote('Sin datos todavía')}
+${leaders}
 ${adjustmentsNote}`;
   return layout({ title: `Posiciones — ${t.name}`, active: 'posiciones', nav: PUBLIC_NAV, body });
 }

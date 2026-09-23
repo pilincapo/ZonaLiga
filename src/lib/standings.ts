@@ -114,3 +114,74 @@ export function groupBy<T>(list: T[], keyFn: (item: T) => string): Map<string, T
   }
   return map;
 }
+
+/** Puntos de fair play por tarjeta: amarilla = 1, roja = 3 (menos es mejor). */
+export const FAIR_PLAY = { yellow: 1, red: 3 } as const;
+
+export interface FairPlayRow {
+  teamId: number;
+  yellows: number;
+  reds: number;
+  points: number;
+}
+
+/**
+ * Tabla de fair play por equipo, calculada desde las tarjetas de los
+ * eventos. Ordena de MENOR a MAYOR puntaje (gana el que menos tarjetas
+ * tiene); empates: menos rojas, menos amarillas y finalmente alfabético.
+ */
+export function computeFairPlay(
+  cards: ReadonlyArray<{ teamId: number; type: string }>,
+  teams: { id: number; name: string }[]
+): FairPlayRow[] {
+  const rows = new Map<number, FairPlayRow>();
+  for (const t of teams) rows.set(t.id, { teamId: t.id, yellows: 0, reds: 0, points: 0 });
+  for (const c of cards) {
+    const row = rows.get(c.teamId);
+    if (!row) continue; // tarjeta de un equipo ajeno: se ignora
+    if (c.type === 'yellow') row.yellows += 1;
+    else if (c.type === 'red') row.reds += 1;
+  }
+  const out = [...rows.values()];
+  for (const r of out) r.points = r.yellows * FAIR_PLAY.yellow + r.reds * FAIR_PLAY.red;
+  const names = new Map(teams.map((t) => [t.id, t.name.toLowerCase()]));
+  out.sort((a, b) => {
+    if (a.points !== b.points) return a.points - b.points;
+    if (a.reds !== b.reds) return a.reds - b.reds;
+    if (a.yellows !== b.yellows) return a.yellows - b.yellows;
+    const an = names.get(a.teamId) ?? '';
+    const bn = names.get(b.teamId) ?? '';
+    if (an !== bn) return an < bn ? -1 : 1;
+    return a.teamId - b.teamId;
+  });
+  return out;
+}
+
+export interface VallaRow {
+  teamId: number;
+  /** Goles en contra. */
+  gc: number;
+}
+
+/**
+ * Valla menos vencida: solo equipos que jugaron, de MENOR a MAYOR goles
+ * en contra. Empate: quien jugó más partidos y finalmente alfabético.
+ */
+export function computeValla(
+  rows: ReadonlyArray<{ teamId: number; played: number; goalsAgainst: number }>,
+  teams: { id: number; name: string }[]
+): VallaRow[] {
+  const names = new Map(teams.map((t) => [t.id, t.name.toLowerCase()]));
+  const out = rows
+    .filter((r) => r.played > 0)
+    .map((r) => ({ teamId: r.teamId, gc: r.goalsAgainst, played: r.played }));
+  out.sort((a, b) => {
+    if (a.gc !== b.gc) return a.gc - b.gc;
+    if (b.played !== a.played) return b.played - a.played;
+    const an = names.get(a.teamId) ?? '';
+    const bn = names.get(b.teamId) ?? '';
+    if (an !== bn) return an < bn ? -1 : 1;
+    return a.teamId - b.teamId;
+  });
+  return out.map((r) => ({ teamId: r.teamId, gc: r.gc }));
+}

@@ -22,6 +22,8 @@ export interface Rules {
   yellowAccumWindow: number;
   /** Partidos de suspensión por roja directa. */
   redSuspensionMatches: number;
+  /** Muestra Fair Play y Valla menos vencida en Posiciones. */
+  showAdvanced: boolean;
   /** Reglas extra (ej: bonus por categoría). Reservado para el futuro. */
   bonusRules: string[];
 }
@@ -34,6 +36,7 @@ export const DEFAULT_RULES: Rules = {
   yellowAccumulation: 0,
   yellowAccumWindow: 0,
   redSuspensionMatches: 1,
+  showAdvanced: true,
   bonusRules: [],
 };
 
@@ -56,6 +59,7 @@ export function parseRules(configJson: string): Rules {
     yellowAccumulation: num(raw['yellowAccumulation'], DEFAULT_RULES.yellowAccumulation),
     yellowAccumWindow: num(raw['yellowAccumWindow'], DEFAULT_RULES.yellowAccumWindow),
     redSuspensionMatches: num(raw['redSuspensionMatches'], DEFAULT_RULES.redSuspensionMatches),
+    showAdvanced: raw['showAdvanced'] !== false,
     bonusRules: Array.isArray(raw['bonusRules'])
       ? (raw['bonusRules'] as unknown[]).filter((b): b is string => typeof b === 'string')
       : [],

@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.7';
+export const APP_VERSION = '0.2.8';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,16 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.8',
+    date: '2026-09-23',
+    title: 'Fair play y valla menos vencida',
+    items: [
+      { kind: 'nuevo', text: 'Posiciones muestra una columna FP (fair play) calculada desde las tarjetas: amarilla 1 punto, roja 3 — gana el equipo que menos tiene.' },
+      { kind: 'nuevo', text: 'Debajo de la tabla aparecen los líderes de Valla menos vencida (menos goles en contra) y Fair Play.' },
+      { kind: 'mejora', text: 'Se puede encender o apagar desde las Reglas del torneo ("Fair play y valla menos vencida").' },
+    ],
+  },
   {
     version: '0.2.7',
     date: '2026-09-23',

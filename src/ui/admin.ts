@@ -218,6 +218,10 @@ function rulesFields(rules: Rules): string {
 <div class="form-row">
   ${f('yellowAccumulation', 'Amarillas para suspensión', '0 = desactivado')}
   ${f('yellowAccumWindow', 'Ventana de acumulación', 'Últimas N jornadas; 0 = todo el torneo')}
+</div>
+<div class="field">
+  <label><input type="checkbox" name="showAdvanced" ${rules.showAdvanced ? 'checked' : ''}> Fair play y valla menos vencida</label>
+  <p class="hint">Muestra la columna FP y los líderes de fair play y valla en la página de Posiciones</p>
 </div>`;
 }
 

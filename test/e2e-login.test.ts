@@ -505,3 +505,62 @@ describe.skipIf(!has)('e2e: generar fixture no pisa los jugados', () => {
     expect(publicHtml).toContain('3 - 1');
   });
 });
+
+describe.skipIf(!has)('e2e: fair play y valla en posiciones', () => {
+  const form = (extra: Record<string, string> = {}) => ({
+    name: 'Copa E2E',
+    season: '2026',
+    format: 'round_robin',
+    status: 'active',
+    venues: 'Cancha Norte\nCancha Sur',
+    kickoffs: '10:00, 12:00',
+    start_date: '2026-10-05',
+    round_gap: '7',
+    play_weekday: '6',
+    ...extra,
+  });
+
+  it('columna FP y líderes con tarjetas reales; se ocultan con la regla apagada', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Enciendo la regla (los POSTs de otros tests no mandan el checkbox).
+    expect((await admin.post(`/admin/torneos/${tournamentId}`, form({ showAdvanced: 'on' }))).status).toBe(302);
+
+    try {
+      // Tarjeta real: jugador nuevo y una amarilla en el partido aprobado.
+      const add = await admin.post('/admin/jugadores', {
+        team_id: teamId,
+        name: 'Cardado E2E',
+        number: '5',
+        position: 'DF',
+      });
+      expect(add.status).toBe(302);
+      const roster = await (await admin.get(`/admin/jugadores?team=${teamId}`)).text();
+      const playerId = /\/admin\/jugadores\/(\d+)\/eliminar/.exec(roster)?.[1] ?? '';
+      expect(playerId, 'el jugador debe figurar en la plantilla').toBeTruthy();
+      const ev = await admin.post(`/admin/planilla/${matchId}/evento`, {
+        team_id: teamId,
+        player_id: playerId,
+        type: 'yellow',
+      });
+      expect(ev.status).toBe(302);
+
+      // Posiciones con la regla activa: columna FP + líderes de valla y fair play.
+      const pos = await (await fetch(`${BASE}/posiciones`)).text();
+      expect(pos).toContain('>FP<');
+      expect(pos).toContain('1 amarilla(s), 0 roja(s)'); // el desglose del equipo
+      expect(pos).toContain('Valla menos vencida');
+      expect(pos).toContain('Fair Play:');
+
+      // Apago la regla: la columna y los líderes desaparecen.
+      expect((await admin.post(`/admin/torneos/${tournamentId}`, form())).status).toBe(302);
+      const off = await (await fetch(`${BASE}/posiciones`)).text();
+      expect(off).not.toContain('>FP<');
+      expect(off).not.toContain('Valla menos vencida');
+    } finally {
+      // Dejo la regla activa para lo que siga.
+      await admin.post(`/admin/torneos/${tournamentId}`, form({ showAdvanced: 'on' }));
+    }
+  });
+});

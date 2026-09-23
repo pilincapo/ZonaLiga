@@ -141,6 +141,7 @@ function readRules(f: Record<string, unknown>) {
     yellowAccumulation: num('yellowAccumulation', 0),
     yellowAccumWindow: num('yellowAccumWindow', 0),
     redSuspensionMatches: num('redSuspensionMatches', 1),
+    showAdvanced: f['showAdvanced'] === 'on',
     bonusRules: [],
   };
 }

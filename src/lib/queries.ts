@@ -129,6 +129,26 @@ export interface CardsRow {
   reds: number;
 }
 
+/** Tarjetas por evento (equipo + tipo) para la tabla de fair play. */
+export interface TeamCardRow {
+  team_id: number;
+  type: string;
+}
+
+export async function teamCards(db: D1Database, tournamentId: number): Promise<TeamCardRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT pl.team_id, e.type
+       FROM events e
+       JOIN matches m ON m.id = e.match_id
+       JOIN players pl ON pl.id = e.player_id
+       WHERE m.tournament_id = ?1 AND e.type IN ('yellow', 'red')`
+    )
+    .bind(tournamentId)
+    .all<TeamCardRow>();
+  return results ?? [];
+}
+
 export async function topCards(db: D1Database, tournamentId: number, limit = 25): Promise<CardsRow[]> {
   const { results } = await db
     .prepare(

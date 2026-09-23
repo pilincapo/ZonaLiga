@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeResult, DEFAULT_RULES, parseRules } from '../src/lib/types.ts';
 import type { Match } from '../src/lib/types.ts';
-import { computeStandings, type PointAdjustment } from '../src/lib/standings.ts';
+import { computeStandings, computeFairPlay, computeValla, FAIR_PLAY, type PointAdjustment } from '../src/lib/standings.ts';
 
 function mkMatch(partial: Partial<Match>): Match {
   return {
@@ -82,6 +82,12 @@ describe('parseRules', () => {
     expect(r.win).toBe(2);
     expect(r.draw).toBe(1);
     expect(r.yellowAccumulation).toBe(3);
+  });
+
+  it('showAdvanced: activo por defecto, apagable explícitamente', () => {
+    expect(parseRules('{}').showAdvanced).toBe(true);
+    expect(DEFAULT_RULES.showAdvanced).toBe(true);
+    expect(parseRules('{"showAdvanced":false}').showAdvanced).toBe(false);
   });
 });
 
@@ -181,5 +187,90 @@ describe('ajustes manuales de puntos', () => {
   it('ignora ajustes de equipos que no están en la tabla', () => {
     const table = computeStandings(matches, twoTeams, DEFAULT_RULES, [{ teamId: 999, delta: -5, reason: 'fantasma' }]);
     expect(table).toEqual(computeStandings(matches, twoTeams, DEFAULT_RULES));
+  });
+});
+
+describe('computeFairPlay', () => {
+  const teams = [
+    { id: 1, name: 'Azul' },
+    { id: 2, name: 'Rojo' },
+    { id: 3, name: 'Verde' },
+  ];
+
+  it('amarilla = 1, roja = 3 y ordena de menor a mayor puntaje', () => {
+    const fp = computeFairPlay(
+      [
+        { teamId: 1, type: 'yellow' },
+        { teamId: 1, type: 'yellow' }, // 2 pts
+        { teamId: 2, type: 'red' }, // 3 pts
+        { teamId: 3, type: 'yellow' }, // 1 pt
+      ],
+      teams
+    );
+    expect(fp.map((r) => r.teamId)).toEqual([3, 1, 2]); // Verde(1) < Azul(2) < Rojo(3)
+    expect(fp[0]!.points).toBe(FAIR_PLAY.yellow);
+    expect(fp[2]!.points).toBe(FAIR_PLAY.red);
+    expect(fp[2]!.reds).toBe(1);
+  });
+
+  it('descarta tipos que no son tarjetas y equipos fantasma', () => {
+    const fp = computeFairPlay(
+      [{ teamId: 99, type: 'yellow' }, { teamId: 1, type: 'goal' }],
+      teams
+    );
+    expect(fp).toHaveLength(3); // todos los equipos, con 0 pts
+    expect(fp.every((r) => r.points === 0)).toBe(true);
+  });
+
+  it('empate de puntos: gana el que menos rojas tiene; después alfabético', () => {
+    // Azul: 3 amarillas = 3 pts · Rojo: 1 roja = 3 pts
+    const byCards = computeFairPlay(
+      [
+        { teamId: 1, type: 'yellow' },
+        { teamId: 1, type: 'yellow' },
+        { teamId: 1, type: 'yellow' },
+        { teamId: 2, type: 'red' },
+      ],
+      teams
+    );
+    // Verde(0) < Azul(3 pts, 0 rojas) < Rojo(3 pts, 1 roja)
+    expect(byCards.map((r) => r.teamId)).toEqual([3, 1, 2]);
+    // Sin tarjetas, todos empatan en 0: orden alfabético
+    const byName = computeFairPlay([], teams);
+    expect(byName.map((r) => r.teamId)).toEqual([1, 2, 3]); // Azul, Rojo, Verde
+  });
+});
+
+describe('computeValla', () => {
+  const teams = [
+    { id: 1, name: 'Azul' },
+    { id: 2, name: 'Rojo' },
+    { id: 3, name: 'Verde' },
+  ];
+
+  it('solo equipos que jugaron, de menor a mayor goles en contra', () => {
+    const valla = computeValla(
+      [
+        { teamId: 1, played: 2, goalsAgainst: 3 },
+        { teamId: 2, played: 2, goalsAgainst: 1 },
+        { teamId: 3, played: 0, goalsAgainst: 0 }, // sin partidos: fuera
+      ],
+      teams
+    );
+    expect(valla.map((r) => r.teamId)).toEqual([2, 1]);
+    expect(valla[0]!.gc).toBe(1);
+  });
+
+  it('empate de goles: quien jugó más; después alfabético', () => {
+    const valla = computeValla(
+      [
+        { teamId: 1, played: 1, goalsAgainst: 2 },
+        { teamId: 2, played: 3, goalsAgainst: 2 },
+        { teamId: 3, played: 3, goalsAgainst: 2 },
+      ],
+      teams
+    );
+    // Rojo y Verde empatan con 3 partidos → Azul (1 partido) queda último
+    expect(valla.map((r) => r.teamId)).toEqual([2, 3, 1]);
   });
 });
