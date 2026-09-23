@@ -31,6 +31,7 @@ import {
 } from '../lib/queries.ts';
 import { searchPlayers, searchTeams, searchTournaments } from '../lib/search.ts';
 import { rulesOf } from '../lib/rules.ts';
+import { adjustmentsForTournament } from '../lib/adjustments.ts';
 import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow } from './match.ts';
 import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
@@ -400,9 +401,23 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
     })
     .join('');
 
+  const adjustments = await adjustmentsForTournament(db, t.id);
+  const adjustmentsNote = adjustments.length
+    ? `<section class="block"><div class="card"><div class="card-body">
+  <strong class="uppercase">Ajustes de puntos</strong>
+  <ul class="hint" style="margin:8px 0 0 18px">${adjustments
+    .map(
+      (a) =>
+        `<li>${esc(a.team_name)}: <strong>${a.delta > 0 ? '+' : ''}${a.delta}</strong> pt(s) — ${esc(a.reason)}${a.created_at ? ` <span class="faint">(${formatDateShort(a.created_at.slice(0, 10))})</span>` : ''}</li>`
+    )
+    .join('')}</ul>
+</div></div></section>`
+    : '';
+
   const body = `
 <section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Posiciones</h1></section>
-${tables || emptyNote('Sin datos todavía')}`;
+${tables || emptyNote('Sin datos todavía')}
+${adjustmentsNote}`;
   return layout({ title: `Posiciones — ${t.name}`, active: 'posiciones', nav: PUBLIC_NAV, body });
 }
 
@@ -689,12 +704,17 @@ export async function historyPage(db: D1Database): Promise<string> {
 
     let champion = '';
     if (t.status === 'finished') {
+      const adjustments = await adjustmentsForTournament(db, t.id);
+      const adj = adjustments.reduce((acc, a) => acc + a.delta, 0);
       const standings = computeStandings(
         matches,
         teams.map((tm) => ({ id: tm.id, name: tm.name })),
         rulesOf(t)
       );
       champion = standings[0] ? `<div class="mt-2">🏆 <strong>Campeón:</strong> ${esc(teamMap.get(standings[0].teamId)?.name ?? '')}</div>` : '';
+      if (adj !== 0) {
+        champion += `<div class="muted small">Incluye ${adj > 0 ? '+' : ''}${adj} pt(s) de ajustes manuales</div>`;
+      }
     }
 
     cards.push(`<div class="card">

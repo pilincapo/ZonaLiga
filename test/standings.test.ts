@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeResult, DEFAULT_RULES, parseRules } from '../src/lib/types.ts';
 import type { Match } from '../src/lib/types.ts';
-import { computeStandings } from '../src/lib/standings.ts';
+import { computeStandings, type PointAdjustment } from '../src/lib/standings.ts';
 
 function mkMatch(partial: Partial<Match>): Match {
   return {
@@ -132,5 +132,54 @@ describe('computeStandings', () => {
     const table = computeStandings(matches, teams.slice(0, 2), { ...DEFAULT_RULES, walkoverGoals: 3 });
     expect(table[0]!.teamId).toBe(2);
     expect(table[0]!.goalsFor).toBe(3);
+  });
+});
+
+describe('ajustes manuales de puntos', () => {
+  const teams = [
+    { id: 1, name: 'Almendro' },
+    { id: 2, name: 'Pampa' },
+  ];
+  const matches = [mkMatch({ status: 'played', home_team_id: 1, away_team_id: 2, home_goals: 2, away_goals: 0 })];
+  const twoTeams = teams.slice(0, 2);
+
+  it('una penalización fuerte cambia el orden', () => {
+    // Equipo 1 ganó (3 pts). Con -4 queda en -1 y pasa al último lugar.
+    const table = computeStandings(matches, twoTeams, DEFAULT_RULES, [{ teamId: 1, delta: -4, reason: 'Inclusión de jugador no habilitado' }]);
+    expect(table[0]!.teamId).toBe(2);
+    expect(table[1]!.points).toBe(-1);
+  });
+
+  it('empate en puntos tras penalizar: decide la diferencia de gol', () => {
+    // Con -3 ambos quedan en 0; el equipo 1 sigue primero por +2 de diff.
+    const table = computeStandings(matches, twoTeams, DEFAULT_RULES, [{ teamId: 1, delta: -3, reason: 'x' }]);
+    expect(table[0]!.teamId).toBe(1);
+    expect(table[1]!.points).toBe(0);
+  });
+
+  it('los ajustes no tocan PJ, goles ni diferencia', () => {
+    const table = computeStandings(matches, twoTeams, DEFAULT_RULES, [{ teamId: 1, delta: -1, reason: 'x' }]);
+    const first = table.find((r) => r.teamId === 1)!;
+    expect(first.played).toBe(1);
+    expect(first.goalsFor).toBe(2);
+    expect(first.goalsAgainst).toBe(0);
+    expect(first.points).toBe(2); // 3 - 1
+  });
+
+  it('acumula varios ajustes del mismo equipo', () => {
+    const table = computeStandings(matches, twoTeams, DEFAULT_RULES, [
+      { teamId: 1, delta: -3, reason: 'Penalización' },
+      { teamId: 1, delta: 1, reason: 'Corrección por planilla' },
+    ]);
+    expect(table.find((r) => r.teamId === 1)!.points).toBe(1);
+  });
+
+  it('sin ajustes el resultado es idéntico al de siempre', () => {
+    expect(computeStandings(matches, twoTeams, DEFAULT_RULES, [])).toEqual(computeStandings(matches, twoTeams, DEFAULT_RULES));
+  });
+
+  it('ignora ajustes de equipos que no están en la tabla', () => {
+    const table = computeStandings(matches, twoTeams, DEFAULT_RULES, [{ teamId: 999, delta: -5, reason: 'fantasma' }]);
+    expect(table).toEqual(computeStandings(matches, twoTeams, DEFAULT_RULES));
   });
 });

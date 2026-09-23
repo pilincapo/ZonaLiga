@@ -245,7 +245,7 @@ delegran el armado de HTML en `src/ui/`; la lógica de dominio vive en
 ┌───────────────────────────▼───────────────────────────────────┐
 │ lib/tournamentView  torneo+partidos+equipos armados, 1 llamada │
 │ lib/queries  SQL transversal     lib/submissions  entregas     │
-│ lib/search   /buscar             lib/rules  reglas del torneo  │
+│ lib/search   /buscar    lib/rules  reglas   lib/adjustments    │
 │ lib/standings · suspensions · fixture · bracket · live ·      │
 │ lib/delegates · share                     (dominio puro)       │
 │ lib/auth (tokens+cookies HMAC) · html · format · slug  (base)  │
@@ -263,9 +263,11 @@ delegran el armado de HTML en `src/ui/`; la lógica de dominio vive en
 | `lib/submissions` | Consultas del cluster de entregas: `pendingSubmissions`, `submissionEvents`, `matchesForTeam`, `getTeamByDelegateCode`… | routes/admin, routes/delegate, ui/admin, ui/adminEntregas, ui/delegate, ui/live |
 | `lib/search` | `searchTeams`, `searchPlayers`, `searchTournaments` | ui/public (`/buscar`) |
 | `lib/rules` | `rulesOf(t)` | ui/public, ui/admin |
+| `lib/adjustments` | Ajustes de puntos: `parseAdjustment` (validación), `adjustmentsForTournament`, `insertAdjustment`, `deleteAdjustment` | routes/admin, ui/adminAjustes, ui/public |
 | `lib/auth` | Sesión admin y delegado: `createSessionToken`, `verifySessionToken`, `createDelegateToken`, `verifyDelegateToken`, cookies, `hashPassword`, `safeEqual`, `sessionSecret` | routes/admin, routes/delegate, test/auth-bracket |
 | `lib/delegates` | Negocio de entregas: `parseSubmission`, `parseEvent`, `canSubmitFor`, `generateDelegateCode`, labels | routes/*, ui/admin, ui/adminEntregas, ui/delegate, lib/submissions |
-| `lib/standings` | `computeStandings`, `groupBy` | ui/public |
+| `lib/standings` | `computeStandings` (acepta ajustes de puntos), `groupBy` | ui/public |
+| `ui/adminAjustes` | `adjustmentsAdminPage`: form de ajuste con motivo, historial con borrado | routes/admin |
 | `lib/suspensions` | `computeSuspensions` | ui/public, ui/admin |
 | `lib/fixture` | Generador round-robin (`generateRoundRobin`, `generateDoubleRoundRobin`) | routes/admin, ui/admin |
 | `lib/bracket` | `buildBracketColumns`, `matchShortLabel`, `sourceLabel`, labels | ui/public, ui/match, ui/admin, ui/adminEntregas, ui/delegate |
@@ -278,8 +280,8 @@ delegran el armado de HTML en `src/ui/`; la lógica de dominio vive en
 
 ### Reglas de diseño que mantiene el grafo
 
-- **Dominio puro**: `standings`, `suspensions`, `fixture`, `bracket`, `live` y
-  `rules` no tocan la base; sus tests corren sin D1.
+- **Dominio puro**: `standings`, `suspensions`, `fixture`, `bracket`, `live`,
+  `rules` y la validación de `adjustments` no tocan la base; sus tests corren sin D1.
 - **Las consultas viven junto a su feature**: el SQL de entregas está en
   `lib/submissions` (su único consumidor es el mundo delegados) y el de
   búsqueda en `lib/search` (solo `/buscar`). `queries` queda con lo
@@ -294,7 +296,7 @@ delegran el armado de HTML en `src/ui/`; la lógica de dominio vive en
 ### Estructura de archivos
 
 ```
-migrations/          Esquema D1 (0001_init, 0002_delegados)
+migrations/          Esquema D1 (0001_init, 0002_delegados, 0003_ajustes)
 seed.sql             Torneo de ejemplo (ficticio)
 src/index.ts         Rutas públicas, /changelog y /api/vivo
 src/routes/          Sesiones y autorización: admin.ts y delegate.ts

@@ -188,3 +188,44 @@ describe.skipIf(!has)('e2e: sesión delegado end-to-end', () => {
     expect(publicHtml).toContain('3 - 1');
   });
 });
+
+describe.skipIf(!has)('e2e: ajustes manuales de puntos', () => {
+  it('flujo completo: sin motivo rechaza, aplica penalización, publica el motivo y borra', async () => {
+    const admin = client();
+    const login = await admin.loginAdmin(ADMIN_PASSWORD);
+    expect(login.status).toBe(302);
+
+    // Sin motivo → redirect de error, nada creado.
+    const noReason = await admin.post('/admin/ajustes', { team_id: teamId, delta: '-3', reason: '' });
+    expect(noReason.status).toBe(302);
+    expect(decodeURIComponent(noReason.headers.get('location') ?? '')).toContain('Documentá el motivo');
+
+    // Penalización de -3 con motivo.
+    const apply = await admin.post('/admin/ajustes', {
+      team_id: teamId,
+      delta: '-3',
+      reason: 'Sanción del comité de disciplina',
+    });
+    expect(apply.status).toBe(302);
+
+    // Aparece en el historial del panel.
+    const panel = await (await admin.get('/admin/ajustes')).text();
+    expect(panel).toContain('Sanción del comité de disciplina');
+
+    // El sitio público documenta el motivo junto a la tabla.
+    const standingsHtml = await (await fetch(`${BASE}/posiciones`)).text();
+    expect(standingsHtml).toContain('Ajustes de puntos');
+    expect(standingsHtml).toContain('Sanción del comité de disciplina');
+    expect(standingsHtml).toContain('-3');
+
+    // Borrar → el historial queda vacío y el aviso desaparece del sitio.
+    const adjId = /\/admin\/ajustes\/(\d+)\/borrar/.exec(panel)?.[1] ?? '';
+    expect(adjId, 'el historial debe exponer el botón de borrado').toBeTruthy();
+    const del = await admin.post(`/admin/ajustes/${adjId}/borrar`, {});
+    expect(del.status).toBe(302);
+    const after = await (await admin.get('/admin/ajustes')).text();
+    expect(after).not.toContain('Sanción del comité de disciplina');
+    const publicAfter = await (await fetch(`${BASE}/posiciones`)).text();
+    expect(publicAfter).not.toContain('Ajustes de puntos');
+  });
+});

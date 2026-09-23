@@ -1,13 +1,24 @@
 // Cálculo de posiciones: acumula resultados computados y ordena
 // con tiebreakers PTS > DIF > GF > head-to-head > orden alfabético.
+// Los ajustes manuales de puntos (penalizaciones y correcciones) se suman
+// después del ordenamiento NO: se suman a los puntos ANTES de ordenar, para
+// que la penalización afecte la posición.
 
 import { computeResult } from './types.ts';
 import type { Match, Rules, StandingRow } from './types.ts';
 
+/** Ajuste manual de puntos: delta (puede ser negativo) y motivo. */
+export interface PointAdjustment {
+  teamId: number;
+  delta: number;
+  reason: string;
+}
+
 export function computeStandings(
   matches: Match[],
   teams: { id: number; name: string }[],
-  rules: Rules
+  rules: Rules,
+  adjustments: PointAdjustment[] = []
 ): StandingRow[] {
   const rows = new Map<number, StandingRow>();
   for (const t of teams) {
@@ -39,6 +50,12 @@ export function computeStandings(
     }
     home.points += r.homePoints;
     away.points += r.awayPoints;
+  }
+
+  // Ajustes manuales: cambian puntos (y por ende el orden), nunca PJ ni goles.
+  for (const adj of adjustments) {
+    const row = rows.get(adj.teamId);
+    if (row) row.points += adj.delta;
   }
 
   const out: StandingRow[] = [];

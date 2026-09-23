@@ -40,6 +40,7 @@ export const ADMIN_NAV: NavItem[] = [
   { href: '/admin/fixture', label: 'Fixture', match: 'fixture' },
   { href: '/admin/planilla', label: 'Planilla', match: 'planilla' },
   { href: '/admin/entregas', label: 'Entregas', match: 'entregas' },
+  { href: '/admin/ajustes', label: 'Puntos', match: 'ajustes' },
   { href: '/admin/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
 ];
 

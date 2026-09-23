@@ -16,14 +16,22 @@ import { slugify } from '../lib/slug.ts';
 import type { MatchStatus } from '../lib/types.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
 import { roundSlots, scheduleFromForm, scheduleOf } from '../lib/schedule.ts';
+import { resolveTournament } from '../lib/tournamentView.ts';
 import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
+import { deleteAdjustment, insertAdjustment, parseAdjustment } from '../lib/adjustments.ts';
+import { adjustmentsAdminPage } from '../ui/adminAjustes.ts';
 import * as admin from '../ui/admin.ts';
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
 
 export async function isAdmin(c: any): Promise<boolean> {
   return verifySessionToken(getSessionCookie(c.req.raw), sessionSecret(c.env));
+}
+
+/** Torneo del selector de Ajustes (por slug, o el activo). */
+async function resolveTournamentForAdjustment(db: D1Database, slug?: string) {
+  return resolveTournament(db, slug);
 }
 
 adminRoutes.use('*', async (c, next) => {
@@ -497,6 +505,37 @@ adminRoutes.post('/planilla/:id/evento/eliminar', async (c) => {
   const f = await c.req.parseBody();
   await c.env.DB.prepare('DELETE FROM events WHERE id = ?1').bind(Number(f['event_id'])).run();
   return c.redirect(`/admin/planilla/${id}`);
+});
+
+/* ---------- Ajustes de puntos ---------- */
+
+/** URL de vuelta al panel de Ajustes con flash; respeta el ?t= del selector. */
+function adjustmentRedirect(slug: string | undefined, key: 'msg' | 'err', text: string): string {
+  const base = slug ? `/admin/ajustes?t=${encodeURIComponent(slug)}` : '/admin/ajustes';
+  return `${base}${slug ? '&' : '?'}${key}=${encodeURIComponent(text)}`;
+}
+
+adminRoutes.get('/ajustes', async (c) => {
+  return c.html(await adjustmentsAdminPage(c.env.DB, c.req.query('t')));
+});
+
+adminRoutes.post('/ajustes', async (c) => {
+  const slug = c.req.query('t');
+  const parsed = parseAdjustment(await c.req.parseBody());
+  if (!parsed.ok) {
+    return c.redirect(adjustmentRedirect(slug, 'err', parsed.error ?? 'Datos inválidos'));
+  }
+  const t = await resolveTournamentForAdjustment(c.env.DB, slug);
+  if (!t) return c.redirect(adjustmentRedirect(slug, 'err', 'Torneo inexistente'));
+  await insertAdjustment(c.env.DB, t.id, parsed.value!);
+  const sign = parsed.value!.delta > 0 ? `+${parsed.value!.delta}` : String(parsed.value!.delta);
+  return c.redirect(adjustmentRedirect(slug, 'msg', `Ajuste de ${sign} puntos aplicado y documentado`));
+});
+
+adminRoutes.post('/ajustes/:id/borrar', async (c) => {
+  const slug = c.req.query('t');
+  await deleteAdjustment(c.env.DB, Number(c.req.param('id')));
+  return c.redirect(adjustmentRedirect(slug, 'msg', 'Ajuste eliminado'));
 });
 
 /* ---------- Suspensiones ---------- */
