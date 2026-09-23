@@ -33,3 +33,6 @@ jobs:
 
       - name: Tests
         run: npm test
+
+      - name: Test E2E de login (wrangler dev + D1 local)
+        run: npm run test:e2e
