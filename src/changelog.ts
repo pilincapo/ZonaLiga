@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.15';
+export const APP_VERSION = '0.2.16';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,18 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.16',
+    date: '2026-09-23',
+    title: 'Zonas manuales con canchas compartidas',
+    items: [
+      { kind: 'nuevo', text: 'En el torneo podés activar la división en zonas: les ponés nombre (A, B, Norte, Sur…) y asignás cada equipo a su zona desde la configuración.' },
+      { kind: 'nuevo', text: 'Al generar el fixture, cada zona arma su calendario interno (los cruces nunca salen de la zona) y las canchas se comparten entre zonas: los partidos de la fecha se intercalan en la misma lista de canchas y horarios (10:00 A, 10:00 B, 11:00 A…).' },
+      { kind: 'nuevo', text: 'La tabla de posiciones se muestra agrupada por zona automáticamente.' },
+      { kind: 'mejora', text: 'La validación avisa si falta asignar zona a un equipo, si hay un equipo en dos zonas o si las zonas quedaron desbalanceadas.' },
+      { kind: 'mejora', text: 'Regenerar cruces a mitad de torneo respeta las zonas: los partidos pendientes se rearman solo entre equipos de la misma zona y comparten las canchas del día sin duplicar horario.' },
+    ],
+  },
   {
     version: '0.2.15',
     date: '2026-09-23',

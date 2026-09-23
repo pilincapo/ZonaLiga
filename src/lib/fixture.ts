@@ -1,9 +1,11 @@
 // Generador de fixture round-robin (algoritmo del círculo).
 // Devuelve jornadas con pares [homeId, awayId]; con impar, cada jornada tiene un "libre".
-// También regenera cruces a mitad de torneo conservando lo jugado.
+// También regenera cruces a mitad de torneo conservando lo jugado y arma
+// fixtures por zonas con canchas compartidas e intercaladas entre zonas.
 
 import type { Match } from './types.ts';
-import { plannedRoundDate, roundSlots, type TournamentSchedule } from './schedule.ts';
+import { plannedRoundDate, roundSlots, scheduleCapacity, type TournamentSchedule } from './schedule.ts';
+import type { ZoneConfig } from './zones.ts';
 
 export interface RoundPair {
   home: number;
@@ -81,6 +83,85 @@ export function shuffled<T>(list: T[], rng: () => number = Math.random): T[] {
   return out;
 }
 
+/* ========== Fixture por zonas con canchas compartidas ========== */
+
+export interface ZonedMatch {
+  zone: string;
+  round: number;
+  home: number;
+  away: number;
+  kickoff_time: string;
+  venue: string;
+}
+
+export interface ZonedFixture {
+  /** Máximo de fechas entre las zonas (una zona de 6 termina antes que una de 10). */
+  rounds: number;
+  /** Fecha r => partidos de todas las zonas esa fecha, con su zona marcada. */
+  byRound: ZonedMatch[][];
+  /** Fechas donde alguna zona libra. */
+  byes: { zone: string; round: number; teamId: number }[];
+}
+
+/**
+ * Round-robin por zona: cada zona genera su calendario interno y las fechas
+ * de todas las zonas se superponen por índice (fecha 1 de la A con la 1 de
+ * la B). Mantiene todos los cruces dentro de la zona.
+ */
+export function buildZonedFixture(zones: ZoneConfig): ZonedFixture {
+  const withTeams = zones.zones.filter((z) => z.teamIds.length >= 2);
+  const calendars = withTeams.map((z) => ({
+    zone: z.name,
+    fixture: generateRoundRobin(z.teamIds),
+  }));
+  const rounds = calendars.reduce((mx, c) => Math.max(mx, c.fixture.rounds.length), 0);
+  const byRound: ZonedMatch[][] = Array.from({ length: rounds }, () => []);
+  const byes: { zone: string; round: number; teamId: number }[] = [];
+  for (const { zone, fixture } of calendars) {
+    for (const [i, pairs] of fixture.rounds.entries()) {
+      for (const p of pairs) {
+        byRound[i]!.push({ zone, round: i + 1, home: p.home, away: p.away, kickoff_time: '', venue: '' });
+      }
+    }
+    for (const [i, teamId] of fixture.byes.entries()) {
+      if (teamId > 0) byes.push({ zone, round: i + 1, teamId });
+    }
+  }
+  return { rounds, byRound, byes };
+}
+
+/** ZonedFixture con la forma GeneratedFixture (para reutilizarlo en regeneración). */
+function zonedGeneratedFixture(zf: ZonedFixture, double: boolean): GeneratedFixture {
+  const toPairs = (ms: ZonedMatch[]): RoundPair[] => ms.map((m) => ({ home: m.home, away: m.away }));
+  const first = zf.byRound.map(toPairs);
+  const rounds = double ? [...first, ...first.map((pairs) => pairs.map((p) => ({ home: p.away, away: p.home })))] : first;
+  const byes = zf.byes.map((b) => b.teamId);
+  if (double) for (let i = 0; i < first.length; i++) byes.push(byes[i] ?? -1);
+  return { rounds, byes };
+}
+
+/**
+ * Sloteo intercalado de una fecha: recorre una sola lista de slots (todas las
+ * canchas × todos los horarios) y la reparte entre los partidos de TODAS las
+ * zonas — no hay turnos por zona. Ejemplo 20 equipos / 2 zonas: fecha de 10
+ * partidos con 2 canchas → 10:00 A, 10:00 B, 11:00 A, 11:00 B…
+ */
+export function interleaveSlots(
+  matches: ZonedMatch[],
+  schedule: TournamentSchedule
+): void {
+  if (schedule.venues.length === 0 && schedule.kickoffs.length === 0) return;
+  const venues = schedule.venues.length ? schedule.venues : [''];
+  const kickoffs = schedule.kickoffs.length ? schedule.kickoffs : [''];
+  const catalog: { venue: string; kickoff: string }[] = [];
+  for (const kickoff of kickoffs) for (const venue of venues) catalog.push({ venue, kickoff });
+  matches.forEach((m, i) => {
+    const slot = catalog[i % catalog.length]!;
+    m.kickoff_time = slot.kickoff;
+    m.venue = slot.venue;
+  });
+}
+
 /* ========== Regeneración de cruces a mitad de torneo ========== */
 
 export type FixtureMode = 'single' | 'double';
@@ -95,6 +176,8 @@ export interface RegenInput {
   activeTeamIds: number[];
   mode: FixtureMode;
   schedule: TournamentSchedule;
+  /** Zonas del torneo (opcional; con zonas activas los nuevos se re-slotean compartiendo canchas). */
+  zones?: ZoneConfig;
 }
 
 export interface NewMatch {
@@ -129,7 +212,7 @@ function pairingKey(a: number, b: number): string {
  *   planificado; los slots evitan cancha+hora ocupadas ese día.
  */
 export function regeneratePairings(input: RegenInput): RegenPlan {
-  const { existing, activeTeamIds, mode, schedule } = input;
+  const { existing, activeTeamIds, mode, schedule, zones = { enabled: false, zones: [] } } = input;
   const allowed = mode === 'double' ? 2 : 1;
 
   const kept: Match[] = [];
@@ -155,8 +238,17 @@ export function regeneratePairings(input: RegenInput): RegenPlan {
     }
   }
 
-  const fresh =
+  // Con zonas activas, el fixture fresco es el de zonas: los cruces nuevos
+  // respetan la división (nadie cruza zonas) y las fechas de todas las zonas
+  // se superponen por índice. Sin zonas, el círculo de siempre.
+  const useZones = zones.enabled && zones.zones.length >= 2;
+  const plainFresh =
     mode === 'double' ? generateDoubleRoundRobin(activeTeamIds) : generateRoundRobin(activeTeamIds);
+  const fresh: GeneratedFixture = useZones
+    ? zonedGeneratedFixture(buildZonedFixture(zones), mode === 'double')
+    : plainFresh;
+  const zoneOfTeam = new Map<number, string>();
+  if (useZones) for (const z of zones.zones) for (const id of z.teamIds) zoneOfTeam.set(id, z.name);
   const maxRound = Math.max(
     existing.reduce((mx, m) => Math.max(mx, m.round ?? 0), 0),
     fresh.rounds.length
@@ -200,6 +292,8 @@ export function regeneratePairings(input: RegenInput): RegenPlan {
       let bestCount = Infinity;
       for (let j = i + 1; j < free.length; j++) {
         if (used.has(j)) continue;
+        // Con zonas: solo se emparejan equipos de la misma zona.
+        if (useZones && zoneOfTeam.get(free[i]!) !== zoneOfTeam.get(free[j]!)) continue;
         const cnt = counts.get(pairingKey(free[i]!, free[j]!)) ?? 0;
         if (cnt < allowed && cnt < bestCount) {
           best = j;
@@ -251,6 +345,48 @@ export function regeneratePairings(input: RegenInput): RegenPlan {
         kickoff_time: slot.kickoff,
         venue: slot.venue,
       });
+    }
+  }
+
+  // Canchas y horarios compartidos entre zonas: los pendientes nuevos de cada
+  // día se re-slotean en una sola lista (todas las canchas × horarios), sin
+  // mirar de qué zona vienen — así las zonas intercalan canchas y nunca
+  // duplican horario en la misma cancha. Lo jugado queda reservado; si algo
+  // no entra, la verificación lo reporta.
+  if (zones.enabled && zones.zones.length >= 2) {
+    const takenByDay = new Map<string, Set<string>>();
+    for (const m of kept) {
+      if (!m.played_on || !m.kickoff_time || !m.venue) continue;
+      const set = takenByDay.get(m.played_on);
+      if (set) set.add(`${m.kickoff_time}|${m.venue}`);
+      else takenByDay.set(m.played_on, new Set([`${m.kickoff_time}|${m.venue}`]));
+    }
+    const catalog = roundSlots(scheduleCapacity(schedule), schedule);
+    const byDay = new Map<string, NewMatch[]>();
+    for (const m of create) {
+      if (catalog.length === 0) break;
+      const arr = byDay.get(m.played_on);
+      if (arr) arr.push(m);
+      else byDay.set(m.played_on, [m]);
+    }
+    for (const [day, list] of byDay) {
+      // Sin calendario (played_on vacío) no hay día real que compartan:
+      // queda el sloteo por jornada de antes.
+      if (!day) continue;
+      const taken = new Set(takenByDay.get(day) ?? []);
+      let cursor = 0;
+      for (const m of list) {
+        let slot = catalog[cursor % catalog.length]!;
+        cursor += 1;
+        for (let tries = 0; tries < catalog.length; tries++) {
+          if (!taken.has(`${slot.kickoff}|${slot.venue}`)) break;
+          slot = catalog[cursor % catalog.length]!;
+          cursor += 1;
+        }
+        taken.add(`${slot.kickoff}|${slot.venue}`);
+        m.kickoff_time = slot.kickoff;
+        m.venue = slot.venue;
+      }
     }
   }
 

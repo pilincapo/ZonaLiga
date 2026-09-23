@@ -1199,3 +1199,8 @@ html[data-theme='dark'] .theme-toggle .ico-moon { display: none; }
   .live-banner { flex-wrap: wrap; }
   .live-banner-cta { margin-left: 22px; }
 }
+
+/* Zonas del torneo (form de configuración) */
+.zones-table select { min-width: 9rem; }
+.zones-table td { vertical-align: middle; }
+#zones-config .table-wrap { margin-top: 10px; }

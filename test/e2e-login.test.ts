@@ -506,6 +506,54 @@ describe.skipIf(!has)('e2e: generar fixture no pisa los jugados', () => {
   });
 });
 
+describe.skipIf(!has)('e2e: zonas manuales con canchas compartidas', () => {
+  it('torneo propio con 2 zonas: generar marca la zona y posiciones agrupa', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Torneo nuevo con zonas activadas en el mismo form de creación.
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const allIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!);
+    const form: Record<string, string> = {
+      name: 'Copa Zonas E2E',
+      season: '2026',
+      format: 'round_robin',
+      // draft: no compite por el default de /posiciones (tests de fair play).
+      status: 'draft',
+      venues: 'Cancha Norte\nCancha Sur',
+      kickoffs: '10:00, 12:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      play_weekday: '6',
+      zones_enabled: 'on',
+      zone_names: 'Zona E2E A\nZona E2E B',
+    };
+    allIds.forEach((id, i) => {
+      form[`zone_of_${id}`] = i % 2 === 0 ? '1' : '2';
+    });
+    const create = await admin.post('/admin/torneos', form);
+    expect(create.status).toBe(302);
+
+    // El id del torneo nuevo sale del form de generación del fixture.
+    const fxPage = await (await admin.get('/admin/fixture?t=copa-zonas-e2e')).text();
+    const zonasId = /name="tournament_id" value="(\d+)"/.exec(fxPage)?.[1] ?? '';
+    expect(zonasId, 'el torneo de zonas debe existir').toBeTruthy();
+
+    // Generar: con zonas activas no hay cruces entre zonas y la zona queda en el partido.
+    const gen = await admin.post('/admin/fixture/generar', { tournament_id: zonasId, mode: 'single' });
+    const genLoc = decodeURIComponent(gen.headers.get('location') ?? '');
+    expect(genLoc).not.toContain('err=');
+    const fixtureHtml = await (await admin.get('/admin/fixture?t=copa-zonas-e2e')).text();
+    expect(fixtureHtml).toContain('Zona E2E A');
+    expect(fixtureHtml).toContain('Zona E2E B');
+
+    // Posiciones públicas agrupan por zona.
+    const pub = await (await admin.get('/posiciones?t=copa-zonas-e2e')).text();
+    expect(pub).toContain('Zona E2E A');
+    expect(pub).toContain('Zona E2E B');
+  });
+});
+
 describe.skipIf(!has)('e2e: fair play y valla en posiciones', () => {
   const form = (extra: Record<string, string> = {}) => ({
     name: 'Copa E2E',

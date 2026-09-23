@@ -33,6 +33,7 @@ import {
 } from '../lib/submissions.ts';
 import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { rulesOf } from '../lib/rules.ts';
+import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
 import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
@@ -271,6 +272,21 @@ export async function tournamentFormPage(db: D1Database, id?: number, error?: st
   }
   const rules = t ? parseRules(t.config) : DEFAULT_RULES;
   const schedule = t ? scheduleOf(t.config) : EMPTY_SCHEDULE;
+  const zones = t ? zonesOf(t.config) : EMPTY_ZONES;
+  const activeTeams = (await listTeams(db, true)).filter((tm) => tm.active);
+  const zoneRows = activeTeams
+    .map((tm) => {
+      const zi = zones.zones.findIndex((z) => z.teamIds.includes(tm.id)) + 1;
+      const opts =
+        '<option value="">Sin zona</option>' +
+        zones.zones
+          .map(
+            (z, i) => `<option value="${i + 1}" ${zi === i + 1 ? 'selected' : ''}>${esc(z.name)}</option>`
+          )
+          .join('');
+      return `<tr><td>${esc(tm.name)}</td><td><select name="zone_of_${tm.id}" data-zone-select>${opts}</select></td></tr>`;
+    })
+    .join('');
   const isEdit = t != null;
   const body = `
 ${flash('error', error)}
@@ -303,6 +319,24 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
         <option value="copa" ${t?.format === 'copa' ? 'selected' : ''}>Copa eliminatoria</option>
       </select>
     </div>
+    <h3 class="zone-title">Zonas</h3>
+    <div class="field">
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="zones_enabled" name="zones_enabled" ${zones.enabled ? 'checked' : ''} style="width:auto">
+        Dividir en zonas manualmente
+      </label>
+      <p class="hint">Los equipos de una zona solo se cruzan entre sí. Las canchas y horarios son compartidos: los partidos de todas las zonas de una fecha se reparten intercalados en la misma lista de canchas (ej.: 10:00 Zona A, 10:00 Zona B, 11:00 Zona A…).</p>
+    </div>
+    <div id="zones-config">
+      <div class="field">
+        <label for="zone_names">Nombres de zonas (uno por línea, 2 a 8)</label>
+        <textarea id="zone_names" name="zone_names" rows="3" placeholder="A\nB">${esc(zones.zones.map((z) => z.name).join('\n'))}</textarea>
+      </div>
+      <div class="table-wrap"><table class="data zones-table">
+        <thead><tr><th>Equipo</th><th>Zona</th></tr></thead>
+        <tbody>${zoneRows || '<tr><td colspan="2" class="empty-note">Sin equipos activos todavía.</td></tr>'}</tbody>
+      </table></div>
+    </div>
     <h3 class="zone-title">Canchas y horarios</h3>
     ${scheduleFields(schedule)}
     <h3 class="zone-title">Reglas de puntuación y sanciones</h3>
@@ -310,6 +344,37 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
     <button class="btn btn-primary" type="submit">Guardar</button>
     <a class="btn btn-ghost" href="/admin/torneos">Cancelar</a>
   </form>
+  <script>
+  (function () {
+    var cb = document.getElementById('zones_enabled');
+    var box = document.getElementById('zones-config');
+    var ta = document.getElementById('zone_names');
+    if (!cb || !box) return;
+    function syncBox() { box.style.display = cb.checked ? '' : 'none'; }
+    cb.addEventListener('change', syncBox);
+    syncBox();
+    if (!ta) return;
+    var selects = Array.prototype.slice.call(document.querySelectorAll('select[data-zone-select]'));
+    function syncSelects() {
+      var names = ta.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 8);
+      selects.forEach(function (sel) {
+        var prev = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+        sel.innerHTML = '';
+        var none = document.createElement('option');
+        none.value = ''; none.textContent = 'Sin zona';
+        sel.appendChild(none);
+        names.forEach(function (n, i) {
+          var o = document.createElement('option');
+          o.value = String(i + 1); o.textContent = n;
+          sel.appendChild(o);
+          if (n === prev) sel.value = o.value;
+        });
+      });
+    }
+    ta.addEventListener('input', syncSelects);
+    syncSelects();
+  })();
+  </script>
 </div></div></section>`;
   return adminLayout({ title: isEdit ? 'Editar torneo' : 'Nuevo torneo', active: 'torneos', body });
 }

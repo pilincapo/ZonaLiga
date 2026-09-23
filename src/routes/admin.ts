@@ -25,6 +25,8 @@ import {
   isRegenerable,
   plannedRoundDate,
 } from '../lib/schedule.ts';
+import { zonesFromForm, zonesOf, validateZones } from '../lib/zones.ts';
+import { buildZonedFixture, interleaveSlots } from '../lib/fixture.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
 import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
@@ -96,7 +98,7 @@ adminRoutes.post('/torneos', async (c) => {
   const existing = await c.env.DB.prepare('SELECT id FROM tournaments WHERE slug = ?1').bind(slug).first();
   if (existing) slug = `${slug}-${Date.now().toString(36)}`;
   const rules = readRules(f);
-  const config = { ...rules, ...scheduleFromForm(f) };
+  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f) };
   await c.env.DB.prepare(
     'INSERT INTO tournaments (name, slug, season, format, config, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
   )
@@ -116,7 +118,7 @@ adminRoutes.post('/torneos/:id', async (c) => {
   const name = String(f['name'] ?? '').trim();
   if (!name) return c.html(await admin.tournamentFormPage(c.env.DB, id, 'El nombre es obligatorio'), 400);
   const rules = readRules(f);
-  const config = { ...rules, ...scheduleFromForm(f) };
+  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f) };
   await c.env.DB.prepare('UPDATE tournaments SET name = ?1, season = ?2, format = ?3, config = ?4, status = ?5 WHERE id = ?6')
     .bind(name, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'), id)
     .run();
@@ -396,33 +398,62 @@ adminRoutes.post('/fixture/generar', async (c) => {
   if (ids.length < 2) {
     return c.redirect('/admin/fixture?err=' + encodeURIComponent('Necesitás al menos 2 equipos activos'));
   }
-  const fixture =
-    mode === 'double' ? admin.generateDoubleRoundRobin(ids) : admin.generateRoundRobin(ids);
-
   // Canchas y horarios del torneo: cada partido de una jornada toma su slot
   // (primera hora en todas las canchas, después la siguiente hora, y así).
   const schedule = scheduleOf(tRow.config ?? '{}');
+  const zones = zonesOf(tRow.config ?? '{}');
+  const activeTeams = await c.env.DB
+    .prepare('SELECT id, name, active FROM teams WHERE active = 1 ORDER BY id')
+    .all<{ id: number; name: string; active: number }>();
+  const activeList = activeTeams.results ?? [];
 
+  // Fixture por zonas o círculo completo. Con zonas, cada zona arma su
+  // calendario interno y las fechas de todas las zonas comparten las canchas
+  // intercaladas en una sola lista.
   const stmts: D1PreparedStatement[] = [];
   stmts.push(c.env.DB.prepare("DELETE FROM events WHERE match_id IN (SELECT id FROM matches WHERE tournament_id = ?1)").bind(tournamentId));
   stmts.push(c.env.DB.prepare('DELETE FROM matches WHERE tournament_id = ?1').bind(tournamentId));
-  let round = 1;
-  for (const pairs of fixture.rounds) {
-    const slots = roundSlots(pairs.length, schedule);
-    // Día de la jornada: avanza el calendario desde la fecha de inicio del torneo.
-    const day = plannedRoundDate(schedule, round);
-    for (const [i, p] of pairs.entries()) {
-      const slot = slots[i];
-      stmts.push(
-        c.env.DB.prepare(
-          'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
-        ).bind(tournamentId, round, p.home, p.away, 'scheduled', slot?.venue ?? '', slot?.kickoff ?? '', day)
-      );
+
+  let totalRounds = 0;
+  if (zones.enabled && zones.zones.length >= 2) {
+    const problems = validateZones(zones, activeList);
+    const err = problems.find((p) => p.kind === 'error');
+    if (err) return c.redirect('/admin/fixture?err=' + encodeURIComponent(err.text));
+    const zf = buildZonedFixture(zones);
+    totalRounds = zf.rounds;
+    for (const [ri, list] of zf.byRound.entries()) {
+      const day = plannedRoundDate(schedule, ri + 1);
+      interleaveSlots(list, schedule);
+      for (const m of list) {
+        stmts.push(
+          c.env.DB.prepare(
+            'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
+          ).bind(tournamentId, m.round, m.zone, m.home, m.away, 'scheduled', m.venue, m.kickoff_time, day)
+        );
+      }
     }
-    round += 1;
+  } else {
+    const fixture =
+      mode === 'double' ? admin.generateDoubleRoundRobin(ids) : admin.generateRoundRobin(ids);
+    totalRounds = fixture.rounds.length;
+    let round = 1;
+    for (const pairs of fixture.rounds) {
+      const slots = roundSlots(pairs.length, schedule);
+      // Día de la jornada: avanza el calendario desde la fecha de inicio del torneo.
+      const day = plannedRoundDate(schedule, round);
+      for (const [i, p] of pairs.entries()) {
+        const slot = slots[i];
+        stmts.push(
+          c.env.DB.prepare(
+            'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
+          ).bind(tournamentId, round, p.home, p.away, 'scheduled', slot?.venue ?? '', slot?.kickoff ?? '', day)
+        );
+      }
+      round += 1;
+    }
   }
   await c.env.DB.batch(stmts);
-  return c.redirect('/admin/fixture?msg=' + encodeURIComponent(`Fixture generado: ${fixture.rounds.length} fechas`));
+  return c.redirect('/admin/fixture?msg=' + encodeURIComponent(`Fixture generado: ${totalRounds} fechas`));
 });
 
 /**
@@ -460,6 +491,7 @@ adminRoutes.post('/fixture/regenerar', async (c) => {
     activeTeamIds,
     mode,
     schedule: scheduleOf(t.config),
+    zones: zonesOf(t.config),
   });
 
   const stmts: D1PreparedStatement[] = [];
