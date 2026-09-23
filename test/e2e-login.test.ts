@@ -62,8 +62,15 @@ beforeAll(async () => {
   const login = await admin.loginAdmin(ADMIN_PASSWORD);
   expect(login.status).toBe(302);
 
-  // Torneo activo.
-  const t = await admin.post('/admin/torneos', { name: 'Copa E2E', season: '2026', format: 'round_robin', status: 'active' });
+  // Torneo activo, con canchas y horarios para el fixture.
+  const t = await admin.post('/admin/torneos', {
+    name: 'Copa E2E',
+    season: '2026',
+    format: 'round_robin',
+    status: 'active',
+    venues: 'Cancha Norte\nCancha Sur',
+    kickoffs: '10:00, 12:00',
+  });
   expect(t.status).toBe(302);
 
   // El fixture expone el tournament_id en su form de generación.
@@ -103,6 +110,14 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     const res = await client().loginAdmin('no-es-la-clave');
     expect(res.status).toBe(401);
     expect(res.headers.get('set-cookie') ?? '').not.toContain('zl_session=');
+  });
+
+  it('el fixture generado usa las canchas y horarios del torneo', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const html = await (await admin.get('/admin/fechas')).text();
+    expect(html).toContain('Cancha Norte');
+    expect(html).toContain('10:00');
   });
 
   it('login correcto, dashboard y logout', async () => {

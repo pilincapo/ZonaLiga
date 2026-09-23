@@ -96,13 +96,18 @@ Recomendación: el token de CI puede compartir los mismos permisos que el deploy
 
 ## Armar tu liga (2 minutos)
 
-1. `/admin` → **Torneos → + Nuevo torneo**: nombre, formato y reglas
-   (puntos, walkover, suspensión por roja y acumulación de amarillas).
+1. `/admin` → **Torneos → + Nuevo torneo**: nombre, formato, **canchas y
+   horarios** (una cancha por línea, horarios por línea o separados por
+   comas), y reglas (puntos, walkover, suspensión por roja y acumulación de
+   amarillas).
 2. **Equipos → + Nuevo equipo**: nombre, corto (3 letras) y color de camiseta
    (la cresta se genera sola; podés poner URL de escudo).
 3. **Jugadores**: elegí el equipo y cargá la plantilla.
 4. **Fixture → Generar**: ida o ida y vuelta con todos los equipos activos.
-   Después **Fechas** para asignar día, hora y cancha de cada jornada.
+   Si el torneo tiene canchas/horarios, cada partido sale con cancha y hora
+   ya asignadas (primera hora en todas las canchas, después la siguiente
+   hora, y así; si no alcanzan, los últimos repiten horario). Después
+   **Fechas** para ajustar día, hora y cancha de cada jornada.
 5. Cada fecha: **Planilla → Cargar planilla**: resultado + goles y tarjetas
    (el minuto es opcional). Las posiciones, goleadores y suspensiones se
    recalculan solos.

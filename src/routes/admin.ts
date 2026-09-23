@@ -15,6 +15,7 @@ import {
 import { slugify } from '../lib/slug.ts';
 import type { MatchStatus } from '../lib/types.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
+import { roundSlots, scheduleFromForm, scheduleOf } from '../lib/schedule.ts';
 import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
 import * as admin from '../ui/admin.ts';
@@ -78,10 +79,11 @@ adminRoutes.post('/torneos', async (c) => {
   const existing = await c.env.DB.prepare('SELECT id FROM tournaments WHERE slug = ?1').bind(slug).first();
   if (existing) slug = `${slug}-${Date.now().toString(36)}`;
   const rules = readRules(f);
+  const config = { ...rules, ...scheduleFromForm(f) };
   await c.env.DB.prepare(
     'INSERT INTO tournaments (name, slug, season, format, config, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
   )
-    .bind(name, slug, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(rules), String(f['status'] ?? 'draft'))
+    .bind(name, slug, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'))
     .run();
   return c.redirect('/admin/torneos?msg=' + encodeURIComponent('Torneo creado'));
 });
@@ -97,8 +99,9 @@ adminRoutes.post('/torneos/:id', async (c) => {
   const name = String(f['name'] ?? '').trim();
   if (!name) return c.html(await admin.tournamentFormPage(c.env.DB, id, 'El nombre es obligatorio'), 400);
   const rules = readRules(f);
+  const config = { ...rules, ...scheduleFromForm(f) };
   await c.env.DB.prepare('UPDATE tournaments SET name = ?1, season = ?2, format = ?3, config = ?4, status = ?5 WHERE id = ?6')
-    .bind(name, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(rules), String(f['status'] ?? 'draft'), id)
+    .bind(name, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'), id)
     .run();
   return c.redirect('/admin/torneos?msg=' + encodeURIComponent('Torneo actualizado'));
 });
@@ -353,16 +356,23 @@ adminRoutes.post('/fixture/generar', async (c) => {
   const fixture =
     mode === 'double' ? admin.generateDoubleRoundRobin(ids) : admin.generateRoundRobin(ids);
 
+  // Canchas y horarios del torneo: cada partido de una jornada toma su slot
+  // (primera hora en todas las canchas, después la siguiente hora, y así).
+  const tRow = await c.env.DB.prepare('SELECT config FROM tournaments WHERE id = ?1').bind(tournamentId).first<{ config: string }>();
+  const schedule = scheduleOf(tRow?.config ?? '{}');
+
   const stmts: D1PreparedStatement[] = [];
   stmts.push(c.env.DB.prepare("DELETE FROM events WHERE match_id IN (SELECT id FROM matches WHERE tournament_id = ?1)").bind(tournamentId));
   stmts.push(c.env.DB.prepare('DELETE FROM matches WHERE tournament_id = ?1').bind(tournamentId));
   let round = 1;
   for (const pairs of fixture.rounds) {
-    for (const p of pairs) {
+    const slots = roundSlots(pairs.length, schedule);
+    for (const [i, p] of pairs.entries()) {
+      const slot = slots[i];
       stmts.push(
         c.env.DB.prepare(
-          'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status) VALUES (?1, ?2, ?3, ?4, ?5)'
-        ).bind(tournamentId, round, p.home, p.away, 'scheduled')
+          'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)'
+        ).bind(tournamentId, round, p.home, p.away, 'scheduled', slot?.venue ?? '', slot?.kickoff ?? '')
       );
     }
     round += 1;

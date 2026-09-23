@@ -6,6 +6,7 @@ import { parseRules, DEFAULT_RULES, POSITION_ORDER } from '../lib/types.ts';
 import type { Match, Rules, Team, Tournament } from '../lib/types.ts';
 import { generateDoubleRoundRobin, generateRoundRobin, shuffled } from '../lib/fixture.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
+import { EMPTY_SCHEDULE, scheduleOf, type TournamentSchedule } from '../lib/schedule.ts';
 import { BRACKET_LABELS } from '../lib/bracket.ts';
 import { formatDateShort } from '../lib/format.ts';
 import {
@@ -148,6 +149,24 @@ export async function entregasAdminPage(db: D1Database, msg?: string, errMsg?: s
 
 /* ============================== TORNEOS ============================== */
 
+function scheduleFields(schedule: TournamentSchedule): string {
+  const list = (items: string[]): string => items.join('\n');
+  return `
+<div class="form-row">
+  <div class="field">
+    <label for="venues">Canchas</label>
+    <textarea id="venues" name="venues" rows="3" placeholder="Cancha 1&#10;Cancha 2">${esc(list(schedule.venues))}</textarea>
+    <p class="hint">Una por línea (máximo 12). Si no cargás canchas, el fixture sale sin cancha asignada.</p>
+  </div>
+  <div class="field">
+    <label for="kickoffs">Horarios de inicio</label>
+    <textarea id="kickoffs" name="kickoffs" rows="3" placeholder="10:00&#10;12:00&#10;14:00">${esc(list(schedule.kickoffs))}</textarea>
+    <p class="hint">Uno por línea o separados por comas (máximo 12). Acepta “9” o “9:30”.</p>
+  </div>
+</div>
+<p class="hint">Al generar el fixture, los partidos de cada fecha rotan entre estas canchas y horarios: primera hora en todas las canchas, después la siguiente hora, y así. Si la configuración no alcanza para todos los partidos de una fecha, los últimos repiten horario.</p>`;
+}
+
 function rulesFields(rules: Rules): string {
   const f = (name: keyof Rules, label: string, hint?: string) => `
   <div class="field">
@@ -215,6 +234,7 @@ export async function tournamentFormPage(db: D1Database, id?: number, error?: st
     t = results?.[0] ?? null;
   }
   const rules = t ? parseRules(t.config) : DEFAULT_RULES;
+  const schedule = t ? scheduleOf(t.config) : EMPTY_SCHEDULE;
   const isEdit = t != null;
   const body = `
 ${flash('error', error)}
@@ -247,6 +267,8 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
         <option value="copa" ${t?.format === 'copa' ? 'selected' : ''}>Copa eliminatoria</option>
       </select>
     </div>
+    <h3 class="zone-title">Canchas y horarios</h3>
+    ${scheduleFields(schedule)}
     <h3 class="zone-title">Reglas de puntuación y sanciones</h3>
     ${rulesFields(rules)}
     <button class="btn btn-primary" type="submit">Guardar</button>
