@@ -583,10 +583,9 @@ select {
 
 .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 
-/* Carga rápida de goles en la planilla */
-.goal-count { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.radio-chip { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; cursor: pointer; }
-.check-row { display: flex; gap: 8px; align-items: center; padding: 3px 0; cursor: pointer; }
+/* Declaración de goles en la planilla */
+.goal-picks { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+.goal-picks [data-pick] { min-width: 180px; flex: 0 1 220px; }
 
 .actions-cell { white-space: nowrap; text-align: right; }
 
