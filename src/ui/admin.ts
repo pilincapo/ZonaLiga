@@ -4,7 +4,7 @@ import { esc, escUrl } from '../lib/html.ts';
 import { slugify } from '../lib/slug.ts';
 import { parseRules, DEFAULT_RULES, POSITION_ORDER } from '../lib/types.ts';
 import type { Match, Rules, Team, Tournament } from '../lib/types.ts';
-import { generateDoubleRoundRobin, generateRoundRobin, shuffled } from '../lib/fixture.ts';
+import { generateDoubleRoundRobin, generateRoundRobin, playedCount, shuffled } from '../lib/fixture.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
 import {
   EMPTY_SCHEDULE,
@@ -512,6 +512,17 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   );
   const gapsNote = gaps.length ? `<div class="warning-box">${esc(formatScheduleGaps(gaps))}</div>` : '';
 
+  // Guardia contra pisar resultados: con partidos jugados (o torneo
+  // finalizado), "Generar" queda deshabilitado y se explica por qué.
+  const jugados = playedCount(matches);
+  const genBlocked = jugados > 0 || t.status === 'finished';
+  const blockNote =
+    jugados > 0
+      ? `<div class="warning-box">Hay ${jugados} partido(s) con resultado cargado: “Generar” está deshabilitado para no pisarlos. Usá “Regenerar cruce” para rearmar solo los pendientes.</div>`
+      : t.status === 'finished'
+        ? '<div class="warning-box">Torneo finalizado: “Generar” está deshabilitado. Cambialo a activo para regenerar el fixture.</div>'
+        : '';
+
   const roundSections = roundKeys
     .map((r) => {
       const list = byRound.get(r)!;
@@ -541,7 +552,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     .join('');
 
   const body = `
-${flash('success', msg)}${flash('error', errMsg)}${gapsNote}
+${flash('success', msg)}${flash('error', errMsg)}${blockNote}${gapsNote}
 ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, label: '+ Partido suelto' })}
 <section class="block"><div class="card"><div class="card-body">
   <form method="post" action="/admin/fixture/generar" class="form-row">
@@ -555,7 +566,7 @@ ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, 
     </div>
     <div class="field" style="align-self:flex-end">
       <span style="display:flex;gap:8px">
-        <button class="btn btn-primary" type="submit" onclick="return confirm('Esto reemplaza TODO el fixture (los partidos jugados se pierden). ¿Continuar?')">Generar</button>
+        <button class="btn btn-primary" type="submit" ${genBlocked ? 'disabled' : ''} onclick="return confirm('Esto reemplaza TODO el fixture (los partidos jugados se pierden). ¿Continuar?')">Generar</button>
         <button class="btn btn-ghost" type="submit" formaction="/admin/fixture/regenerar" onclick="return confirm('Se rearman SOLO los cruces pendientes: los partidos jugados y sus resultados quedan intactos. ¿Continuar?')">↻ Regenerar cruce</button>
       </span>
     </div>

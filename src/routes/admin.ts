@@ -14,7 +14,7 @@ import {
 } from '../lib/auth.ts';
 import { slugify } from '../lib/slug.ts';
 import type { Match, MatchStatus } from '../lib/types.ts';
-import { regeneratePairings, verifyPairings, slotConflicts } from '../lib/fixture.ts';
+import { regeneratePairings, verifyPairings, slotConflicts, playedCount } from '../lib/fixture.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
 import {
   roundSlots,
@@ -364,6 +364,31 @@ adminRoutes.post('/fixture/generar', async (c) => {
   const f = await c.req.parseBody();
   const tournamentId = Number(f['tournament_id']);
   const mode = String(f['mode'] ?? 'single');
+
+  // Guardia: no pisar resultados. Generar borra TODO el fixture del torneo.
+  const tRow = await c.env.DB
+    .prepare('SELECT config, status FROM tournaments WHERE id = ?1')
+    .bind(tournamentId)
+    .first<{ config: string; status: string }>();
+  if (!tRow) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const rows = await c.env.DB.prepare('SELECT status FROM matches WHERE tournament_id = ?1').bind(tournamentId).all<{ status: string }>();
+  const jugados = playedCount(rows.results ?? []);
+  if (jugados > 0) {
+    return c.redirect(
+      '/admin/fixture?err=' +
+        encodeURIComponent(
+          `El torneo ya tiene ${jugados} partido(s) jugado(s): “Generar” los borraría. Usá “Regenerar cruce” para rearmar solo los pendientes.`
+        )
+    );
+  }
+  if (tRow.status === 'finished') {
+    return c.redirect(
+      '/admin/fixture?err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.')
+    );
+  }
+
   const teams = await c.env.DB.prepare('SELECT id FROM teams WHERE active = 1 ORDER BY id').all<{ id: number }>();
   const ids = (teams.results ?? []).map((r) => r.id);
   if (ids.length < 2) {
@@ -374,8 +399,7 @@ adminRoutes.post('/fixture/generar', async (c) => {
 
   // Canchas y horarios del torneo: cada partido de una jornada toma su slot
   // (primera hora en todas las canchas, después la siguiente hora, y así).
-  const tRow = await c.env.DB.prepare('SELECT config FROM tournaments WHERE id = ?1').bind(tournamentId).first<{ config: string }>();
-  const schedule = scheduleOf(tRow?.config ?? '{}');
+  const schedule = scheduleOf(tRow.config ?? '{}');
 
   const stmts: D1PreparedStatement[] = [];
   stmts.push(c.env.DB.prepare("DELETE FROM events WHERE match_id IN (SELECT id FROM matches WHERE tournament_id = ?1)").bind(tournamentId));

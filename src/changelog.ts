@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.6';
+export const APP_VERSION = '0.2.7';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,15 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.7',
+    date: '2026-09-23',
+    title: 'El fixture no se pisa con resultados cargados',
+    items: [
+      { kind: 'mejora', text: 'Si el torneo ya tiene partidos jugados (o está finalizado), el botón “Generar” de Fixture queda deshabilitado y la app explica por qué: así nunca se borran resultados sin querer.' },
+      { kind: 'mejora', text: 'Para rearmar los cruces de un torneo empezado sigue estando “Regenerar cruce”, que conserva todo lo jugado.' },
+    ],
+  },
   {
     version: '0.2.6',
     date: '2026-09-23',

@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { generateDoubleRoundRobin, generateRoundRobin, shuffled } from '../src/lib/fixture.ts';
+import { generateDoubleRoundRobin, generateRoundRobin, playedCount, shuffled } from '../src/lib/fixture.ts';
+
+describe('playedCount', () => {
+  it('cuenta jugados y walkovers como resultados', () => {
+    const matches = [
+      { status: 'played' },
+      { status: 'walkover' },
+      { status: 'scheduled' },
+      { status: 'postponed' },
+      { status: 'suspended' },
+      { status: 'bye' },
+    ];
+    expect(playedCount(matches)).toBe(2);
+  });
+
+  it('sin resultados cargados da 0 (generar libre)', () => {
+    expect(playedCount([])).toBe(0);
+    expect(playedCount([{ status: 'scheduled' }, { status: 'bye' }])).toBe(0);
+  });
+});
 
 describe('generateRoundRobin', () => {
   it('con 4 equipos genera 3 fechas con 2 partidos', () => {

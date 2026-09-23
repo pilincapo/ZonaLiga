@@ -315,6 +315,14 @@ export function verifyPairings(
   return issues;
 }
 
+/**
+ * Partidos con resultado ya cargado. Mientras haya uno, "Generar" está
+ * prohibido: el DELETE masivo borraría el fixture y con él los resultados.
+ */
+export function playedCount(matches: ReadonlyArray<{ status: string }>): number {
+  return matches.filter((m) => m.status === 'played' || m.status === 'walkover').length;
+}
+
 /** Campos mínimos para detectar un choque de cancha y hora. */
 export type SlotLike = Pick<Match, 'played_on' | 'kickoff_time' | 'venue'>;
 

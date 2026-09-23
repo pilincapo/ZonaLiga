@@ -482,3 +482,26 @@ describe.skipIf(!has)('e2e: regenerar cruce a mitad de torneo', () => {
     expect(await home.text()).toContain('Deportivo E2E');
   });
 });
+
+describe.skipIf(!has)('e2e: generar fixture no pisa los jugados', () => {
+  it('bloquea Generar con resultados cargados y lo jugado sigue publicado', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // La ruta rechaza: el 3-1 aprobado en el flujo delegado no se borra.
+    const gen = await admin.post('/admin/fixture/generar', { tournament_id: tournamentId, mode: 'double' });
+    expect(gen.status).toBe(302);
+    const loc = decodeURIComponent(gen.headers.get('location') ?? '');
+    expect(loc).toContain('partido(s) jugado');
+    expect(loc).toContain('Regenerar cruce');
+
+    // La página explica el bloqueo y el botón queda deshabilitado.
+    const page = await (await admin.get('/admin/fixture')).text();
+    expect(page).toContain('deshabilitado');
+    expect(page).toContain('disabled');
+
+    // Lo jugado sigue publicado en el sitio.
+    const publicHtml = await (await fetch(`${BASE}/`)).text();
+    expect(publicHtml).toContain('3 - 1');
+  });
+});
