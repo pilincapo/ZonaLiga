@@ -71,6 +71,20 @@ npm run db:unseed:local    # borra TODOS los datos locales
 
    Tu app queda en `https://liga-amateur.<tu-subdominio>.workers.dev`.
 
+## CI/CD (GitHub Actions)
+
+- **`.github/workflows/ci.yml`** — en cada push y PR: `npm run typecheck` + `npm test` con Node 22 (cachea `npm ci`).
+- **`.github/workflows/deploy.yml`** — en cada push a `main`: corre los mismos checks y si pasan publica con `wrangler-action`. Usa el environment `production` (restringido a `main`), que permite aprobar o cancelar el deploy desde la pestaña *Environments* de GitHub.
+
+Secrets requeridos en el repo (Settings → Secrets and variables → Actions):
+
+| Secret | Cómo obtenerlo |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Dashboard → My Profile → API Tokens → *Create Token* → plantilla **Edit Cloudflare Workers** → Continue → copiar. Usar en `wrangler-action@v3` o `npx wrangler deploy` con `CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}`. |
+| `CLOUDFLARE_ACCOUNT_ID` | Valor no secreto, visible en el dashboard o `npx wrangler whoami`. Ya cargado. |
+
+Recomendación: el token de CI puede compartir los mismos permisos que el deploy manual. Si se quiere menor radio de impacto, excluir D1 (las migraciones se corren local o manualmente con `npm run db:migrate:remote`).
+
 ## Dominio propio
 
 1. Agregá tu dominio a Cloudflare (Plan Free: **Add site** y seguí el asistente;
@@ -133,6 +147,31 @@ celular; nada se publica hasta que vos lo apruebes.
 delegado es una cookie HMAC firmada que incluye ese hash — **regenerar o revocar el código
 invalida las sesiones abiertas al instante**. Los eventos se validan contra la plantilla del
 equipo y el partido (no se puede cargar un gol de un jugador ajeno ni un partido de otro equipo).
+
+## Fecha en vivo
+
+Vista pública `/en-vivo` pensada para el celular el día de partido: muestra **los partidos de
+hoy** y se actualiza sola, sin que nadie recargue.
+
+- Los partidos se agrupan por estado: en juego, por jugar, terminados, postergados y
+  suspendidos, con un resumen arriba (cuántos en cancha, cuántos por jugar, goles del día).
+- Cada tarjeta muestra la fase real según el horario: **Próximo** (con cuenta regresiva),
+  **1er tiempo**, **Entretiempo**, **2do tiempo**, **Alargue**, **Penales** o **Final**.
+  Los tiempos se calculan con la cancha de cada partido, así que se ven iguales para todo el mundo.
+- Si un delegado cargó un resultado que vos todavía no aprobaste, aparece como
+  **PROVISORIO** (marcador punteado) con el nombre de quien lo envió; al aprobarlo se vuelve oficial.
+- Los goleadores del día se listan al pie de cada partido.
+- La página pide `GET /api/vivo` cada 30 s (y al volver a la pestaña), parchea el DOM en el
+  lugar y **se pausa sola** cuando no hay partidos en curso. Si el navegador no soporta
+  `fetch`, cae a una recarga completa. No usa websockets ni servicios extra: sigue dentro
+  del free tier.
+- Los días sin partidos no gasta requests: la página dice **“Hoy no se juega”** y cuándo es
+  la próxima fecha, y no arranca el refresco automático.
+- El home muestra un aviso **“Hoy se juega · N partidos”** que lleva a la vista en vivo.
+
+> La hora de la liga se configura en `src/lib/live.ts` (`LEAGUE_TZ_OFFSET`, por defecto
+> UTC−3, Argentina). Todo el cálculo de fases es lógica pura y está cubierto por
+> `test/live.test.ts`.
 
 ## Diseño
 
