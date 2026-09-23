@@ -5,6 +5,7 @@ import type { Env } from './types.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { delegateRoutes } from './routes/delegate.ts';
 import * as pub from './ui/public.ts';
+import * as live from './ui/live.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -38,6 +39,19 @@ app.get('/historial', async (c) => c.html(await pub.historyPage(c.env.DB)));
 app.get('/suspensiones', async (c) => c.html(await pub.suspensionsPage(c.env.DB, c.req.query('t'))));
 
 app.get('/buscar', async (c) => c.html(await pub.searchPage(c.env.DB, c.req.query('q'))));
+
+/** Fecha en vivo: la página y el JSON que refresca solo. */
+app.get('/en-vivo', async (c) => c.html(await live.livePage(c.env.DB, c.req.query('t'))));
+
+app.get('/api/vivo', async (c) => {
+  const data = await live.liveData(c.env.DB, c.req.query('t'));
+  if (!data) return c.json({ error: 'sin torneo activo' }, 404);
+  return c.json(
+    { ...data.payload, tournament: { name: data.tournament.name, slug: data.tournament.slug } },
+    200,
+    { 'cache-control': 'no-store' }
+  );
+});
 
 app.notFound((c) => c.html(pub.notFoundPage(), 404));
 

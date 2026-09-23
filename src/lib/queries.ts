@@ -241,6 +241,18 @@ export async function activeTournament(db: D1Database): Promise<Tournament | nul
 }
 
 /** Todos los eventos de un torneo (para suspensiones). */
+/** Todos los eventos (goles incluidos) de un conjunto de partidos. */
+export async function eventsForMatches(db: D1Database, matchIds: number[]): Promise<Event[]> {
+  if (matchIds.length === 0) return [];
+  const placeholders = matchIds.map((_, i) => `?${i + 1}`).join(', ');
+  const { results } = await db
+    .prepare(`SELECT * FROM events WHERE match_id IN (${placeholders}) ORDER BY minute IS NULL, minute, id`)
+    .bind(...matchIds)
+    .all<Event>();
+  return results ?? [];
+}
+
+/** Tarjetas del torneo (usado por suspensiones). */
 export async function tournamentEvents(db: D1Database, tournamentId: number): Promise<(Event & { team_id: number | null })[]> {
   const { results } = await db
     .prepare(
@@ -406,6 +418,26 @@ export async function countPendingSubmissions(db: D1Database): Promise<number> {
 }
 
 /** Partidos que tienen alguna entrega pendiente (para marcar la lista de planillas). */
+/** Entregas pendientes de un torneo (para el modo en vivo). */
+export async function pendingForTournament(db: D1Database, tournamentId: number): Promise<PendingSubmissionRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT s.*, m.round, m.played_on, m.kickoff_time, m.venue, m.home_team_id, m.away_team_id,
+              m.status AS match_status, m.home_goals AS match_home_goals, m.away_goals AS match_away_goals,
+              tm.name AS team_name, tm.short_name AS team_short, tm.color AS team_color, tm.delegate_name,
+              t.name AS tournament_name, t.slug AS tournament_slug
+       FROM submissions s
+       JOIN matches m ON m.id = s.match_id
+       JOIN teams tm ON tm.id = s.team_id
+       JOIN tournaments t ON t.id = m.tournament_id
+       WHERE s.review = 'pending' AND m.tournament_id = ?1
+       ORDER BY s.updated_at DESC, s.id DESC`
+    )
+    .bind(tournamentId)
+    .all<PendingSubmissionRow>();
+  return results ?? [];
+}
+
 export async function matchIdsWithPendingSubmissions(db: D1Database): Promise<Set<number>> {
   const { results } = await db
     .prepare("SELECT DISTINCT match_id FROM submissions WHERE review = 'pending'")

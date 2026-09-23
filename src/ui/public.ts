@@ -2,6 +2,7 @@
 
 import { esc, escUrl } from '../lib/html.ts';
 import { formatDateShort, formatDateLong } from '../lib/format.ts';
+import { leagueNow } from '../lib/live.ts';
 import { groupBy } from '../lib/standings.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
@@ -53,6 +54,7 @@ import {
 
 export const PUBLIC_NAV: NavItem[] = [
   { href: '/', label: 'Inicio', match: 'home' },
+  { href: '/en-vivo', label: 'En vivo', match: 'envivo' },
   { href: '/posiciones', label: 'Posiciones', match: 'posiciones' },
   { href: '/fixture', label: 'Fixture', match: 'fixture' },
   { href: '/goleadores', label: 'Goleadores', match: 'goleadores' },
@@ -324,7 +326,22 @@ async function tournamentHomeBody(db: D1Database, t: Tournament, origin: string)
     )
     .join('');
 
+  // Aviso destacado cuando hoy hay partidos: lleva al modo en vivo.
+  const todayIso = leagueNow().date;
+  const todays = matches.filter((m) => m.played_on === todayIso && m.status !== 'bye');
+  const todayBanner =
+    todays.length > 0
+      ? `<section class="block"><a class="live-banner" href="/en-vivo">
+    <span class="live-banner-dot"></span>
+    <span class="live-banner-text"><strong>Hoy se juega</strong> · ${todays.length} partido(s)${
+          nextRound != null ? ` · Fecha ${nextRound}` : ''
+        }</span>
+    <span class="live-banner-cta">Seguir en vivo →</span>
+  </a></section>`
+      : '';
+
   return `
+${todayBanner}
 <section class="block">
   <div class="section-head">
     <div>
@@ -805,7 +822,7 @@ export function notFoundPage(): string {
 
 export async function suspensionsPage(db: D1Database, slugParam?: string): Promise<string> {
   const t = await resolveTournament(db, slugParam);
-  if (!t) return layout({ title: 'Suspensiones', active: 'fixture', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  if (!t) return layout({ title: 'Suspensiones', active: 'suspensiones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
 
   const [matches, teams, events] = await Promise.all([listMatches(db, t.id), listTeams(db), tournamentEvents(db, t.id)]);
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
@@ -834,7 +851,7 @@ export async function suspensionsPage(db: D1Database, slugParam?: string): Promi
   const body = `
 <section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Suspensiones</h1></section>
 <section class="block"><div class="card">${table}</div></section>`;
-  return layout({ title: `Suspensiones — ${t.name}`, active: 'fixture', nav: PUBLIC_NAV, body });
+  return layout({ title: `Suspensiones — ${t.name}`, active: 'suspensiones', nav: PUBLIC_NAV, body });
 }
 
 /* Re-export helpers usados por rutas */
