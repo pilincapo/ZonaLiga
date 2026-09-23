@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_GOALS, resolveScorers } from '../src/lib/sheet.ts';
+import { MAX_GOALS, resolveScorers, scoreFromEvents } from '../src/lib/sheet.ts';
 
 const ALLOWED = [10, 11, 12, 13];
 
@@ -56,5 +56,53 @@ describe('resolveScorers', () => {
       error: 'Ese jugador no es de la plantilla de este equipo',
     });
     expect(resolveScorers({ count: '1', checked: [Number.NaN], allowed: ALLOWED }).ok).toBe(false);
+  });
+});
+
+describe('scoreFromEvents', () => {
+  const H = 1;
+  const A = 2;
+
+  it('cada gol suma para el equipo que lo cargó', () => {
+    const score = scoreFromEvents(
+      [
+        { teamId: H, type: 'goal' },
+        { teamId: H, type: 'goal' },
+        { teamId: A, type: 'goal' },
+      ],
+      H,
+      A
+    );
+    expect(score).toEqual({ home: 2, away: 1 });
+  });
+
+  it('el gol en contra favorece al rival', () => {
+    const score = scoreFromEvents(
+      [
+        { teamId: A, type: 'own_goal' }, // en contra de la visita: gol local
+        { teamId: H, type: 'own_goal' }, // en contra del local: gol visita
+      ],
+      H,
+      A
+    );
+    expect(score).toEqual({ home: 1, away: 1 });
+  });
+
+  it('ignora eventos sin equipo, de terceros y que no son goles', () => {
+    const score = scoreFromEvents(
+      [
+        { teamId: null, type: 'goal' },
+        { teamId: 99, type: 'goal' },
+        { teamId: H, type: 'yellow' },
+        { teamId: A, type: 'red' },
+      ],
+      H,
+      A
+    );
+    expect(score).toEqual({ home: 0, away: 0 });
+  });
+
+  it('sin eventos: 0-0', () => {
+    expect(scoreFromEvents([], H, A)).toEqual({ home: 0, away: 0 });
   });
 });

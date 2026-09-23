@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.2.9';
+export const APP_VERSION = '0.2.10';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,14 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.10',
+    date: '2026-09-23',
+    title: 'Marcador automático al cargar goles',
+    items: [
+      { kind: 'mejora', text: 'Al usar la carga rápida de goles, el marcador del partido se actualiza solo (cuenta los goles y también los en contra).' },
+    ],
+  },
   {
     version: '0.2.9',
     date: '2026-09-23',

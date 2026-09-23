@@ -593,10 +593,13 @@ describe.skipIf(!has)('e2e: carga rápida de goles en la planilla', () => {
     expect(ok.status).toBe(302);
     const okLoc = decodeURIComponent(ok.headers.get('location') ?? '');
     expect(okLoc).toContain('Goles cargados: 2');
+    expect(okLoc).toContain('Marcador actualizado');
 
-    // La flash llega a la planilla y la ficha pública muestra a los goleadores.
+    // La flash llega a la planilla y el marcador quedó 2-0 para Deportivo.
     const sheet = await (await admin.get(okLoc)).text();
     expect(sheet).toContain('Goles cargados: 2');
+    expect(sheet).toMatch(/name="home_goals"[^>]*value="2"/);
+    expect(sheet).toMatch(/name="away_goals"[^>]*value="0"/);
     const ficha = await (await fetch(`${BASE}/partido/${matchId}`)).text();
     expect(ficha).toContain('Goleador A E2E');
     expect(ficha).toContain('Goleador B E2E');

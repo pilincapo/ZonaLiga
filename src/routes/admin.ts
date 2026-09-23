@@ -15,7 +15,7 @@ import {
 import { slugify } from '../lib/slug.ts';
 import type { Match, MatchStatus } from '../lib/types.ts';
 import { regeneratePairings, verifyPairings, slotConflicts, playedCount } from '../lib/fixture.ts';
-import { resolveScorers } from '../lib/sheet.ts';
+import { resolveScorers, scoreFromEvents } from '../lib/sheet.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
 import {
   roundSlots,
@@ -665,9 +665,9 @@ adminRoutes.post('/planilla/:id/goles', async (c) => {
   const id = Number(c.req.param('id'));
   const f = await c.req.parseBody();
   const m = await c.env.DB
-    .prepare('SELECT id, home_team_id, away_team_id FROM matches WHERE id = ?1')
+    .prepare('SELECT id, home_team_id, away_team_id, status FROM matches WHERE id = ?1')
     .bind(id)
-    .first<{ id: number; home_team_id: number | null; away_team_id: number | null }>();
+    .first<{ id: number; home_team_id: number | null; away_team_id: number | null; status: string }>();
   if (!m) {
     return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
   }
@@ -693,7 +693,26 @@ adminRoutes.post('/planilla/:id/goles', async (c) => {
     c.env.DB.prepare("INSERT INTO events (match_id, team_id, player_id, type) VALUES (?1, ?2, ?3, 'goal')").bind(id, teamId, pid)
   );
   await c.env.DB.batch(stmts);
-  return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent(`Goles cargados: ${res.ids.length}`));
+
+  // Marcador automático: recalculo desde TODOS los eventos del partido
+  // (goles + en contra) y actualizo, salvo en walkover (resultado legal).
+  if (m.status !== 'walkover') {
+    const evs = await c.env.DB
+      .prepare('SELECT team_id, type FROM events WHERE match_id = ?1')
+      .bind(id)
+      .all<{ team_id: number | null; type: string }>();
+    const score = scoreFromEvents(
+      (evs.results ?? []).map((e) => ({ teamId: e.team_id, type: e.type })),
+      m.home_team_id,
+      m.away_team_id
+    );
+    await c.env.DB
+      .prepare('UPDATE matches SET home_goals = ?1, away_goals = ?2 WHERE id = ?3')
+      .bind(score.home, score.away, id)
+      .run();
+  }
+
+  return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent(`Goles cargados: ${res.ids.length}. Marcador actualizado`));
 });
 
 adminRoutes.post('/planilla/:id/evento', async (c) => {
