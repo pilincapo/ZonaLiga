@@ -36,6 +36,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       { kind: 'mejora', text: 'La carga rápida ahora muestra una lista desplegable por gol: elegís al autor (o “En contra”) — sin tildes ni escritura. La cantidad abre y cierra las listas.' },
       { kind: 'arreglo', text: 'Se sacaron los casilleros “Goles local/visitante” de la planilla: el marcador se muestra y se arma solo desde los goles cargados, así nunca difiere de los eventos. El walkover conserva su carga especial.' },
+      { kind: 'arreglo', text: 'Las listas de goles del segundo equipo (visitante) no desplegaban al elegir la cantidad: ya funciona en los dos lados.' },
     ],
   },
   {

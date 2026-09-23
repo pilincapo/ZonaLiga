@@ -761,7 +761,7 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
     const pickLists = players.length ? Array.from({ length: MAX_GOALS }, (_, i) => goalList(i)).join('') : '';
     return `<div class="card-body">
   <h3 class="zone-title">${esc(label)}</h3>
-  <form method="post" action="/admin/planilla/${m.id}/goles" data-goal-form>
+  <form method="post" action="/admin/planilla/${m.id}/goles" data-goal-form id="goal-form-${side}">
     <input type="hidden" name="team_id" value="${teamId ?? ''}">
     <strong class="uppercase">Carga rápida de goles</strong>
     <div class="field mt-3">
@@ -787,7 +787,7 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   </form>
   <script>
     (function () {
-      var form = document.querySelector('form[data-goal-form]');
+      var form = document.getElementById('goal-form-${side}');
       if (!form) return;
       var radios = form.querySelectorAll('input[name="count"]');
       var lists = form.querySelectorAll('[data-pick]');
