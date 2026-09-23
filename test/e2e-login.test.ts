@@ -120,6 +120,51 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     expect(html).toContain('10:00');
   });
 
+  it('regenerar una fecha: re-slotea hora y cancha y corre el día', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // El id del partido sale de los inputs de la propia página de Fechas.
+    const before = await (await admin.get('/admin/fechas')).text();
+    const mid = /name="d_(\d+)"/.exec(before)?.[1] ?? '';
+    expect(mid, 'la fecha 1 debe tener al menos un partido').toBeTruthy();
+
+    // Edito la fecha 1 a mano (día fijo, hora y cancha cualquiera).
+    const save = await admin.post('/admin/fechas/guardar', {
+      tournament_id: tournamentId,
+      round: '1',
+      [`d_${mid}`]: '2026-11-08',
+      [`t_${mid}`]: '09:30',
+      [`v_${mid}`]: 'Cancha Vieja',
+    });
+    expect(save.status).toBe(302);
+
+    // Regenero con +1 día: corre el día y vuelve al patrón del torneo.
+    const regen = await admin.post('/admin/fechas/regenerar', {
+      tournament_id: tournamentId,
+      round: '1',
+      shift_days: '1',
+    });
+    expect(regen.status).toBe(302);
+    expect(decodeURIComponent(regen.headers.get('location') ?? '')).toContain('Fecha 1 regenerada');
+
+    const html = await (await admin.get('/admin/fechas')).text();
+    expect(html).toContain('value="2026-11-09"'); // el día corrió
+    expect(html).toContain('value="10:00"'); // patrón del torneo (10:00 / Cancha Norte)
+    expect(html).toContain('Cancha Norte');
+    expect(html).not.toContain('Cancha Vieja'); // lo editado a mano se re-sloteó
+
+    // Regenerar sin correr el día no mueve la fecha.
+    const again = await admin.post('/admin/fechas/regenerar', {
+      tournament_id: tournamentId,
+      round: '1',
+      shift_days: '0',
+    });
+    expect(again.status).toBe(302);
+    const html2 = await (await admin.get('/admin/fechas')).text();
+    expect(html2).toContain('value="2026-11-09"');
+  });
+
   it('login correcto, dashboard y logout', async () => {
     const admin = client();
     const ok = await admin.loginAdmin(ADMIN_PASSWORD);

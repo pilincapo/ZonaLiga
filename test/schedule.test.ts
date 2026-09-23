@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_SCHEDULE,
   normalizeKickoff,
+  regenerateRound,
   roundSlots,
   scheduleCovers,
   scheduleFromForm,
@@ -91,5 +92,57 @@ describe('scheduleCovers', () => {
     expect(scheduleCovers({ venues: ['A', 'B'], kickoffs: ['09:00', '11:00'] }, 3)).toBe(true);
     expect(scheduleCovers({ venues: ['A'], kickoffs: ['09:00'] }, 3)).toBe(false);
     expect(scheduleCovers(EMPTY_SCHEDULE, 0)).toBe(true);
+  });
+});
+
+describe('regenerateRound', () => {
+  const sched = { venues: ['Cancha Norte', 'Cancha Sur'], kickoffs: ['10:00', '12:00'] };
+  const mk = (id: number, over: Partial<import('../src/lib/schedule.ts').RoundMatchInput> = {}) => ({
+    id,
+    played_on: '2026-10-05',
+    kickoff_time: '09:00',
+    venue: 'Vieja',
+    status: 'scheduled',
+    ...over,
+  });
+
+  it('re-slotea hora y cancha de toda la jornada', () => {
+    const out = regenerateRound([mk(1), mk(2), mk(3)], sched);
+    expect(out.map((u) => [u.kickoff, u.venue])).toEqual([
+      ['10:00', 'Cancha Norte'],
+      ['10:00', 'Cancha Sur'],
+      ['12:00', 'Cancha Norte'],
+    ]);
+  });
+
+  it('corre todos los partidos un día (inicio atrasado)', () => {
+    const out = regenerateRound([mk(1), mk(2)], sched, 1);
+    expect(out.every((u) => u.played_on === '2026-10-06')).toBe(true);
+    expect(out[0]!.kickoff).toBe('10:00');
+  });
+
+  it('adelanta con días negativos', () => {
+    const out = regenerateRound([mk(1, { played_on: '2026-10-05' })], sched, -2);
+    expect(out[0]!.played_on).toBe('2026-10-03');
+  });
+
+  it('no toca partidos jugados ni bye', () => {
+    const out = regenerateRound(
+      [mk(1, { status: 'played' }), mk(2, { status: 'bye' }), mk(3)],
+      sched,
+      1
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe(3);
+  });
+
+  it('sin canchas/horarios conserva los actuales (solo corre el día)', () => {
+    const out = regenerateRound([mk(1)], EMPTY_SCHEDULE, 1);
+    expect(out[0]).toEqual({ id: 1, played_on: '2026-10-06', kickoff: '09:00', venue: 'Vieja' });
+  });
+
+  it('corre el día de fechas vacías sin romper', () => {
+    const out = regenerateRound([mk(1, { played_on: '' })], sched, 1);
+    expect(out[0]!.played_on).toBe('');
   });
 });

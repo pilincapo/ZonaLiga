@@ -760,7 +760,7 @@ ${submissionsBlock}
 
 /* ============================== FECHAS (día/hora/cancha) ============================== */
 
-export async function roundsSchedulePage(db: D1Database, slugParam: string | undefined, msg?: string): Promise<string> {
+export async function roundsSchedulePage(db: D1Database, slugParam: string | undefined, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
     return adminLayout({ title: 'Fechas', active: 'fixture', body: `${pageHead('Fechas')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
@@ -795,12 +795,18 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
       return `<form method="post" action="/admin/fechas/guardar"><input type="hidden" name="tournament_id" value="${t.id}"><input type="hidden" name="round" value="${r}"><h3 class="zone-title">Fecha ${r}</h3><div class="card"><div class="table-wrap"><table class="data">
     <thead><tr><th>Partido</th><th>Día</th><th>Hora</th><th>Cancha</th></tr></thead>
     <tbody>${rows}</tbody>
-    </table></div></div><p class="mt-2"><button class="btn btn-primary btn-sm" type="submit">Guardar fecha ${r}</button></p></form>`;
+    </table></div></div><div class="row-between mt-2">
+      <button class="btn btn-primary btn-sm" type="submit">Guardar fecha ${r}</button>
+      <span style="display:flex;gap:6px;align-items:center">
+        <input type="number" name="shift_days" value="0" min="-30" max="30" style="width:64px" title="Días a correr el inicio de la fecha (0 = solo re-slotea hora y cancha)">
+        <button class="btn btn-ghost btn-sm" type="submit" formaction="/admin/fechas/regenerar" formmethod="post" title="Re-slotea hora y cancha con las canchas y horarios del torneo; el número corre el día de todos los partidos pendientes" onclick="return confirm('Se van a pisar hora y cancha de la fecha ${r} con el patrón del torneo. ¿Continuar?')">↻ Regenerar fecha</button>
+      </span>
+    </div></form>`;
     })
     .join('');
 
   const body = `
-${flash('success', msg)}
+${flash('success', msg)}${flash('error', errMsg)}
 ${pageHead('Días, horas y canchas')}
 ${tournaments.length > 1 ? `<form method="get" action="/admin/fechas"><select name="t" onchange="this.form.submit()">${tournaments.map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></form>` : ''}
 ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></div>'}`;

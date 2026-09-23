@@ -93,3 +93,53 @@ export function scheduleCovers(s: TournamentSchedule, matchesPerRound: number): 
   if (matchesPerRound <= 0) return true;
   return s.venues.length * Math.max(1, s.kickoffs.length) >= matchesPerRound;
 }
+
+export interface RoundMatchInput {
+  id: number;
+  played_on: string;
+  kickoff_time: string;
+  venue: string;
+  status: string;
+}
+
+export interface RoundSlotUpdate {
+  id: number;
+  played_on: string;
+  kickoff: string;
+  venue: string;
+}
+
+/** Suma N días a una fecha YYYY-MM-DD (UTC, sin sorpresas de zona horaria). */
+function shiftDate(isoDate: string, days: number): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return isoDate;
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Regenera los horarios y canchas de UNA jornada: corre el día `shiftDays`
+ * (negativo = adelanta) y re-slotea hora y cancha con `roundSlots` sobre los
+ * partidos pendientes, en orden. Los ya jugados (y los bye) no se tocan;
+ * sin canchas ni horarios configurados, conserva los actuales.
+ */
+export function regenerateRound(
+  matches: RoundMatchInput[],
+  s: TournamentSchedule,
+  shiftDays = 0
+): RoundSlotUpdate[] {
+  const shift = Math.trunc(shiftDays);
+  const pending = matches.filter((m) => m.status !== 'played' && m.status !== 'walkover' && m.status !== 'bye');
+  const slots = roundSlots(pending.length, s);
+  const updates: RoundSlotUpdate[] = [];
+  pending.forEach((m, i) => {
+    const slot = slots[i];
+    updates.push({
+      id: m.id,
+      played_on: shift !== 0 ? shiftDate(m.played_on, shift) : m.played_on,
+      kickoff: slot ? slot.kickoff : m.kickoff_time,
+      venue: slot ? slot.venue : m.venue,
+    });
+  });
+  return updates;
+}

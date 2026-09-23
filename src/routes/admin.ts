@@ -15,7 +15,7 @@ import {
 import { slugify } from '../lib/slug.ts';
 import type { MatchStatus } from '../lib/types.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
-import { roundSlots, scheduleFromForm, scheduleOf } from '../lib/schedule.ts';
+import { roundSlots, scheduleFromForm, scheduleOf, regenerateRound } from '../lib/schedule.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
 import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
@@ -427,7 +427,44 @@ adminRoutes.post('/fixture/:id/eliminar', async (c) => {
 /* ---------- Fechas (día/hora/cancha por ronda) ---------- */
 
 adminRoutes.get('/fechas', async (c) => {
-  return c.html(await admin.roundsSchedulePage(c.env.DB, c.req.query('t')));
+  return c.html(await admin.roundsSchedulePage(c.env.DB, c.req.query('t'), c.req.query('msg'), c.req.query('err')));
+});
+
+/** Regenera hora y cancha de UNA jornada (y opcionalmente corre el día). */
+adminRoutes.post('/fechas/regenerar', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  const round = Number(f['round']);
+  const shift = Math.trunc(Number(f['shift_days'] ?? 0)) || 0;
+  if (!Number.isFinite(tournamentId) || !Number.isFinite(round)) {
+    return c.redirect('/admin/fechas?err=' + encodeURIComponent('Fecha inexistente'));
+  }
+  const t = await resolveTournament(c.env.DB, undefined, tournamentId);
+  if (!t) return c.redirect('/admin/fechas?err=' + encodeURIComponent('Torneo inexistente'));
+  const slugQ = `?t=${encodeURIComponent(t.slug)}`;
+
+  const rows = await c.env.DB.prepare(
+    'SELECT id, played_on, kickoff_time, venue, status FROM matches WHERE tournament_id = ?1 AND round = ?2 ORDER BY id'
+  )
+    .bind(tournamentId, round)
+    .all<{ id: number; played_on: string; kickoff_time: string; venue: string; status: string }>();
+  const matches = rows.results ?? [];
+  if (matches.length === 0) {
+    return c.redirect(`/admin/fechas${slugQ}&err=` + encodeURIComponent(`La fecha ${round} no tiene partidos`));
+  }
+
+  const updates = regenerateRound(matches, scheduleOf(t.config), shift);
+  const stmts: D1PreparedStatement[] = updates.map((u) =>
+    c.env.DB.prepare('UPDATE matches SET played_on = ?1, kickoff_time = ?2, venue = ?3 WHERE id = ?4')
+      .bind(u.played_on, u.kickoff, u.venue, u.id)
+  );
+  if (stmts.length) await c.env.DB.batch(stmts);
+
+  const day = shift !== 0 ? (shift > 0 ? ` (+${shift} día${shift > 1 ? 's' : ''})` : ` (${shift} día)`) : '';
+  return c.redirect(
+    `/admin/fechas${slugQ}&msg=` +
+      encodeURIComponent(`Fecha ${round} regenerada: ${updates.length} partido(s)${day}`)
+  );
 });
 
 adminRoutes.post('/fechas/guardar', async (c) => {
