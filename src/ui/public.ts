@@ -17,19 +17,15 @@ import {
 } from '../lib/share.ts';
 import {
   listTournaments,
-  getTournamentBySlug,
-  listTeams,
   getTeamBySlug,
   listPlayers,
   getPlayer,
-  listMatches,
   getMatch,
   listEvents,
+  listTeams,
   topScorers,
   topCards,
-  playerTournamentStats,
-  activeTournament,
-  tournamentEvents,
+  playerStatsAcrossTournaments,
   tournamentStats,
   searchTeams,
   searchPlayers,
@@ -37,6 +33,8 @@ import {
   rulesOf,
   type ScorersRow,
 } from '../lib/queries.ts';
+import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
+import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
 import type { Match, Team, Tournament } from '../lib/types.ts';
 import {
   layout,
@@ -81,17 +79,16 @@ function roundLabel(round: number | null): string {
   return round != null ? `Fecha ${round}` : 'Partidos';
 }
 
-async function resolveTournament(db: D1Database, slugParam: string | undefined): Promise<Tournament | null> {
-  if (slugParam) return getTournamentBySlug(db, slugParam);
-  return activeTournament(db);
-}
-
 /* ============================== HOME ============================== */
 
 export async function homePage(db: D1Database, origin: string, slugParam?: string): Promise<string> {
-  const t = await resolveTournament(db, slugParam);
-  const [tournaments, stats] = await Promise.all([listTournaments(db), tournamentStats(db)]);
-  const body = t ? await tournamentHomeBody(db, t, origin) : await emptyHomeBody(db);
+  const [tournaments, stats, view] = await Promise.all([
+    listTournaments(db),
+    tournamentStats(db),
+    loadTournamentView(db, { slug: slugParam, scorers: 5 }),
+  ]);
+  const t = view?.tournament ?? null;
+  const body = view ? await tournamentHomeBody(view, origin) : await emptyHomeBody(db);
   const inner = `
 ${heroBand(t)}
 <section class="block">${tournamentCards(tournaments, stats, t?.slug)}</section>
@@ -236,12 +233,11 @@ async function emptyHomeBody(db: D1Database): Promise<string> {
 </section>`;
 }
 
-async function tournamentHomeBody(db: D1Database, t: Tournament, origin: string): Promise<string> {
-  const [matches, teams, scorers] = await Promise.all([
-    listMatches(db, t.id),
-    listTeams(db),
-    topScorers(db, t.id, 5),
-  ]);
+async function tournamentHomeBody(view: TournamentView, origin: string): Promise<string> {
+  const t = view.tournament;
+  const matches = view.matches;
+  const teams = view.teams;
+  const scorers = view.scorers;
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
 
   const today = new Date().toISOString().slice(0, 10);
@@ -365,10 +361,11 @@ ${todayBanner}
 /* ============================== POSICIONES ============================== */
 
 export async function standingsPage(db: D1Database, slugParam?: string): Promise<string> {
-  const t = await resolveTournament(db, slugParam);
-  if (!t) return layout({ title: 'Posiciones', active: 'posiciones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
-
-  const [matches, teams] = await Promise.all([listMatches(db, t.id), listTeams(db)]);
+  const view = await loadTournamentView(db, { slug: slugParam });
+  if (!view) return layout({ title: 'Posiciones', active: 'posiciones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  const t = view.tournament;
+  const matches = view.matches;
+  const teams = view.teams;
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
   const standings = computeStandings(
     matches,
@@ -424,10 +421,11 @@ ${tables || emptyNote('Sin datos todavía')}`;
 /* ============================== FIXTURE ============================== */
 
 export async function fixturePage(db: D1Database, slugParam?: string): Promise<string> {
-  const t = await resolveTournament(db, slugParam);
-  if (!t) return layout({ title: 'Fixture', active: 'fixture', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
-
-  const [matches, teams] = await Promise.all([listMatches(db, t.id), listTeams(db)]);
+  const view = await loadTournamentView(db, { slug: slugParam });
+  if (!view) return layout({ title: 'Fixture', active: 'fixture', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  const t = view.tournament;
+  const matches = view.matches;
+  const teams = view.teams;
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
 
   const rounds = groupBy(matches, (m) => (m.round != null ? String(m.round) : 'x'));
@@ -460,10 +458,11 @@ ${bracketHtml}`;
 /* ============================== GOLEADORES ============================== */
 
 export async function scorersPage(db: D1Database, origin: string, slugParam?: string): Promise<string> {
-  const t = await resolveTournament(db, slugParam);
-  if (!t) return layout({ title: 'Goleadores', active: 'goleadores', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  const view = await loadTournamentView(db, { slug: slugParam, scorers: 50 });
+  if (!view) return layout({ title: 'Goleadores', active: 'goleadores', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  const t = view.tournament;
 
-  const [scorers, cards] = await Promise.all([topScorers(db, t.id, 50), topCards(db, t.id, 50)]);
+  const [scorers, cards] = await Promise.all([Promise.resolve(view.scorers), topCards(db, t.id, 50)]);
   const shareLines = scorers.slice(0, 10).map((s, i) => `${i + 1}. ${s.player_name} (${s.team_name}) — ${s.goals} goles`);
 
   const scorersHtml = scorers.length
@@ -527,13 +526,13 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
   const team = await getTeamBySlug(db, slug);
   if (!team) return notFoundPage();
 
-  const [players, tournaments, allTeams] = await Promise.all([listPlayers(db, team.id), listTournaments(db), listTeams(db)]);
+  const [players, views] = await Promise.all([listPlayers(db, team.id), listTournamentViews(db)]);
+  const allTeams = views[0]?.teams ?? [];
   const teamMap = new Map<number, Team>(allTeams.map((tm) => [tm.id, tm]));
 
   // Partidos del equipo en cada torneo
   const sections: string[] = [];
-  for (const t of tournaments) {
-    const all = await listMatches(db, t.id);
+  for (const { tournament: t, matches: all } of views) {
     const mine = all.filter((m) => m.home_team_id === team.id || m.away_team_id === team.id);
     if (mine.length === 0) continue;
     sections.push(`<h3 class="zone-title">${esc(t.name)}</h3>
@@ -577,12 +576,13 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
 export async function playerPage(db: D1Database, id: number): Promise<string> {
   const player = await getPlayer(db, id);
   if (!player) return notFoundPage();
-  const [tournaments, teams] = await Promise.all([listTournaments(db), listTeams(db)]);
+  const [teams, statsByTournament] = await Promise.all([listTeams(db), playerStatsAcrossTournaments(db, player.id)]);
   const myTeam = teams.find((tm) => tm.id === player.team_id) ?? null;
 
   const perTournament: string[] = [];
-  for (const t of tournaments) {
-    const stats = await playerTournamentStats(db, player.id, t.id);
+  for (const t of await listTournaments(db)) {
+    const stats = statsByTournament.get(t.id);
+    if (!stats) continue;
     if (stats.goals + stats.ownGoals + stats.yellows + stats.reds + stats.playedMatches === 0) continue;
     perTournament.push(`<div class="card"><div class="card-body row-between">
       <a href="/?t=${escUrl(t.slug)}"><strong>${esc(t.name)}</strong></a>
@@ -694,9 +694,7 @@ export async function historyPage(db: D1Database): Promise<string> {
   }
 
   const cards: string[] = [];
-  for (const t of tournaments) {
-    const matches = await listMatches(db, t.id);
-    const teams = await listTeams(db);
+  for (const { tournament: t, matches, teams } of await listTournamentViews(db)) {
     const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
     const played = matches.filter((m) => m.status === 'played' || m.status === 'walkover').length;
     const total = matches.filter((m) => m.status !== 'bye').length;
@@ -811,6 +809,40 @@ export async function searchPage(db: D1Database, q?: string): Promise<string> {
   return layout({ title: `Buscar: ${query}`, nav: PUBLIC_NAV, body });
 }
 
+/* ============================== CHANGELOG ============================== */
+
+const KIND_LABEL: Record<ChangelogItem['kind'], string> = {
+  nuevo: 'Nuevo',
+  mejora: 'Mejora',
+  arreglo: 'Arreglo',
+};
+
+/** Página de novedades: en lenguaje sencillo, la más nueva arriba. */
+export function changelogPage(): string {
+  const entries = CHANGELOG.map((e) => {
+    const items = e.items
+      .map((i) => `<li><span class="badge ${i.kind === 'nuevo' ? 'green' : i.kind === 'mejora' ? 'info' : 'red'}">${KIND_LABEL[i.kind]}</span>${esc(i.text)}</li>`)
+      .join('');
+    const fecha = formatDateLong(e.date);
+    return `<article class="card changelog-entry">
+  <header class="card-head">
+    <h2>v${esc(e.version)} — ${esc(e.title)}</h2>
+    <span class="badge ghost">${esc(fecha)}</span>
+  </header>
+  <ul class="changelog-list">${items}</ul>
+</article>`;
+  }).join('');
+
+  const body = `
+<section class="hero">
+  <div class="hero-kicker">ZonaLiga v${esc(latestEntry().version)}</div>
+  <h1>Novedades</h1>
+  <p class="hero-sub">Acá contamos, con palabras simples, todo lo que vamos agregando y mejorando del sitio.</p>
+</section>
+<section class="block">${entries}</section>`;
+  return layout({ title: 'Novedades — ZonaLiga', nav: PUBLIC_NAV, body });
+}
+
 /* ============================== 404 ============================== */
 
 export function notFoundPage(): string {
@@ -821,10 +853,12 @@ export function notFoundPage(): string {
 /* ============================== Suspensiones (público) ============================== */
 
 export async function suspensionsPage(db: D1Database, slugParam?: string): Promise<string> {
-  const t = await resolveTournament(db, slugParam);
-  if (!t) return layout({ title: 'Suspensiones', active: 'suspensiones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
-
-  const [matches, teams, events] = await Promise.all([listMatches(db, t.id), listTeams(db), tournamentEvents(db, t.id)]);
+  const view = await loadTournamentView(db, { slug: slugParam, events: true });
+  if (!view) return layout({ title: 'Suspensiones', active: 'suspensiones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  const t = view.tournament;
+  const matches = view.matches;
+  const teams = view.teams;
+  const events = view.events;
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
   const rules = rulesOf(t);
   const maxRound = matches.reduce((acc, m) => Math.max(acc, m.round ?? 0), 0);

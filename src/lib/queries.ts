@@ -69,6 +69,10 @@ export async function searchTournaments(db: D1Database, q: string, limit = 8): P
   return results ?? [];
 }
 
+export async function getTournament(db: D1Database, id: number): Promise<Tournament | null> {
+  return (await db.prepare('SELECT * FROM tournaments WHERE id = ?1').bind(id).first<Tournament>()) ?? null;
+}
+
 export async function getTournamentBySlug(db: D1Database, slug: string): Promise<Tournament | null> {
   return (
     (await db
@@ -195,6 +199,16 @@ export interface PlayerTournamentStats {
   playedMatches: number;
 }
 
+/** Agregación de eventos de un jugador (compartida por las dos variantes de stats). */
+const PLAYER_AGG = `SUM(CASE WHEN e.type = 'goal' THEN 1 ELSE 0 END) AS goals,
+   SUM(CASE WHEN e.type = 'own_goal' THEN 1 ELSE 0 END) AS ownGoals,
+   SUM(CASE WHEN e.type = 'yellow' THEN 1 ELSE 0 END) AS yellows,
+   SUM(CASE WHEN e.type = 'red' THEN 1 ELSE 0 END) AS reds`;
+
+function zeroStats(playedMatches = 0): PlayerTournamentStats {
+  return { goals: 0, ownGoals: 0, yellows: 0, reds: 0, playedMatches };
+}
+
 export async function playerTournamentStats(db: D1Database, playerId: number, tournamentId: number): Promise<PlayerTournamentStats> {
   const played = await db
     .prepare(
@@ -208,24 +222,69 @@ export async function playerTournamentStats(db: D1Database, playerId: number, to
     .first<{ n: number }>();
   const row = await db
     .prepare(
-      `SELECT
-         SUM(CASE WHEN e.type = 'goal' THEN 1 ELSE 0 END) AS goals,
-         SUM(CASE WHEN e.type = 'own_goal' THEN 1 ELSE 0 END) AS ownGoals,
-         SUM(CASE WHEN e.type = 'yellow' THEN 1 ELSE 0 END) AS yellows,
-         SUM(CASE WHEN e.type = 'red' THEN 1 ELSE 0 END) AS reds
+      `SELECT ${PLAYER_AGG}
        FROM events e
        JOIN matches m ON m.id = e.match_id
        WHERE e.player_id = ?1 AND m.tournament_id = ?2`
     )
     .bind(playerId, tournamentId)
-    .first<{ goals: number; ownGoals: number; yellows: number; reds: number }>();
+    .first<{ goals: number | null; ownGoals: number | null; yellows: number | null; reds: number | null }>();
+  if (!row || (row.goals == null && row.ownGoals == null && row.yellows == null && row.reds == null)) {
+    return zeroStats(played?.n ?? 0);
+  }
   return {
-    goals: row?.goals ?? 0,
-    ownGoals: row?.ownGoals ?? 0,
-    yellows: row?.yellows ?? 0,
-    reds: row?.reds ?? 0,
+    goals: row.goals ?? 0,
+    ownGoals: row.ownGoals ?? 0,
+    yellows: row.yellows ?? 0,
+    reds: row.reds ?? 0,
     playedMatches: played?.n ?? 0,
   };
+}
+
+/** Estadísticas de un jugador en TODOS los torneos de una vez, indexadas por torneo. */
+export async function playerStatsAcrossTournaments(db: D1Database, playerId: number): Promise<Map<number, PlayerTournamentStats>> {
+  const [rows, playedRows] = await Promise.all([
+    db
+      .prepare(
+        `SELECT m.tournament_id AS tid, ${PLAYER_AGG}
+         FROM events e
+         JOIN matches m ON m.id = e.match_id
+         WHERE e.player_id = ?1
+         GROUP BY m.tournament_id`
+      )
+      .bind(playerId)
+      .all<{ tid: number; goals: number | null; ownGoals: number | null; yellows: number | null; reds: number | null }>(),
+    db
+      .prepare(
+        `SELECT m.tournament_id AS tid, COUNT(*) AS n
+         FROM events e
+         JOIN matches m ON m.id = e.match_id
+         WHERE e.player_id = ?1
+           AND e.type IN ('goal','own_goal','yellow','red')
+         GROUP BY m.tournament_id`
+      )
+      .bind(playerId)
+      .all<{ tid: number; n: number }>(),
+  ]);
+
+  const played = new Map<number, number>();
+  for (const r of playedRows.results ?? []) played.set(r.tid, r.n ?? 0);
+
+  const map = new Map<number, PlayerTournamentStats>();
+  for (const r of rows.results ?? []) {
+    map.set(r.tid, {
+      goals: r.goals ?? 0,
+      ownGoals: r.ownGoals ?? 0,
+      yellows: r.yellows ?? 0,
+      reds: r.reds ?? 0,
+      playedMatches: played.get(r.tid) ?? 0,
+    });
+  }
+  // Torneos donde solo jugó (sin eventos agregados) igual aparecen con playedMatches.
+  for (const [tid, n] of played) {
+    if (!map.has(tid)) map.set(tid, zeroStats(n));
+  }
+  return map;
 }
 
 /** Torneo activo (o el más reciente si no hay activo). */

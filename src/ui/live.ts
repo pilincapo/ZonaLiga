@@ -10,14 +10,11 @@ import {
   type LiveSide,
 } from '../lib/live.ts';
 import {
-  activeTournament,
   eventsForMatches,
-  getTournamentBySlug,
-  listMatches,
   listPlayers,
-  listTeams,
   pendingForTournament,
 } from '../lib/queries.ts';
+import { loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import type { Tournament } from '../lib/types.ts';
 import { crest, emptyNote, layout } from './components.ts';
 import { PUBLIC_NAV } from './public.ts';
@@ -30,19 +27,14 @@ export interface LiveData {
   payload: LivePayload;
 }
 
-async function resolveLiveTournament(db: D1Database, slug?: string): Promise<Tournament | null> {
-  return slug ? getTournamentBySlug(db, slug) : activeTournament(db);
-}
-
 /** Consulta todo lo necesario y arma el payload (compartido por la página y el endpoint). */
 export async function liveData(db: D1Database, slug?: string): Promise<LiveData | null> {
-  const t = await resolveLiveTournament(db, slug);
-  if (!t) return null;
-
-  const [matches, teams] = await Promise.all([listMatches(db, t.id), listTeams(db)]);
+  const view = await loadTournamentView(db, { slug });
+  if (!view) return null;
+  const t = view.tournament;
 
   const today = leagueNow().date;
-  const todayMatches = matches.filter((m) => m.played_on === today && m.status !== 'bye');
+  const todayMatches = view.matches.filter((m) => m.played_on === today && m.status !== 'bye');
   const teamIds = new Set<number>();
   for (const m of todayMatches) {
     if (m.home_team_id != null) teamIds.add(m.home_team_id);
@@ -71,7 +63,7 @@ export async function liveData(db: D1Database, slug?: string): Promise<LiveData 
 
   return {
     tournament: t,
-    payload: buildLivePayload({ matches, teams, players, events, provisional }),
+    payload: buildLivePayload({ matches: view.matches, teams: view.teams, players, events, provisional }),
   };
 }
 

@@ -9,12 +9,10 @@ import { computeSuspensions } from '../lib/suspensions.ts';
 import { BRACKET_LABELS } from '../lib/bracket.ts';
 import { formatDateShort } from '../lib/format.ts';
 import {
-  activeTournament,
   countPendingSubmissions,
   getMatch,
   getTeam,
   listEvents,
-  listMatches,
   listPlayers,
   listTeams,
   listTournaments,
@@ -22,8 +20,8 @@ import {
   pendingSubmissions,
   rulesOf,
   submissionEvents,
-  tournamentEvents,
 } from '../lib/queries.ts';
+import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
 import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
 import { waLink } from '../lib/share.ts';
@@ -94,10 +92,11 @@ export async function dashboardPage(db: D1Database, msg?: string, errMsg?: strin
     listTeams(db),
     countPendingSubmissions(db),
   ]);
-  const active = await activeTournament(db);
+  const activeView = await loadTournamentView(db);
+  const active = activeView?.tournament ?? null;
   let matchStats = { total: 0, played: 0, upcoming: 0 };
-  if (active) {
-    const matches = await listMatches(db, active.id);
+  if (activeView) {
+    const matches = activeView.matches;
     matchStats = {
       total: matches.filter((m) => m.status !== 'bye').length,
       played: matches.filter((m) => m.status === 'played' || m.status === 'walkover').length,
@@ -436,7 +435,9 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     return adminLayout({ title: 'Fixture', active: 'fixture', body: `${pageHead('Fixture')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
   }
   const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
-  const [matches, teams] = await Promise.all([listMatches(db, t.id), listTeams(db, true)]);
+  const view = await loadTournamentView(db, { id: t.id, includeInactiveTeams: true });
+  const matches = view?.matches ?? [];
+  const teams = view?.teams ?? [];
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
 
   const byRound = new Map<number, Match[]>();
@@ -569,11 +570,12 @@ export async function sheetListPage(db: D1Database, msg?: string, errMsg?: strin
     return adminLayout({ title: 'Planilla', active: 'planilla', body: `${pageHead('Planilla')}<div class="card"><div class="card-body">Primero creá un torneo y su fixture.</div></div>` });
   }
   const t = tournaments[0]!;
-  const [matches, teams, pendingMatches] = await Promise.all([
-    listMatches(db, t.id),
-    listTeams(db, true),
+  const [view, pendingMatches] = await Promise.all([
+    loadTournamentView(db, { id: t.id, includeInactiveTeams: true }),
     matchIdsWithPendingSubmissions(db),
   ]);
+  const matches = view?.matches ?? [];
+  const teams = view?.teams ?? [];
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
 
   const pending = matches
@@ -738,8 +740,9 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
     return adminLayout({ title: 'Fechas', active: 'fixture', body: `${pageHead('Fechas')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
   }
   const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
-  const matches = await listMatches(db, t.id);
-  const teams = await listTeams(db, true);
+  const view = await loadTournamentView(db, { id: t.id, includeInactiveTeams: true });
+  const matches = view?.matches ?? [];
+  const teams = view?.teams ?? [];
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
 
   const byRound = new Map<number, Match[]>();
@@ -786,7 +789,10 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
     return adminLayout({ title: 'Suspensiones', active: 'suspensiones', body: `${pageHead('Suspensiones')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
   }
   const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
-  const [matches, teams, events] = await Promise.all([listMatches(db, t.id), listTeams(db, true), tournamentEvents(db, t.id)]);
+  const view = await loadTournamentView(db, { id: t.id, includeInactiveTeams: true, events: true });
+  const matches = view?.matches ?? [];
+  const teams = view?.teams ?? [];
+  const events = view?.events ?? [];
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
   const rules = rulesOf(t);
   const maxRound = matches.reduce((acc, m) => Math.max(acc, m.round ?? 0), 0);
