@@ -5,7 +5,7 @@
 // "vX.Y.Z" con link a /changelog para que cualquiera pueda ver las novedades.
 
 /** Versión actual de la app. Mantener sincronizada con la de package.json. */
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.2.0';
 
 /** Categorías de cada cambio, con su etiqueta visible. */
 export type ChangeKind = 'nuevo' | 'mejora' | 'arreglo';
@@ -29,6 +29,16 @@ export interface ChangelogEntry {
  * Entradas ordenadas de la más nueva a la más vieja.
  */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.2.0',
+    date: '2026-09-23',
+    title: 'Canchas, horarios y ajustes de puntos',
+    items: [
+      { kind: 'nuevo', text: 'Configurá las canchas y horarios del torneo: el fixture se arma con ellos ya cargados.' },
+      { kind: 'nuevo', text: 'Ajustes manuales de puntos: penalizaciones o correcciones, con motivo documentado y a la vista en posiciones.' },
+      { kind: 'mejora', text: 'El historial de torneos aclara si el campeón tuvo ajustes de puntos.' },
+    ],
+  },
   {
     version: '0.1.0',
     date: '2026-09-23',
