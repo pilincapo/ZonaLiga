@@ -34,6 +34,20 @@ import {
 import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
+import {
+  buildCrossoverPairs,
+  crossoverRoundsOf,
+  parseCrossoverConfig,
+  CROSSOVER_RULES,
+  matchesForStandings,
+} from '../lib/crossover.ts';
+import {
+  PLAYOFF_FORMATS,
+  parsePlayoffConfig,
+  pendingLeagueCount,
+  playoffFormatLabel,
+} from '../lib/playoff.ts';
+import { computeStandings } from '../lib/standings.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
 import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
@@ -582,6 +596,120 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   );
   const gapsNote = gaps.length ? `<div class="warning-box">${esc(formatScheduleGaps(gaps))}</div>` : '';
 
+  // Fecha de cruce entre zonas: formulario + vista previa (solo con 2 zonas).
+  const zones = zonesOf(t.config);
+  const crossovers = parseCrossoverConfig(t.config);
+  const crossoverRounds = crossoverRoundsOf(t.config);
+  const activeTeamRows = teams.filter((x) => x.active);
+  const standings = computeStandings(
+    matchesForStandings(matches, t.config),
+    activeTeamRows.map((x) => ({ id: x.id, name: x.name })),
+    rulesOf(t)
+  );
+  const twoZones = zones.enabled && zones.zones.length === 2;
+  const usedRounds = new Set(roundKeys);
+  const nextFreeRound = roundKeys.length ? Math.max(...roundKeys) + 1 : 1;
+  let crossoverBlock = '';
+  if (twoZones) {
+    const zoneA = zones.zones[0]!;
+    const zoneB = zones.zones[1]!;
+    const tableA = standings.filter((row) => zoneA.teamIds.includes(row.teamId) && activeTeamRows.some((x) => x.id === row.teamId));
+    const tableB = standings.filter((row) => zoneB.teamIds.includes(row.teamId) && activeTeamRows.some((x) => x.id === row.teamId));
+    const posOf = new Map(standings.map((row, i) => [row.teamId, i + 1]));
+    const preview = (rule: 'espejo' | 'invertido' | 'cruzado') =>
+      buildCrossoverPairs(tableA, tableB, rule);
+    const ruleOptions = CROSSOVER_RULES.map(
+      (r) => `<option value="${r.value}">${esc(r.label)}</option>`
+    ).join('');
+    const previewRows = (rule: 'espejo' | 'invertido' | 'cruzado') => {
+      const { pairs, unpaired } = preview(rule);
+      const zoneName = (id: number): string =>
+        zoneA.teamIds.includes(id) ? zoneA.name : zoneB.teamIds.includes(id) ? zoneB.name : '';
+      const rows = pairs
+        .map(
+          (p) =>
+            `<tr><td>${esc(zoneName(p.home))}</td><td>${esc(teamMap.get(p.home)?.name ?? '?')}</td><td class="faint">vs</td><td>${esc(
+              teamMap.get(p.away)?.name ?? '?'
+            )}</td><td>${esc(zoneName(p.away))}</td></tr>`
+        )
+        .join('');
+      const libre = unpaired.length
+        ? `<tr><td colspan="5" class="muted small">Libran (sin rival): ${unpaired.map((id) => esc(teamMap.get(id)?.name ?? '?')).join(', ')}</td></tr>`
+        : '';
+      return `<div class="table-wrap"><table class="data">
+        <thead><tr><th colspan="2">${esc(zoneA.name)}</th><th></th><th colspan="2">${esc(zoneB.name)}</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="muted small">Sin equipos para el cruce</td></tr>'}${libre}</tbody></table></div>`;
+    };
+    const existingList = crossovers.length
+      ? `<p class="hint">Fechas de cruce ya generadas: ${crossovers
+          .map((d) => `Fecha ${d.round} (${esc(d.rule)}${d.counts ? '' : ', no cuenta'})`)
+          .join(' · ')}</p>`
+      : '';
+    crossoverBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <strong>Fecha especial de cruce entre zonas</strong>
+  <p class="hint">Los equipos de una zona se enfrentan a los de la otra según la tabla: primero contra primero, último contra primero, etc. Los partidos se crean en la fecha que elijas y la tabla se calcula según cómo va el torneo hoy.</p>
+  ${existingList}
+  <form method="post" action="/admin/fixture/cruce" class="form-row">
+    <input type="hidden" name="tournament_id" value="${t.id}">
+    <div class="field"><label>Fecha</label><input type="number" name="round" min="1" value="${nextFreeRound}" style="width:100px"></div>
+    <div class="field grow"><label>Regla de emparejamiento</label><select name="rule">${ruleOptions}</select></div>
+    <div class="field" style="align-self:flex-end">
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="counts" style="width:auto"> Los puntos cuentan para la tabla</label>
+    </div>
+    <div class="field" style="align-self:flex-end"><button class="btn btn-primary" type="submit" onclick="return confirm('Se crean los partidos de la fecha de cruce según la tabla actual. ¿Continuar?')">Generar fecha de cruce</button></div>
+  </form>
+  <details class="mt-2">
+    <summary>Ver cómo quedaría con cada regla (tabla de hoy)</summary>
+    <div class="grid-2" style="margin-top:8px">
+      <div><strong>Espejo</strong>${previewRows('espejo')}</div>
+      <div><strong>Invertido</strong>${previewRows('invertido')}</div>
+      <div><strong>Cruzado</strong>${previewRows('cruzado')}</div>
+    </div>
+  </details>
+</div></div></section>`;
+  }
+
+  // Playoff (llave opcional entre zonas): se habilita con todo jugado.
+  const playoff = parsePlayoffConfig(t.config);
+  let playoffBlock = '';
+  if (twoZones) {
+    if (playoff) {
+      playoffBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <strong>Playoff generado</strong>
+  <p class="hint">${esc(playoffFormatLabel(playoff.format))} — fecha ${playoff.round}. Los partidos de la llave aparecen abajo y en el sitio público, en la sección Llaves / Playoffs. Para rearmar la fase regular usá “Regenerar cruce”: la llave no se toca.</p>
+</div></div></section>`;
+    } else {
+      const pending = pendingLeagueCount(matches);
+      const noFixture = matches.length === 0;
+      const ready = !noFixture && pending === 0;
+      const statusNote = noFixture
+        ? '<div class="warning-box">Primero generá el fixture: el playoff se arma cuando todas las fechas de zona estén jugadas.</div>'
+        : pending > 0
+          ? `<div class="warning-box">Faltan ${pending} partido(s) por jugar para habilitar el playoff.</div>`
+          : '<p class="hint">✓ Todas las fechas de zona están jugadas: el playoff está listo para generar.</p>';
+      playoffBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <strong>Playoff (llave opcional entre zonas)</strong>
+  <p class="hint">Se genera cuando todas las fechas están jugadas. El ganador de la llave queda como campeón del torneo y los partidos no cuentan para la tabla de posiciones.</p>
+  ${statusNote}
+  <form method="post" action="/admin/fixture/playoff" class="form-row">
+    <input type="hidden" name="tournament_id" value="${t.id}">
+    <div class="field grow">
+      <label>Formato</label>
+      <select name="format">${PLAYOFF_FORMATS.map(
+        (f) => `<option value="${f.value}">${esc(f.label)}</option>`
+      ).join('')}</select>
+    </div>
+    <div class="field" style="align-self:flex-end">
+      <button class="btn btn-primary" type="submit" ${ready ? '' : 'disabled'} onclick="return confirm('Se genera la llave del playoff según la tabla actual. ¿Continuar?')">Generar playoff</button>
+    </div>
+  </form>
+</div></div></section>`;
+    }
+  }
+
   // Guardia contra pisar resultados: con partidos jugados (o torneo
   // finalizado), "Generar" queda deshabilitado y se explica por qué.
   const jugados = playedCount(matches);
@@ -615,7 +743,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     </tr>`;
         })
         .join('');
-      return `<h3 class="zone-title">Fecha ${r}</h3><div class="card"><div class="table-wrap"><table class="data">
+      return `<h3 class="zone-title">Fecha ${r}${crossoverRounds.has(r) ? ' <span class="badge green">Cruce entre zonas</span>' : ''}</h3><div class="card"><div class="table-wrap"><table class="data">
     <thead><tr><th>ID</th><th>Partido</th><th>Zona / Ronda</th><th>Día y hora</th><th>Cancha</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div></div>`;
     })
@@ -646,6 +774,8 @@ ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, 
 <section class="block"><div class="card"><div class="card-body">
   <strong>Orden de partidos por fecha:</strong> <a href="/admin/fechas?t=${escUrl(t.slug)}">asignar día, hora y cancha →</a>
 </div></div></section>
+${crossoverBlock}
+${playoffBlock}
 ${roundSections || '<section class="block"><div class="card"><div class="card-body">Fixture vacío. Generá uno automático o agregá partidos.</div></div></section>'}`;
   return adminLayout({ title: 'Fixture', active: 'fixture', body });
 }

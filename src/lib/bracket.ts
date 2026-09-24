@@ -1,6 +1,6 @@
 // Modelo del bracket (llaves) para playoffs y copa.
 
-import type { Match, BracketRound, TournamentFormat } from './types.ts';
+import type { Match, BracketRound } from './types.ts';
 
 export const BRACKET_ORDER: BracketRound[] = ['R16', 'QF', 'SF', 'F', '3P'];
 
@@ -23,8 +23,8 @@ export interface BracketColumn {
   matches: BracketMatchView[];
 }
 
-export function hasBracket(format: TournamentFormat, matches: Match[]): boolean {
-  return format !== 'round_robin' && matches.some((m) => m.bracket_round !== '');
+export function hasBracket(matches: Match[]): boolean {
+  return matches.some((m) => m.bracket_round !== '');
 }
 
 export function sourceLabel(source: string): string {
@@ -101,5 +101,12 @@ export function matchWinnerLoser(
   if (m.status !== 'played' && m.status !== 'walkover') return null;
   if (m.home_goals > m.away_goals) return { winner: m.home_team_id, loser: m.away_team_id };
   if (m.away_goals > m.home_goals) return { winner: m.away_team_id, loser: m.home_team_id };
+  // Empate en goles con puntos manuales cargados = definición por penales:
+  // el que tiene más puntos pasa de ronda.
+  if (m.home_points != null && m.away_points != null && m.home_points !== m.away_points) {
+    return m.home_points > m.away_points
+      ? { winner: m.home_team_id, loser: m.away_team_id }
+      : { winner: m.away_team_id, loser: m.home_team_id };
+  }
   return null; // empate: sin ganador (indefinido para llaves)
 }

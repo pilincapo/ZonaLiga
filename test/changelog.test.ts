@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { APP_VERSION, CHANGELOG } from '../src/changelog.ts';
+import { APP_VERSION, CHANGELOG, parseChangelog } from '../src/changelog.ts';
 import { layout } from '../src/ui/components.ts';
 import pkg from '../package.json?raw';
 import css from '../public/css/app.css?raw';
+import md from '../CHANGELOG.md?raw';
 
 const html = layout({ title: 'Prueba', active: 'home', nav: [{ href: '/', label: 'Inicio', match: 'home' }], body: '' });
 
@@ -19,7 +20,20 @@ describe('changelog', () => {
   it('hay entradas y la primera es la más nueva (v0.1.0)', () => {
     expect(CHANGELOG.length).toBeGreaterThan(0);
     expect(CHANGELOG[0]!.version).toBe(APP_VERSION);
-    expect(CHANGELOG[0]!.date).toBe('2026-09-23');
+  });
+
+  it('el CHANGELOG.md es la fuente: el parseo cubre todas las versiones del archivo', () => {
+    // Cada encabezado "## [x.y.z]" del .md debe aparecer como entrada parseada.
+    const headers = [...md.matchAll(/^##\s+\[([^\]]+)\]/gm)].map((m) => m[1]!);
+    expect(headers.length).toBeGreaterThan(0);
+    expect(CHANGELOG.map((e) => e.version)).toEqual(headers);
+    // La primera entrada del .md define la versión de la app.
+    expect(headers[0]).toBe(APP_VERSION);
+  });
+
+  it('parseChangelog es tolerante a texto que no encaja', () => {
+    const entries = parseChangelog('# Título\n\nNotas sueltas sin formato.\n\n' + md);
+    expect(entries.length).toBe(CHANGELOG.length); // las líneas ajenas no generan entradas
   });
 
   it('las entradas están ordenadas de más nueva a más vieja', () => {

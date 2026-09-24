@@ -206,17 +206,38 @@ tablas, goleadores y números del torneo.
 
 ## Changelog y versiones
 
-Cada cambio visible de la app se registra en **`src/changelog.ts`** (fuente única) y se puede
-consultar desde el sitio en **`/changelog`**: el pie de página muestra un chip chiquito con la
-versión actual (ej. `v0.1.0`) que lleva a la página de novedades, escrita en lenguaje sencillo
-para cualquiera de la liga.
+Cada cambio visible de la app se registra en **`CHANGELOG.md`** (raíz del proyecto, fuente única
+de verdad) y se puede consultar desde el sitio en **`/changelog`**: el pie de página muestra un
+chip chiquito con la versión actual (ej. `v0.2.18`) que lleva a la página de novedades, escrita
+en lenguaje sencillo para cualquiera de la liga.
+
+**Quién lee qué:** `src/changelog.ts` no tiene la lista escrita a mano — importa el
+`CHANGELOG.md` y lo parsea (`parseChangelog`). En producción wrangler sube el `.md` como texto
+gracias a la regla `[[rules]] type = "Text"` de `wrangler.toml`; en los tests,
+`vitest.config.ts` define el plugin `markdown-loader` que hace lo mismo.
 
 Para registrar una modificación:
 
-1. Agregá (o actualizá) la entrada más nueva de `CHANGELOG` en `src/changelog.ts`: ítems con
-   categoría `nuevo` / `mejora` / `arreglo` y texto simple, más nueva arriba.
-2. Subí `APP_VERSION` en el mismo archivo y la `version` de `package.json` (deben coincidir;
-   hay un test que lo verifica).
+1. Agregá la entrada nueva **arriba del todo** del `CHANGELOG.md`, con este formato:
+
+   ```markdown
+   ## [0.2.19] — 2026-09-25 — Título corto de la versión
+
+   ### Nuevo
+   - El cambio, en lenguaje sencillo.
+
+   ### Mejora
+   - Otro cambio.
+   ```
+
+   Categorías: `### Nuevo` / `### Mejora` / `### Arreglo` (subtítulos), cada cambio como viñeta.
+2. Subí la `version` en `package.json` — debe coincidir con la primera entrada del `.md`
+   (hay un test que lo verifica).
+3. `src/changelog.ts` **no se edita**: no lleva `APP_VERSION` escrito a mano ni lista de
+   cambios; todo sale del `.md`. Solo se toca si cambia el formato del archivo o el parser.
+
+Los tests de `test/changelog.test.ts` controlan que el parseo cubra todas las entradas, que
+las categorías sean válidas y que la versión coincida.
 
 ## Arquitectura
 

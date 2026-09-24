@@ -27,6 +27,26 @@ import {
 } from '../lib/schedule.ts';
 import { zonesFromForm, zonesOf, validateZones } from '../lib/zones.ts';
 import { buildZonedFixture, interleaveSlots } from '../lib/fixture.ts';
+import {
+  buildCrossoverPairs,
+  crossoverConfigJson,
+  crossoverRoundsOf,
+  parseCrossoverConfig,
+  parseCrossoverRule,
+  matchesForStandings,
+  type CrossoverDate,
+} from '../lib/crossover.ts';
+import {
+  buildPlayoffPlan,
+  parsePlayoffConfig,
+  parsePlayoffFormat,
+  playoffConfigJson,
+  pendingLeagueCount,
+  playoffFormatLabel,
+  resolveAdvancements,
+} from '../lib/playoff.ts';
+import { computeStandings } from '../lib/standings.ts';
+import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
 import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
@@ -118,7 +138,14 @@ adminRoutes.post('/torneos/:id', async (c) => {
   const name = String(f['name'] ?? '').trim();
   if (!name) return c.html(await admin.tournamentFormPage(c.env.DB, id, 'El nombre es obligatorio'), 400);
   const rules = readRules(f);
-  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f) };
+  // Preserva las fechas de cruce ya generadas: se guardan en la misma config
+  // y este form no las toca.
+  const prevRow = await c.env.DB.prepare('SELECT config FROM tournaments WHERE id = ?1').bind(id).first<{ config: string }>();
+  const prevKeep = {
+    ...crossoverConfigJson(parseCrossoverConfig(prevRow?.config ?? '{}')),
+    ...playoffConfigJson(parsePlayoffConfig(prevRow?.config ?? '{}')),
+  };
+  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f), ...prevKeep };
   await c.env.DB.prepare('UPDATE tournaments SET name = ?1, season = ?2, format = ?3, config = ?4, status = ?5 WHERE id = ?6')
     .bind(name, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'), id)
     .run();
@@ -130,6 +157,25 @@ adminRoutes.post('/torneos/:id/eliminar', async (c) => {
   await c.env.DB.prepare('DELETE FROM tournaments WHERE id = ?1').bind(id).run();
   return c.redirect('/admin/torneos?msg=' + encodeURIComponent('Torneo eliminado'));
 });
+
+/**
+ * Avance automático de la llave: si un partido de playoff quedó decidido (o
+ * definido por penales con puntos manuales), completa los equipos del
+ * siguiente round que estaban esperando el ganador/perdedor.
+ */
+async function applyAdvancements(db: D1Database, tournamentId: number): Promise<void> {
+  const rows = await db.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id').bind(tournamentId).all<Match>();
+  const advancements = resolveAdvancements(rows.results ?? []);
+  if (advancements.length === 0) return;
+  const stmts: D1PreparedStatement[] = advancements.map((a) =>
+    db
+      .prepare(
+        `UPDATE matches SET ${a.side === 'home' ? 'home_team_id' : 'away_team_id'} = ?1 WHERE id = ?2 AND ${a.side === 'home' ? 'home_team_id' : 'away_team_id'} IS NULL`
+      )
+      .bind(a.teamId, a.matchId)
+  );
+  await db.batch(stmts);
+}
 
 function readRules(f: Record<string, unknown>) {
   const num = (k: string, fallback: number) => {
@@ -258,6 +304,8 @@ adminRoutes.post('/entregas/:id/aprobar', async (c) => {
     c.env.DB.prepare("UPDATE submissions SET review = 'approved', reviewed_at = datetime('now') WHERE id = ?1").bind(id)
   );
   await c.env.DB.batch(stmts);
+  // Si la entrega decide una llave (semifinal), el siguiente round se completa solo.
+  await applyAdvancements(c.env.DB, match.tournament_id);
 
   return c.redirect(`${dest}?msg=` + encodeURIComponent('Entrega aprobada y publicada'));
 });
@@ -492,6 +540,7 @@ adminRoutes.post('/fixture/regenerar', async (c) => {
     mode,
     schedule: scheduleOf(t.config),
     zones: zonesOf(t.config),
+    crossovers: parseCrossoverConfig(t.config),
   });
 
   const stmts: D1PreparedStatement[] = [];
@@ -521,7 +570,12 @@ adminRoutes.post('/fixture/regenerar', async (c) => {
   const after = await c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id')
     .bind(tournamentId)
     .all<Match>();
-  const issues = verifyPairings(after.results ?? [], mode, (id) => names.get(id) ?? `equipo ${id}`);
+  const issues = verifyPairings(
+    after.results ?? [],
+    mode,
+    (id) => names.get(id) ?? `equipo ${id}`,
+    crossoverRoundsOf(t.config)
+  );
   const resumen = `Cruce regenerado: ${plan.keptMatchIds.length} jugado(s) conservado(s), ${plan.create.length} nuevo(s), ${plan.removeMatchIds.length} pendiente(s) reemplazado(s)`;
   if (issues.length) {
     const detail = issues.slice(0, 6).join(' · ') + (issues.length > 6 ? ' …' : '');
@@ -529,6 +583,189 @@ adminRoutes.post('/fixture/regenerar', async (c) => {
   }
   return c.redirect(
     `${dest}&msg=` + encodeURIComponent(`${resumen}. ✓ Verificado: los nuevos no pisan los jugados`)
+  );
+});
+
+/**
+ * Genera la fecha especial de cruce entre zonas: los equipos de una zona se
+ * enfrentan a los de la otra según su posición en la tabla (1º vs 1º, etc.).
+ */
+adminRoutes.post('/fixture/cruce', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  const rule = parseCrossoverRule(f['rule']);
+  const counts = f['counts'] === 'on' || f['counts'] === '1';
+  const round = Math.max(1, Math.round(Number(f['round']) || 0));
+  if (!Number.isFinite(tournamentId)) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const t = await resolveTournament(c.env.DB, undefined, tournamentId);
+  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(t.slug)}`;
+
+  // Solo con 2 zonas activas: el cruce se define entre exactamente dos zonas.
+  const zones = zonesOf(t.config);
+  if (!zones.enabled || zones.zones.length !== 2) {
+    return c.redirect(`${dest}&err=` + encodeURIComponent('La fecha de cruce necesita exactamente 2 zonas configuradas'));
+  }
+
+  const [teamRows, matchRows] = await Promise.all([
+    c.env.DB.prepare('SELECT id, name, active FROM teams ORDER BY id').all<{ id: number; name: string; active: number }>(),
+    c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id').bind(tournamentId).all<Match>(),
+  ]);
+  const matches = matchRows.results ?? [];
+  const names = new Map((teamRows.results ?? []).map((r) => [r.id, r.name]));
+
+  // Guardia: no pisar partidos ya existentes en esa fecha.
+  const existingInRound = matches.filter((m) => m.round === round);
+  if (existingInRound.length > 0) {
+    return c.redirect(
+      `${dest}&err=` +
+        encodeURIComponent(`La fecha ${round} ya tiene ${existingInRound.length} partido(s). Elegí otra fecha libre.`)
+    );
+  }
+
+  // Tabla por zona (los cruces previos que no cuentan no ensucian la tabla).
+  const standings = computeStandings(matchesForStandings(matches, t.config), (teamRows.results ?? []).map((r) => ({ id: r.id, name: r.name })), rulesOf(t));
+  const zoneA = zones.zones[0]!;
+  const zoneB = zones.zones[1]!;
+  const activeIds = new Set((teamRows.results ?? []).filter((r) => r.active).map((r) => r.id));
+  const byZone = (z: { name: string; teamIds: number[] }): typeof standings =>
+    standings.filter((row) => z.teamIds.includes(row.teamId) && activeIds.has(row.teamId));
+  const tableA = byZone(zoneA);
+  const tableB = byZone(zoneB);
+  if (tableA.length === 0 || tableB.length === 0) {
+    return c.redirect(`${dest}&err=` + encodeURIComponent('Cada zona necesita al menos un equipo activo para el cruce'));
+  }
+
+  const { pairs, unpaired } = buildCrossoverPairs(tableA, tableB, rule);
+  const schedule = scheduleOf(t.config);
+  const day = plannedRoundDate(schedule, round);
+  const slots = roundSlots(pairs.length, schedule);
+
+  const stmts: D1PreparedStatement[] = [];
+  for (const [i, p] of pairs.entries()) {
+    stmts.push(
+      c.env.DB.prepare(
+        'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, played_on, kickoff_time, venue) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
+      ).bind(tournamentId, round, p.home, p.away, 'scheduled', day, slots[i]?.kickoff ?? '', slots[i]?.venue ?? '')
+    );
+  }
+  await c.env.DB.batch(stmts);
+
+  // Registrar la fecha de cruce en la config del torneo.
+  const dates: CrossoverDate[] = [...parseCrossoverConfig(t.config), { round, rule, counts }];
+  await c.env.DB
+    .prepare('UPDATE tournaments SET config = ?1 WHERE id = ?2')
+    .bind(JSON.stringify({ ...JSON.parse(t.config || '{}'), ...crossoverConfigJson(dates) }), tournamentId)
+    .run();
+
+  const zoneName = (id: number): string => (zoneA.teamIds.includes(id) ? zoneA.name : zoneB.teamIds.includes(id) ? zoneB.name : '');
+  const pairsText = pairs
+    .map((p) => `${names.get(p.home) ?? p.home} (${zoneName(p.home)}) vs ${names.get(p.away) ?? p.away} (${zoneName(p.away)})`)
+    .join(' · ');
+  const libran = unpaired.length ? ` · Libran: ${unpaired.map((id) => names.get(id) ?? id).join(', ')}` : '';
+  return c.redirect(
+    `${dest}&msg=` +
+      encodeURIComponent(`Fecha ${round} de cruce generada: ${pairsText}${libran}${counts ? '' : ' · No cuenta para la tabla'}`)
+  );
+});
+
+/**
+ * Genera el playoff entre zonas (llave opcional): se habilita cuando todas
+ * las fechas de zona están jugadas. Tres formatos (final, semis + final,
+ * semis + final + 3er puesto) y queda registrado en la config del torneo.
+ */
+adminRoutes.post('/fixture/playoff', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  const format = parsePlayoffFormat(f['format']);
+  if (!Number.isFinite(tournamentId)) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const t = await resolveTournament(c.env.DB, undefined, tournamentId);
+  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(t.slug)}`;
+  const fail = (msg: string) => c.redirect(`${dest}&err=` + encodeURIComponent(msg));
+
+  // Solo con exactamente 2 zonas configuradas.
+  const zones = zonesOf(t.config);
+  if (!zones.enabled || zones.zones.length !== 2) {
+    return fail('El playoff necesita exactamente 2 zonas configuradas');
+  }
+  // Una sola llave por torneo.
+  if (parsePlayoffConfig(t.config)) {
+    return fail('El playoff ya fue generado: está en la sección Llaves / Playoffs del fixture');
+  }
+
+  const [teamRows, matchRows] = await Promise.all([
+    c.env.DB.prepare('SELECT id, name, active FROM teams ORDER BY id').all<{ id: number; name: string; active: number }>(),
+    c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id').bind(tournamentId).all<Match>(),
+  ]);
+  const matches = matchRows.results ?? [];
+
+  // Guardia: recién cuando todo lo de la fase regular está jugado.
+  const pending = pendingLeagueCount(matches);
+  if (matches.length === 0) return fail('Primero generá el fixture');
+  if (pending > 0) return fail(`Faltan ${pending} partido(s) por jugar para habilitar el playoff`);
+
+  // Tablas por zona (los cruces que no cuentan no ensucian el orden).
+  const activeIds = new Set((teamRows.results ?? []).filter((r) => r.active).map((r) => r.id));
+  const standings = computeStandings(
+    matchesForStandings(matches, t.config),
+    (teamRows.results ?? []).map((r) => ({ id: r.id, name: r.name })),
+    rulesOf(t)
+  );
+  const tableA = standings.filter((r) => zones.zones[0]!.teamIds.includes(r.teamId) && activeIds.has(r.teamId));
+  const tableB = standings.filter((r) => zones.zones[1]!.teamIds.includes(r.teamId) && activeIds.has(r.teamId));
+
+  // La llave va en la fecha siguiente a la última, con los slots del torneo.
+  const maxRound = matches.reduce((mx, m) => Math.max(mx, m.round ?? 0), 0);
+  const round = maxRound + 1;
+  const schedule = scheduleOf(t.config);
+  const day = plannedRoundDate(schedule, round);
+
+  let slots;
+  try {
+    slots = buildPlayoffPlan(tableA, tableB, format, round);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : 'No se pudo armar el playoff');
+  }
+  const roundSlotsList = roundSlots(slots.length, schedule);
+  const stmts: D1PreparedStatement[] = [];
+  for (const [i, s] of slots.entries()) {
+    stmts.push(
+      c.env.DB.prepare(
+        'INSERT INTO matches (tournament_id, round, bracket_round, home_team_id, away_team_id, home_source, away_source, status, played_on, kickoff_time, venue) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)'
+      ).bind(
+        tournamentId,
+        s.round,
+        s.bracket_round,
+        s.home,
+        s.away,
+        s.home_source,
+        s.away_source,
+        'scheduled',
+        day,
+        roundSlotsList[i]?.kickoff ?? '',
+        roundSlotsList[i]?.venue ?? ''
+      )
+    );
+  }
+  await c.env.DB.batch(stmts);
+
+  // Registrar en la config del torneo (así "Regenerar" no lo toca y no se
+  // puede generar dos veces).
+  await c.env.DB
+    .prepare('UPDATE tournaments SET config = ?1 WHERE id = ?2')
+    .bind(JSON.stringify({ ...JSON.parse(t.config || '{}'), ...playoffConfigJson({ format, round }) }), tournamentId)
+    .run();
+
+  return c.redirect(
+    `${dest}&msg=` +
+      encodeURIComponent(
+        `Playoff generado en la fecha ${round} (${playoffFormatLabel(format)}). Se ve en Llaves / Playoffs del fixture.`
+      )
   );
 });
 
@@ -676,9 +913,9 @@ adminRoutes.post('/planilla/:id', async (c) => {
   const homeGoals = Math.max(0, Math.round(Number(f['home_goals'] ?? 0)) || 0);
   const awayGoals = Math.max(0, Math.round(Number(f['away_goals'] ?? 0)) || 0);
   const mRow = await c.env.DB
-    .prepare('SELECT home_team_id, away_team_id FROM matches WHERE id = ?1')
+    .prepare('SELECT tournament_id, home_team_id, away_team_id FROM matches WHERE id = ?1')
     .bind(id)
-    .first<{ home_team_id: number | null; away_team_id: number | null }>();
+    .first<{ tournament_id: number; home_team_id: number | null; away_team_id: number | null }>();
   if (!mRow) {
     return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
   }
@@ -751,6 +988,8 @@ adminRoutes.post('/planilla/:id', async (c) => {
       )
   );
   await c.env.DB.batch(stmts);
+  // Si el partido decide una llave (semifinal), el siguiente round se completa solo.
+  await applyAdvancements(c.env.DB, mRow.tournament_id);
   return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent('Planilla guardada'));
 });
 

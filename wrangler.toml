@@ -12,5 +12,12 @@ database_id = "8f8b91c7-7473-4d50-88fd-d996dbd2583e"
 directory = "./public"
 binding = "ASSETS"
 
+# El CHANGELOG.md se importa como texto desde src/changelog.ts (fuente única).
+# Sin esta regla, esbuild no sabría cómo cargar un .md.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = false
+
 [observability]
 enabled = true

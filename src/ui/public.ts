@@ -4,6 +4,7 @@ import { esc, escUrl } from '../lib/html.ts';
 import { formatDateShort, formatDateLong } from '../lib/format.ts';
 import { leagueNow } from '../lib/live.ts';
 import { groupBy, computeStandings, computeFairPlay, computeValla, FAIR_PLAY } from '../lib/standings.ts';
+import { crossoverRoundsOf, matchesForStandings } from '../lib/crossover.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
 import { buildBracketColumns, hasBracket, matchShortLabel, matchWinnerLoser, BRACKET_LABELS } from '../lib/bracket.ts';
 import {
@@ -64,8 +65,9 @@ function sectionHead(title: string, href?: string, linkLabel?: string): string {
   return `<div class="card-head"><h2>${esc(title)}</h2>${link}</div>`;
 }
 
-function roundLabel(round: number | null): string {
-  return round != null ? `Fecha ${round}` : 'Partidos';
+function roundLabel(round: number | null, crossoverRounds?: ReadonlySet<number>): string {
+  if (round == null) return 'Partidos';
+  return crossoverRounds?.has(round) ? `Fecha ${round} — Cruce entre zonas` : `Fecha ${round}`;
 }
 
 /* ============================== HOME ============================== */
@@ -240,7 +242,7 @@ async function tournamentHomeBody(view: TournamentView, origin: string): Promise
     .slice(0, 5);
 
   const standings = computeStandings(
-    matches,
+    matchesForStandings(matches, t.config),
     teams.map((tm) => ({ id: tm.id, name: tm.name })),
     rulesOf(t)
   );
@@ -358,7 +360,8 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
   const rules = rulesOf(t);
   const teamRows = teams.map((tm) => ({ id: tm.id, name: tm.name }));
-  const standings = computeStandings(matches, teamRows, rules);
+  // Los cruces marcados como "no cuentan" se excluyen de la tabla.
+  const standings = computeStandings(matchesForStandings(matches, t.config), teamRows, rules);
 
   // Fair play y valla menos vencida (columna y líderes, según la regla).
   const showAdv = rules.showAdvanced;
@@ -454,18 +457,19 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
 
   const rounds = groupBy(matches, (m) => (m.round != null ? String(m.round) : 'x'));
   const roundKeys = [...rounds.keys()].sort((a, b) => Number(a) - Number(b));
+  const crossoverRounds = crossoverRoundsOf(t.config);
 
   let roundSections = '';
   for (const key of roundKeys) {
     const list = rounds.get(key)!;
-    const label = key === 'x' ? 'Sin fecha asignada' : roundLabel(Number(key));
+    const label = key === 'x' ? 'Sin fecha asignada' : roundLabel(Number(key), crossoverRounds);
     roundSections += `<h3 class="zone-title">${esc(label)}</h3>
   <div class="card">${list.map((m) => matchRow(m, teamMap)).join('')}</div>`;
   }
 
   // Bracket
   let bracketHtml = '';
-  if (hasBracket(t.format, matches)) {
+  if (hasBracket(matches)) {
     const cols = buildBracketColumns(matches);
     bracketHtml = `<section class="block"><div class="card">${sectionHead('Llaves / Playoffs')}
       <div class="bracket">${cols.map((c) => bracketColumn(c, teamMap)).join('')}</div>
@@ -728,11 +732,15 @@ export async function historyPage(db: D1Database): Promise<string> {
       const adjustments = await adjustmentsForTournament(db, t.id);
       const adj = adjustments.reduce((acc, a) => acc + a.delta, 0);
       const standings = computeStandings(
-        matches,
+        matchesForStandings(matches, t.config),
         teams.map((tm) => ({ id: tm.id, name: tm.name })),
         rulesOf(t)
       );
-      champion = standings[0] ? `<div class="mt-2">🏆 <strong>Campeón:</strong> ${esc(teamMap.get(standings[0].teamId)?.name ?? '')}</div>` : '';
+      // Si hay llave y la final está decidida, el campeón es el de la final.
+      const finalMatch = matches.find((m) => m.bracket_round === 'F');
+      const finalWinner = finalMatch ? matchWinnerLoser(finalMatch) : null;
+      const championId = finalWinner?.winner ?? standings[0]?.teamId;
+      champion = championId != null ? `<div class="mt-2">🏆 <strong>Campeón:</strong> ${esc(teamMap.get(championId)?.name ?? '')}</div>` : '';
       if (adj !== 0) {
         champion += `<div class="muted small">Incluye ${adj > 0 ? '+' : ''}${adj} pt(s) de ajustes manuales</div>`;
       }

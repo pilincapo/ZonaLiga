@@ -6,6 +6,7 @@
 import type { Match } from './types.ts';
 import { plannedRoundDate, roundSlots, scheduleCapacity, type TournamentSchedule } from './schedule.ts';
 import type { ZoneConfig } from './zones.ts';
+import type { CrossoverDate } from './crossover.ts';
 
 export interface RoundPair {
   home: number;
@@ -178,6 +179,8 @@ export interface RegenInput {
   schedule: TournamentSchedule;
   /** Zonas del torneo (opcional; con zonas activas los nuevos se re-slotean compartiendo canchas). */
   zones?: ZoneConfig;
+  /** Fechas de cruce entre zonas: se conservan y no entran en la verificación. */
+  crossovers?: CrossoverDate[];
 }
 
 export interface NewMatch {
@@ -213,11 +216,19 @@ function pairingKey(a: number, b: number): string {
  */
 export function regeneratePairings(input: RegenInput): RegenPlan {
   const { existing, activeTeamIds, mode, schedule, zones = { enabled: false, zones: [] } } = input;
+  // Las fechas de cruce entre zonas son intocables: se tratan como jugadas
+  // aunque estén pendientes (nadie las borra ni rearma).
+  const crossoverRounds = new Set((input.crossovers ?? []).map((d) => d.round));
   const allowed = mode === 'double' ? 2 : 1;
 
   const kept: Match[] = [];
   const remove: Match[] = [];
-  for (const m of existing) (LOCKED_STATUSES.has(m.status) ? kept : remove).push(m);
+  for (const m of existing) {
+    // Fechas de cruce y partidos de llave (playoff): intocables, aunque estén
+    // pendientes — la regeneración solo rearma el fixture de la fase regular.
+    if (m.bracket_round || (m.round != null && crossoverRounds.has(m.round))) kept.push(m);
+    else (LOCKED_STATUSES.has(m.status) ? kept : remove).push(m);
+  }
 
   // Cruces que ya existirán: lo jugado + los pares del fixture fresco en
   // jornadas SIN partidos jugados (esas se usan tal cual). Las jornadas
@@ -256,7 +267,11 @@ export function regeneratePairings(input: RegenInput): RegenPlan {
   const active = new Set(activeTeamIds);
   const create: NewMatch[] = [];
 
+  // Fechas con cruce entre zonas o llave: no se les agregan partidos nuevos.
+  const bracketRounds = new Set(existing.filter((m) => m.bracket_round && m.round != null).map((m) => m.round!));
+
   for (let round = 1; round <= maxRound; round++) {
+    if (crossoverRounds.has(round) || bracketRounds.has(round)) continue;
     const lockedR = lockedByRound.get(round) ?? [];
     if (lockedR.length === 0 && round > fresh.rounds.length) continue; // jornada que dejó de existir
     const busy = new Set<number>();
@@ -399,18 +414,26 @@ export function regeneratePairings(input: RegenInput): RegenPlan {
 
 /**
  * Verificación sobre el fixture final: choques que ningún partido nuevo debe
- * traer. Ignora los cruces de llaves (bracket), donde repetir rival es legal.
+ * traer. Ignora los cruces de llaves (bracket), donde repetir rival es legal,
+ * y las fechas de cruce entre zonas (ahí cruzarse es justamente el objetivo).
  * Devuelve mensajes en lenguaje sencillo (vacío = todo verificado).
  */
 export function verifyPairings(
   matches: Match[],
   mode: FixtureMode,
-  name: (id: number) => string = (id) => `equipo ${id}`
+  name: (id: number) => string = (id) => `equipo ${id}`,
+  crossoverRounds: ReadonlySet<number> = new Set()
 ): string[] {
   const issues: string[] = [];
   const allowed = mode === 'double' ? 2 : 1;
   const league = matches.filter(
-    (m) => m.round != null && !m.bracket_round && m.status !== 'bye' && m.home_team_id != null && m.away_team_id != null
+    (m) =>
+      m.round != null &&
+      !m.bracket_round &&
+      m.status !== 'bye' &&
+      m.home_team_id != null &&
+      m.away_team_id != null &&
+      !crossoverRounds.has(m.round)
   );
 
   // 1) Un equipo no puede jugar dos veces en la misma jornada.
