@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.22] — 2026-09-24 — Postergados mitad y mitad por zona
+
+### Mejora
+- Los partidos postergados de cada fecha se reparten ahora mitad y mitad entre las zonas (con tu caso: 1 de la Zona A y 1 de la Zona B). Cuando el excedente es impar, el partido extra rota de zona en cada fecha para que ninguna acumule. Dentro de cada zona, sigue eligiendo al azar entre los equipos que menos veces postergaron.
+
+---
+
 ## [0.2.21] — 2026-09-24 — Turnos mezclados entre zonas
 
 ### Mejora

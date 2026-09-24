@@ -59,6 +59,49 @@ export function pickDeferred(
   return deferredIdx;
 }
 
+/**
+ * Reparte el excedente de una fecha ENTRE LAS ZONAS: cada zona posterga la
+ * misma cantidad (mitad y mitad); si el excedente es impar, el partido extra
+ * rota de zona en cada fecha (fecha 1 le toca a la primera, fecha 2 a la
+ * segunda…) para que ninguna acumule. Si una zona no tiene partidos
+ * suficientes para su cuota, el resto pasa a las otras.
+ *
+ * @param zoneCounts Partidos de cada zona en la fecha.
+ * @param overflow Partidos a postergar en total.
+ * @param firstExtraZone Índice de la zona que arranca con el extra cuando es impar.
+ */
+export function splitOverflowByZone(
+  zoneCounts: number[],
+  overflow: number,
+  firstExtraZone: number
+): number[] {
+  const n = zoneCounts.length;
+  if (n === 0 || overflow <= 0) return zoneCounts.map(() => 0);
+  const base = Math.floor(overflow / n);
+  const rem = overflow % n;
+  const quotas = zoneCounts.map(() => base);
+  for (let k = 0; k < rem; k++) quotas[(firstExtraZone + k) % n]! += 1;
+
+  // Ajuste: una zona no puede postergar más partidos de los que tiene;
+  // el remanente se reparte entre las demás.
+  let leftover = 0;
+  const result = quotas.map((q, i) => {
+    const usable = Math.min(q, zoneCounts[i]!);
+    leftover += q - usable;
+    return usable;
+  });
+  let turn = 0;
+  while (leftover > 0 && turn < n * overflow + n) {
+    const zi = (firstExtraZone + turn) % n;
+    if (result[zi]! < zoneCounts[zi]!) {
+      result[zi]! += 1;
+      leftover -= 1;
+    }
+    turn += 1;
+  }
+  return result;
+}
+
 /** Partidos postergados de la fase regular (los candidatos a reposición). */
 export function postponedMatches(matches: Match[]): Match[] {
   return matches.filter((m) => m.status === 'postponed' && m.round != null && !m.bracket_round);

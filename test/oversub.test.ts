@@ -9,6 +9,7 @@ import {
   overflowOfRound,
   pickDeferred,
   postponedMatches,
+  splitOverflowByZone,
 } from '../src/lib/oversub.ts';
 import { EMPTY_SCHEDULE } from '../src/lib/schedule.ts';
 import type { Match } from '../src/lib/types.ts';
@@ -109,6 +110,34 @@ describe('pickDeferred (reparto equilibrado)', () => {
     const d = pickDeferred([{ home: 1, away: 2 }], 0, load, rngFijo);
     expect(d.size).toBe(0);
     expect(load.size).toBe(0);
+  });
+});
+
+describe('splitOverflowByZone (mitad y mitad por zona)', () => {
+  it('reparte parejo cuando el excedente es par', () => {
+    expect(splitOverflowByZone([11, 11], 2, 0)).toEqual([1, 1]);
+    expect(splitOverflowByZone([11, 11], 4, 0)).toEqual([2, 2]);
+  });
+
+  it('con excedente impar, el extra rota de zona según la fecha', () => {
+    // Fecha 0 (par): el extra cae en la primera zona. Fecha 1: en la segunda.
+    expect(splitOverflowByZone([11, 11], 3, 0)).toEqual([2, 1]);
+    expect(splitOverflowByZone([11, 11], 3, 1)).toEqual([1, 2]);
+    // Tres zonas, extra +2: arranca en la zona 1 y sigue la 2.
+    expect(splitOverflowByZone([7, 7, 7], 5, 1)).toEqual([1, 2, 2]);
+  });
+
+  it('no posterga más partidos de los que tiene una zona; reasigna el resto', () => {
+    // La zona B tiene 1 solo partido en la fecha: no puede postergar 2.
+    const r = splitOverflowByZone([11, 1], 2, 0);
+    expect(r[0]!).toBe(1);
+    expect(r[1]!).toBe(1);
+    // Suma total = overflow.
+    expect(r[0]! + r[1]!).toBe(2);
+  });
+
+  it('sin excedente no reparte nada', () => {
+    expect(splitOverflowByZone([11, 11], 0, 0)).toEqual([0, 0]);
   });
 });
 

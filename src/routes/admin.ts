@@ -46,7 +46,7 @@ import {
   playoffFormatLabel,
   resolveAdvancements,
 } from '../lib/playoff.ts';
-import { buildMakeUpPlan, postponedMatches, overflowOfRound, pickDeferred } from '../lib/oversub.ts';
+import { buildMakeUpPlan, postponedMatches, overflowOfRound, pickDeferred, splitOverflowByZone } from '../lib/oversub.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
@@ -476,6 +476,7 @@ adminRoutes.post('/fixture/generar', async (c) => {
     if (err) return c.redirect('/admin/fixture?err=' + encodeURIComponent(err.text));
     const zf = buildZonedFixture(zones);
     totalRounds = zf.rounds;
+    const zoneNames = zones.zones.map((z) => z.name);
     for (const [ri, rawList] of zf.byRound.entries()) {
       // Mezclar los partidos de la fecha: buildZonedFixture lista primero toda
       // la Zona A y después la B, y así los primeros turnos (10:00, 11:00…)
@@ -484,14 +485,22 @@ adminRoutes.post('/fixture/generar', async (c) => {
       const day = plannedRoundDate(schedule, ri + 1);
       // Si los partidos de la fecha superan los slots, los excedentes quedan
       // POSTERGADOS (sin cancha, sin día) y esos equipos libran la fecha.
-      // Quiénes: los equipos que menos veces postergaron, al azar entre ellos.
+      // Cuántos por zona: mitad y mitad (el extra rota de zona en fechas
+      // impares); quiénes: los equipos que menos veces postergaron, al azar.
       const overflow = overflowOfRound(list.length, capacity);
       deferredTotal += overflow;
-      const deferredIdx = pickDeferred(
-        list.map((m) => ({ home: m.home, away: m.away })),
-        overflow,
-        postponedLoad
-      );
+      const zoneCounts = zoneNames.map((zn) => list.filter((m) => m.zone === zn).length);
+      const quotas = splitOverflowByZone(zoneCounts, overflow, ri);
+      const deferredIdx = new Set<number>();
+      zoneNames.forEach((zn, zi) => {
+        const inZone = list.map((m, i) => ({ m, i })).filter((x) => x.m.zone === zn);
+        const idxInZone = pickDeferred(
+          inZone.map((x) => ({ home: x.m.home, away: x.m.away })),
+          quotas[zi] ?? 0,
+          postponedLoad
+        );
+        for (const local of idxInZone) deferredIdx.add(inZone[local]!.i);
+      });
       const withSlots = list.filter((_, i) => !deferredIdx.has(i));
       const deferred = list.filter((_, i) => deferredIdx.has(i));
       interleaveSlots(withSlots, schedule);
