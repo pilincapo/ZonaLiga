@@ -15,6 +15,15 @@
 
 ---
 
+## [0.2.24] — 2026-09-24 — Navegación de fechas y home reacomodada
+
+### Nuevo
+- El fixture se navega por fecha: flechas ‹ ›, salto directo a cualquier fecha y botón "Ver todas". Arranca en la primera fecha con partidos pendientes; con JavaScript desactivado se ven todas (como antes).
+
+### Mejora
+- En la portada, Torneos y Próxima fecha comparten la misma fila en escritorio: se elimina el hueco vacío al lado de la tarjeta de torneo. En celular se apilan como antes.
+- En celular, la portada y el bloque "¿Cómo funciona?" ocupan menos altura (buscador y pasos más compactos): la home móvil baja unos 600px.
+
 ## [0.2.23] — 2026-09-24 — Sitio público más compacto
 
 ### Mejora

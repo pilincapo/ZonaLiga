@@ -80,10 +80,12 @@ export async function homePage(db: D1Database, origin: string, slugParam?: strin
     loadTournamentView(db, { slug: slugParam, scorers: 5 }),
   ]);
   const t = view?.tournament ?? null;
-  const body = view ? await tournamentHomeBody(view, origin) : await emptyHomeBody(db);
+  const torneosInner = tournamentCards(tournaments, stats, t?.slug);
+  const body = view
+    ? await tournamentHomeBody(view, origin, torneosInner)
+    : `<section class="block">${torneosInner}</section>\n${await emptyHomeBody(db)}`;
   const inner = `
 ${heroBand(t)}
-<section class="block">${tournamentCards(tournaments, stats, t?.slug)}</section>
 ${body}
 ${howToBlock()}`;
   return layout({ title: 'ZonaLiga — Inicio', active: 'home', nav: PUBLIC_NAV, body: inner });
@@ -225,7 +227,7 @@ async function emptyHomeBody(db: D1Database): Promise<string> {
 </section>`;
 }
 
-async function tournamentHomeBody(view: TournamentView, origin: string): Promise<string> {
+async function tournamentHomeBody(view: TournamentView, origin: string, torneosInner = ''): Promise<string> {
   const t = view.tournament;
   const matches = view.matches;
   const teams = view.teams;
@@ -330,15 +332,18 @@ async function tournamentHomeBody(view: TournamentView, origin: string): Promise
 
   return `
 ${todayBanner}
-<section class="block">
-  <div class="section-head">
-    <div>
-      <h2>Próxima fecha</h2>
-      <div class="sub">${nextRound != null ? `Fecha ${nextRound}` : 'Partidos programados'} de ${esc(t.name)}</div>
+<section class="block home-duo">
+  ${torneosInner ? `<div class="duo-torneos">${torneosInner}</div>` : ''}
+  <div class="duo-proxima">
+    <div class="section-head">
+      <div>
+        <h2>Próxima fecha</h2>
+        <div class="sub">${nextRound != null ? `Fecha ${nextRound}` : 'Partidos programados'} de ${esc(t.name)}</div>
+      </div>
+      <a class="more" href="/fixture">Ver fixture →</a>
     </div>
-    <a class="more" href="/fixture">Ver fixture →</a>
+    <div class="card">${upcomingHtml}${shareBar([{ label: '📲 Compartir por WhatsApp', href: shareHref }])}</div>
   </div>
-  <div class="card">${upcomingHtml}${shareBar([{ label: '📲 Compartir por WhatsApp', href: shareHref }])}</div>
 </section>
 <section class="block grid-2">
   <div class="card">${sectionHead('Últimos resultados', '/fixture', 'Ver todos')}${playedHtml}</div>
@@ -466,13 +471,85 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
   const roundKeys = [...rounds.keys()].sort((a, b) => Number(a) - Number(b));
   const crossoverRounds = crossoverRoundsOf(t.config);
 
-  let roundSections = '';
+  const fxPages: { label: string; day: string; html: string; upcoming: boolean }[] = [];
+  let defaultIdx = 0;
   for (const key of roundKeys) {
     const list = rounds.get(key)!;
     const label = key === 'x' ? 'Sin fecha asignada' : roundLabel(Number(key), crossoverRounds);
-    roundSections += `<h3 class="zone-title">${esc(label)}</h3>
-  <div class="card">${list.map((m) => matchRow(m, teamMap)).join('')}</div>`;
+    const day = list.find((m) => m.played_on)?.played_on ?? '';
+    const upcoming = list.some((m) => m.status === 'scheduled');
+    // Por defecto se muestra la PRIMERA fecha con partidos pendientes.
+    if (upcoming && fxPages.every((p) => !p.upcoming)) defaultIdx = fxPages.length;
+    fxPages.push({
+      label,
+      day,
+      upcoming,
+      html: `<div class="card">${list.map((m) => matchRow(m, teamMap)).join('')}</div>`,
+    });
   }
+
+  // Navegación de fechas: ‹ › + selector de salto. Sin JS, se ven todas
+  // (progressive enhancement: el atributo hidden lo aplica el script).
+  const fxNav = `
+<div class="fx-nav">
+  <button class="btn btn-ghost btn-sm" type="button" id="fxPrev" aria-label="Fecha anterior">‹</button>
+  <div class="fx-current"><strong id="fxLabel"></strong><span class="muted small" id="fxDay"></span></div>
+  <button class="btn btn-ghost btn-sm" type="button" id="fxNext" aria-label="Fecha siguiente">›</button>
+  <select id="fxJump" aria-label="Ir a fecha">${fxPages
+    .map((p, i) => `<option value="${i}">${esc(p.label)}</option>`)
+    .join('')}</select>
+  <a href="#" id="fxAll" class="muted small">Ver todas</a>
+</div>`;
+  const fxPagesHtml = fxPages
+    .map(
+      (p, i) =>
+        `<section class="fx-page" data-day="${esc(p.day)}"${i === defaultIdx ? '' : ' hidden'}><h3 class="zone-title">${esc(p.label)}</h3>${p.html}</section>`
+    )
+    .join('');
+  const fxScript = `
+<script>
+(function () {
+  var pages = [].slice.call(document.querySelectorAll('.fx-page'));
+  if (!pages.length) return;
+  var label = document.getElementById('fxLabel');
+  var day = document.getElementById('fxDay');
+  var jump = document.getElementById('fxJump');
+  var all = document.getElementById('fxAll');
+  var DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  var MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  function fmtDia(iso) {
+    if (!iso) return '';
+    var d = new Date(iso + 'T00:00:00');
+    return DIAS[d.getDay()] + ' ' + d.getDate() + ' ' + MESES[d.getMonth()];
+  }
+  var cur = pages.findIndex(function (p) { return !p.hidden; });
+  if (cur < 0) cur = 0;
+  function show(i) {
+    cur = (i + pages.length) % pages.length;
+    pages.forEach(function (p, k) { p.hidden = k !== cur; });
+    var p = pages[cur];
+    label.textContent = p.querySelector('.zone-title').textContent;
+    day.textContent = fmtDia(p.getAttribute('data-day'));
+    if (jump) jump.value = String(cur);
+    if (all) all.textContent = 'Ver todas';
+  }
+  document.getElementById('fxPrev').addEventListener('click', function () { show(cur - 1); });
+  document.getElementById('fxNext').addEventListener('click', function () { show(cur + 1); });
+  if (jump) jump.addEventListener('change', function () { show(Number(jump.value)); });
+  if (all) all.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (pages.some(function (p) { return p.hidden; })) {
+      pages.forEach(function (p) { p.hidden = false; });
+      label.textContent = 'Todas las fechas';
+      day.textContent = pages.length + ' fechas';
+      all.textContent = 'Ver una';
+    } else {
+      show(cur);
+    }
+  });
+  show(cur);
+})();
+</script>`;
 
   // Bracket
   let bracketHtml = '';
@@ -485,8 +562,10 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
 
   const body = `
 <section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Fixture</h1></section>
-${roundSections || emptyNote('Fixture sin generar todavía')}
-${bracketHtml}`;
+${fxPages.length > 0 ? fxNav : ''}
+${fxPagesHtml || emptyNote('Fixture sin generar todavía')}
+${bracketHtml}
+${fxScript}`;
   return layout({ title: `Fixture — ${t.name}`, active: 'fixture', nav: PUBLIC_NAV, body });
 }
 

@@ -790,6 +790,28 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
 }
 .changelog-list .badge { flex: none; margin-top: 1px; }
 
+/* ---------- Pestañas de fecha del fixture ---------- */
+
+.fx-nav {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+.fx-nav .btn-sm { min-width: 34px; }
+.fx-current { display: flex; flex-direction: column; min-width: 150px; }
+.fx-current strong { font-family: var(--font-head); font-size: 1.05rem; letter-spacing: -0.2px; }
+.fx-nav select { width: auto; min-width: 130px; padding: 6px 28px 6px 10px; font-size: 0.88rem; }
+
+/* ---------- Home: Torneos + Próxima fecha en una fila ---------- */
+
+.home-duo { display: grid; grid-template-columns: minmax(240px, 5fr) 7fr; gap: 18px; align-items: start; }
+.home-duo > * { min-width: 0; }
+.home-duo .duo-torneos .tcards { grid-template-columns: 1fr; gap: 12px; }
+
+@media (max-width: 860px) {
+  .home-duo { grid-template-columns: 1fr; }
+}
+
 /* ---------- Utilities ---------- */
 
 .muted { color: var(--muted); }
@@ -832,6 +854,22 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
 .share-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 
 /* ---------- Responsive ---------- */
+
+@media (max-width: 620px) {
+  /* Hero móvil: portada más baja */
+  .hero-band { padding: 14px 0 16px; }
+  .hero-grid { gap: 18px; }
+  .search-bar { margin-top: 10px; padding: 5px; }
+  .search-bar input { font-size: 0.9rem; }
+  .search-bar .btn { padding: 7px 12px; }
+  .feats { gap: 10px; }
+  .feat .feat-ico { width: 34px; height: 34px; font-size: 0.95rem; }
+  /* Pasos de marketing: 2 columnas, más bajos */
+  .steps-grid { grid-template-columns: repeat(2, 1fr); }
+  .step { padding: 11px; }
+  .step .step-ico { width: 34px; height: 34px; margin-bottom: 7px; font-size: 1rem; }
+  .step .step-d { font-size: 0.8rem; }
+}
 
 @media (min-width: 760px) {
   body { font-size: 14px; }
