@@ -7,6 +7,7 @@ import {
   keepCount,
   makeUpRoundNumber,
   overflowOfRound,
+  pickDeferred,
   postponedMatches,
 } from '../src/lib/oversub.ts';
 import { EMPTY_SCHEDULE } from '../src/lib/schedule.ts';
@@ -51,6 +52,63 @@ describe('overflow de una fecha', () => {
   it('keepCount reparte la capacidad', () => {
     expect(keepCount(22, 8)).toBe(8);
     expect(keepCount(5, 8)).toBe(5);
+  });
+});
+
+describe('pickDeferred (reparto equilibrado)', () => {
+  const rngFijo = () => 0; // siempre el primero del pool: determinista
+  // Alterna entre el principio y el final del pool (reparto parejo reproducible).
+  const alternado = (() => {
+    let n = 0;
+    return () => (n++ % 2 === 0 ? 0 : 0.99);
+  })();
+
+  it('posterga exactamente la cantidad pedida', () => {
+    const load = new Map();
+    const ms = Array.from({ length: 10 }, (_, i) => ({ home: i + 1, away: i + 11 }));
+    const deferred = pickDeferred(ms, 4, load, rngFijo);
+    expect(deferred.size).toBe(4);
+  });
+
+  it('equilibra por equipo: nadie posterga dos veces si hay otros con menos carga', () => {
+    const load = new Map();
+    const ms = [
+      { home: 1, away: 2 }, { home: 3, away: 4 }, { home: 5, away: 6 }, { home: 7, away: 8 },
+      { home: 9, away: 10 }, { home: 11, away: 12 },
+    ];
+    // Fecha 1: postergan 3 partidos (6 equipos con carga 1).
+    const d1 = pickDeferred(ms, 3, load, rngFijo);
+    expect(d1.size).toBe(3);
+    // Fecha 2: con 6 equipos ya en carga 1, elige entre los de carga 0.
+    const d2 = pickDeferred(ms, 3, load, rngFijo);
+    expect(d2.size).toBe(3);
+    // Los conjuntos no comparten partidos (todos con carga previa 0).
+    for (const i of d1) expect(d2.has(i)).toBe(false);
+    // Cargas: 6 equipos con 1 y 6 con 1 → todos con exactamente 1.
+    expect(new Set(load.values())).toEqual(new Set([1]));
+  });
+
+  it('reparte entre zonas: posterga de las dos listas, no de una sola', () => {
+    // Simula el bug viejo: si el orden pone toda la zona A primero, el
+    // recorte "últimos" caía siempre en la B. El selector equilibra.
+    const load = new Map();
+    const zonaA = Array.from({ length: 11 }, (_, i) => ({ home: i + 1, away: ((i + 1) % 11) + 1 }));
+    const zonaB = Array.from({ length: 11 }, (_, i) => ({ home: i + 100, away: ((i + 1) % 11) + 100 }));
+    const all = [...zonaA, ...zonaB];
+    const deferred = pickDeferred(all, 14, load, alternado);
+    const enA = [...deferred].filter((i) => i < 11).length;
+    const enB = [...deferred].filter((i) => i >= 11).length;
+    // Con carga inicial pareja y todos los partidos con carga 0, el pool son
+    // todos: el reparto es aleatorio pero cubre ambas zonas (no 11 y 3).
+    expect(enA).toBeGreaterThan(3);
+    expect(enB).toBeGreaterThan(3);
+  });
+
+  it('sin excedente no posterga nada', () => {
+    const load = new Map();
+    const d = pickDeferred([{ home: 1, away: 2 }], 0, load, rngFijo);
+    expect(d.size).toBe(0);
+    expect(load.size).toBe(0);
   });
 });
 

@@ -22,6 +22,43 @@ export function keepCount(matchCount: number, capacity: number): number {
   return matchCount - overflowOfRound(matchCount, capacity);
 }
 
+/**
+ * Elige qué partidos quedan postergados en una fecha con excedente, de forma
+ * equilibrada: prioriza los partidos cuyos equipos MENOS veces postergaron
+ * hasta ahora, y entre esos elige al azar (rng inyectable para tests).
+ *
+ * `postponedCount` lleva la cuenta por equipo durante toda la generación y
+ * se actualiza acá mismo (mutación intencional: el llamador la reutiliza
+ * para la fecha siguiente).
+ */
+export function pickDeferred(
+  roundMatches: { home: number; away: number }[],
+  overflow: number,
+  postponedCount: Map<number, number>,
+  rng: () => number = Math.random
+): Set<number> {
+  const deferredIdx = new Set<number>();
+  if (overflow <= 0) return deferredIdx;
+
+  // Candidatos con su carga acumulada (máximo de los dos equipos del partido).
+  const candidates = roundMatches.map((m, i) => ({
+    i,
+    load: Math.max(postponedCount.get(m.home) ?? 0, postponedCount.get(m.away) ?? 0),
+  }));
+
+  while (deferredIdx.size < overflow && deferredIdx.size < roundMatches.length) {
+    const free = candidates.filter((c) => !deferredIdx.has(c.i));
+    const minLoad = Math.min(...free.map((c) => c.load));
+    const pool = free.filter((c) => c.load === minLoad);
+    const pick = pool[Math.floor(rng() * pool.length)]!;
+    deferredIdx.add(pick.i);
+    const m = roundMatches[pick.i]!;
+    postponedCount.set(m.home, (postponedCount.get(m.home) ?? 0) + 1);
+    postponedCount.set(m.away, (postponedCount.get(m.away) ?? 0) + 1);
+  }
+  return deferredIdx;
+}
+
 /** Partidos postergados de la fase regular (los candidatos a reposición). */
 export function postponedMatches(matches: Match[]): Match[] {
   return matches.filter((m) => m.status === 'postponed' && m.round != null && !m.bracket_round);

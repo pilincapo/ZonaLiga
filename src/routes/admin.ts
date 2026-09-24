@@ -46,7 +46,7 @@ import {
   playoffFormatLabel,
   resolveAdvancements,
 } from '../lib/playoff.ts';
-import { buildMakeUpPlan, postponedMatches } from '../lib/oversub.ts';
+import { buildMakeUpPlan, postponedMatches, overflowOfRound, pickDeferred } from '../lib/oversub.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
@@ -467,6 +467,9 @@ adminRoutes.post('/fixture/generar', async (c) => {
   let totalRounds = 0;
   let deferredTotal = 0;
   const capacity = scheduleCapacity(schedule);
+  // Carga acumulada de postergaciones por equipo: el reparto de excedentes
+  // elige siempre a los que menos esperaron (equilibrado, con azar en empates).
+  const postponedLoad = new Map<number, number>();
   if (zones.enabled && zones.zones.length >= 2) {
     const problems = validateZones(zones, activeList);
     const err = problems.find((p) => p.kind === 'error');
@@ -477,12 +480,16 @@ adminRoutes.post('/fixture/generar', async (c) => {
       const day = plannedRoundDate(schedule, ri + 1);
       // Si los partidos de la fecha superan los slots, los excedentes quedan
       // POSTERGADOS (sin cancha, sin día) y esos equipos libran la fecha.
-      // Se recortan los últimos del orden (los primeros conservan slot).
-      const overflow = Math.max(0, list.length - capacity);
+      // Quiénes: los equipos que menos veces postergaron, al azar entre ellos.
+      const overflow = overflowOfRound(list.length, capacity);
       deferredTotal += overflow;
-      const limit = list.length - overflow;
-      const withSlots = list.slice(0, limit);
-      const deferred = list.slice(limit);
+      const deferredIdx = pickDeferred(
+        list.map((m) => ({ home: m.home, away: m.away })),
+        overflow,
+        postponedLoad
+      );
+      const withSlots = list.filter((_, i) => !deferredIdx.has(i));
+      const deferred = list.filter((_, i) => deferredIdx.has(i));
       interleaveSlots(withSlots, schedule);
       for (const m of withSlots) {
         stmts.push(
@@ -508,13 +515,17 @@ adminRoutes.post('/fixture/generar', async (c) => {
       const slots = roundSlots(pairs.length, schedule);
       // Día de la jornada: avanza el calendario desde la fecha de inicio del torneo.
       const day = plannedRoundDate(schedule, round);
-      // Mismo criterio sin zonas: los excedentes quedan postergados.
-      const overflow = Math.max(0, pairs.length - capacity);
+      // Mismo criterio sin zonas: excedentes postergados, elegidos equilibrado.
+      const overflow = overflowOfRound(pairs.length, capacity);
       deferredTotal += overflow;
-      const limit = pairs.length - overflow;
+      const deferredIdx = pickDeferred(
+        pairs.map((p) => ({ home: p.home, away: p.away })),
+        overflow,
+        postponedLoad
+      );
       for (const [i, p] of pairs.entries()) {
         const slot = slots[i];
-        const isDeferred = i >= limit;
+        const isDeferred = deferredIdx.has(i);
         stmts.push(
           c.env.DB.prepare(
             'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'

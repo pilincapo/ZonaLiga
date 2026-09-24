@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.20] — 2026-09-24 — Reparto equilibrado de postergados
+
+### Mejora
+- Quiénes quedan postergados ya no depende del orden del fixture (antes caían siempre en la misma zona): la generación cuenta cuántas veces postergó cada equipo y elige al azar entre los que menos esperaron. Zonas y equipos quedan parejos, y ninguna zona acumula todas las postergaciones.
+
+---
+
 ## [0.2.19] — 2026-09-24 — Partidos postergados y fecha de reposición
 
 ### Nuevo
