@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.21] — 2026-09-24 — Turnos mezclados entre zonas
+
+### Mejora
+- Al generar el fixture por zonas, los partidos de cada fecha se mezclan al azar antes de asignar canchas y horarios: los primeros turnos (10:00, 11:00…) ya no son siempre de la misma zona, ahora las dos zonas comparten todos los horarios de la fecha.
+
+---
+
 ## [0.2.20] — 2026-09-24 — Reparto equilibrado de postergados
 
 ### Mejora

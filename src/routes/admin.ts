@@ -27,7 +27,7 @@ import {
   scheduleCapacity,
 } from '../lib/schedule.ts';
 import { zonesFromForm, zonesOf, validateZones } from '../lib/zones.ts';
-import { buildZonedFixture, interleaveSlots } from '../lib/fixture.ts';
+import { buildZonedFixture, interleaveSlots, shuffled } from '../lib/fixture.ts';
 import {
   buildCrossoverPairs,
   crossoverConfigJson,
@@ -476,7 +476,11 @@ adminRoutes.post('/fixture/generar', async (c) => {
     if (err) return c.redirect('/admin/fixture?err=' + encodeURIComponent(err.text));
     const zf = buildZonedFixture(zones);
     totalRounds = zf.rounds;
-    for (const [ri, list] of zf.byRound.entries()) {
+    for (const [ri, rawList] of zf.byRound.entries()) {
+      // Mezclar los partidos de la fecha: buildZonedFixture lista primero toda
+      // la Zona A y después la B, y así los primeros turnos (10:00, 11:00…)
+      // siempre eran de la A. Al azar, las dos zonas se reparten los horarios.
+      const list = shuffled(rawList, Math.random);
       const day = plannedRoundDate(schedule, ri + 1);
       // Si los partidos de la fecha superan los slots, los excedentes quedan
       // POSTERGADOS (sin cancha, sin día) y esos equipos libran la fecha.
