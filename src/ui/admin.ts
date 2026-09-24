@@ -47,6 +47,7 @@ import {
   pendingLeagueCount,
   playoffFormatLabel,
 } from '../lib/playoff.ts';
+import { buildMakeUpPlan, postponedMatches } from '../lib/oversub.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
@@ -596,6 +597,38 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   );
   const gapsNote = gaps.length ? `<div class="warning-box">${esc(formatScheduleGaps(gaps))}</div>` : '';
 
+  // Fecha de reposición: partidos postergados por falta de canchas/horarios.
+  const postponed = postponedMatches(matches);
+  let makeUpBlock = '';
+  if (postponed.length > 0) {
+    const schedule = scheduleOf(t.config);
+    const maxRound = roundKeys.length ? Math.max(...roundKeys) : 0;
+    const plan = buildMakeUpPlan(postponed, maxRound, schedule);
+    const equiposLibran = new Set<number>();
+    for (const m of postponed) {
+      if (m.home_team_id != null) equiposLibran.add(m.home_team_id);
+      if (m.away_team_id != null) equiposLibran.add(m.away_team_id);
+    }
+    const planText = plan
+      .map(
+        (b) =>
+          `Fecha ${b.round}${b.played_on ? ` (${formatDateShort(b.played_on)})` : ''}: ${b.matches.length} partido(s)`
+      )
+      .join(' · ');
+    makeUpBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <strong>Partidos postergados por falta de canchas</strong>
+  <p class="hint">${postponed.length} partido(s) no entraron en las canchas y horarios del torneo y quedaron pendientes: ${equiposLibran.size} equipo(s) tienen fechas libres hasta que se jueguen. Plan sugerido: ${planText}.</p>
+  <form method="post" action="/admin/fixture/reposicion" class="form-row">
+    <input type="hidden" name="tournament_id" value="${t.id}">
+    <div class="field" style="align-self:flex-end">
+      <button class="btn btn-primary" type="submit" onclick="return confirm('Se agendan TODOS los partidos postergados juntos al final del fixture, respetando la capacidad de canchas. ¿Continuar?')">Agendar fecha de reposición</button>
+    </div>
+  </form>
+  <p class="hint">Alternativa: podés reprogramarlos de a uno desde <a href="/admin/fechas?t=${escUrl(t.slug)}">Días, horas y canchas</a> o editando cada partido.</p>
+</div></div></section>`;
+  }
+
   // Fecha de cruce entre zonas: formulario + vista previa (solo con 2 zonas).
   const zones = zonesOf(t.config);
   const crossovers = parseCrossoverConfig(t.config);
@@ -743,7 +776,14 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     </tr>`;
         })
         .join('');
-      return `<h3 class="zone-title">Fecha ${r}${crossoverRounds.has(r) ? ' <span class="badge green">Cruce entre zonas</span>' : ''}</h3><div class="card"><div class="table-wrap"><table class="data">
+      const postp = list.filter((m) => m.status === 'postponed').length;
+      const badges = [
+        crossoverRounds.has(r) ? '<span class="badge green">Cruce entre zonas</span>' : '',
+        postp > 0 ? `<span class="badge amber">${postp} postergado(s)</span>` : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      return `<h3 class="zone-title">Fecha ${r}${badges ? ' ' + badges : ''}</h3><div class="card"><div class="table-wrap"><table class="data">
     <thead><tr><th>ID</th><th>Partido</th><th>Zona / Ronda</th><th>Día y hora</th><th>Cancha</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div></div>`;
     })
@@ -776,6 +816,7 @@ ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, 
 </div></div></section>
 ${crossoverBlock}
 ${playoffBlock}
+${makeUpBlock}
 ${roundSections || '<section class="block"><div class="card"><div class="card-body">Fixture vacío. Generá uno automático o agregá partidos.</div></div></section>'}`;
   return adminLayout({ title: 'Fixture', active: 'fixture', body });
 }

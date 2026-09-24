@@ -24,6 +24,7 @@ import {
   regenerateRound,
   isRegenerable,
   plannedRoundDate,
+  scheduleCapacity,
 } from '../lib/schedule.ts';
 import { zonesFromForm, zonesOf, validateZones } from '../lib/zones.ts';
 import { buildZonedFixture, interleaveSlots } from '../lib/fixture.ts';
@@ -45,6 +46,7 @@ import {
   playoffFormatLabel,
   resolveAdvancements,
 } from '../lib/playoff.ts';
+import { buildMakeUpPlan, postponedMatches } from '../lib/oversub.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
@@ -463,6 +465,8 @@ adminRoutes.post('/fixture/generar', async (c) => {
   stmts.push(c.env.DB.prepare('DELETE FROM matches WHERE tournament_id = ?1').bind(tournamentId));
 
   let totalRounds = 0;
+  let deferredTotal = 0;
+  const capacity = scheduleCapacity(schedule);
   if (zones.enabled && zones.zones.length >= 2) {
     const problems = validateZones(zones, activeList);
     const err = problems.find((p) => p.kind === 'error');
@@ -471,12 +475,27 @@ adminRoutes.post('/fixture/generar', async (c) => {
     totalRounds = zf.rounds;
     for (const [ri, list] of zf.byRound.entries()) {
       const day = plannedRoundDate(schedule, ri + 1);
-      interleaveSlots(list, schedule);
-      for (const m of list) {
+      // Si los partidos de la fecha superan los slots, los excedentes quedan
+      // POSTERGADOS (sin cancha, sin día) y esos equipos libran la fecha.
+      // Se recortan los últimos del orden (los primeros conservan slot).
+      const overflow = Math.max(0, list.length - capacity);
+      deferredTotal += overflow;
+      const limit = list.length - overflow;
+      const withSlots = list.slice(0, limit);
+      const deferred = list.slice(limit);
+      interleaveSlots(withSlots, schedule);
+      for (const m of withSlots) {
         stmts.push(
           c.env.DB.prepare(
             'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
           ).bind(tournamentId, m.round, m.zone, m.home, m.away, 'scheduled', m.venue, m.kickoff_time, day)
+        );
+      }
+      for (const m of deferred) {
+        stmts.push(
+          c.env.DB.prepare(
+            'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
+          ).bind(tournamentId, m.round, m.zone, m.home, m.away, 'postponed')
         );
       }
     }
@@ -489,19 +508,34 @@ adminRoutes.post('/fixture/generar', async (c) => {
       const slots = roundSlots(pairs.length, schedule);
       // Día de la jornada: avanza el calendario desde la fecha de inicio del torneo.
       const day = plannedRoundDate(schedule, round);
+      // Mismo criterio sin zonas: los excedentes quedan postergados.
+      const overflow = Math.max(0, pairs.length - capacity);
+      deferredTotal += overflow;
+      const limit = pairs.length - overflow;
       for (const [i, p] of pairs.entries()) {
         const slot = slots[i];
+        const isDeferred = i >= limit;
         stmts.push(
           c.env.DB.prepare(
             'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
-          ).bind(tournamentId, round, p.home, p.away, 'scheduled', slot?.venue ?? '', slot?.kickoff ?? '', day)
+          ).bind(
+            tournamentId,
+            round,
+            p.home,
+            p.away,
+            isDeferred ? 'postponed' : 'scheduled',
+            isDeferred ? '' : (slot?.venue ?? ''),
+            isDeferred ? '' : (slot?.kickoff ?? ''),
+            isDeferred ? '' : day
+          )
         );
       }
       round += 1;
     }
   }
   await c.env.DB.batch(stmts);
-  return c.redirect('/admin/fixture?msg=' + encodeURIComponent(`Fixture generado: ${totalRounds} fechas`));
+  const postergado = deferredTotal > 0 ? ` · ${deferredTotal} partido(s) postergado(s) sin cancha (los jugás en una fecha de reposición)` : '';
+  return c.redirect('/admin/fixture?msg=' + encodeURIComponent(`Fixture generado: ${totalRounds} fechas${postergado}`));
 });
 
 /**
@@ -766,6 +800,62 @@ adminRoutes.post('/fixture/playoff', async (c) => {
       encodeURIComponent(
         `Playoff generado en la fecha ${round} (${playoffFormatLabel(format)}). Se ve en Llaves / Playoffs del fixture.`
       )
+  );
+});
+
+/**
+ * Fecha de reposición: agenda TODOS los partidos postergados del torneo en
+ * fecha(s) nuevas al final del fixture. Reparte los slots disponibles y deja
+ * el resto con día "a definir" si no alcanzan.
+ */
+adminRoutes.post('/fixture/reposicion', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  if (!Number.isFinite(tournamentId)) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const t = await resolveTournament(c.env.DB, undefined, tournamentId);
+  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(t.slug)}`;
+  const fail = (msg: string) => c.redirect(`${dest}&err=` + encodeURIComponent(msg));
+
+  const matchRows = await c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id')
+    .bind(tournamentId)
+    .all<Match>();
+  const all = matchRows.results ?? [];
+  const postponed = postponedMatches(all);
+  if (postponed.length === 0) {
+    return fail('No hay partidos postergados para reponer');
+  }
+
+  const schedule = scheduleOf(t.config);
+  if (scheduleCapacity(schedule) === 0) {
+    return fail('Primero cargá canchas y horarios del torneo: sin slots no se puede agendar la reposición');
+  }
+
+  // La reposición va después de la última fecha existente.
+  const maxRound = all.reduce((mx, m) => Math.max(mx, m.round ?? 0), 0);
+  const plan = buildMakeUpPlan(postponed, maxRound, schedule);
+
+  const stmts: D1PreparedStatement[] = [];
+  for (const block of plan) {
+    const slots = roundSlots(block.matches.length, schedule);
+    for (const [i, m] of block.matches.entries()) {
+      stmts.push(
+        c.env.DB.prepare(
+          'UPDATE matches SET round = ?1, status = ?2, played_on = ?3, kickoff_time = ?4, venue = ?5 WHERE id = ?6 AND status = ?7'
+        ).bind(block.round, 'scheduled', block.played_on, slots[i]?.kickoff ?? '', slots[i]?.venue ?? '', m.id, 'postponed')
+      );
+    }
+  }
+  await c.env.DB.batch(stmts);
+
+  const first = plan[0]!.round;
+  const last = plan[plan.length - 1]!.round;
+  const suffix = plan.length > 1 ? ` en ${plan.length} fechas de reposición` : ' en la fecha de reposición';
+  return c.redirect(
+    `${dest}&msg=` +
+      encodeURIComponent(`Reposición agendada: ${postponed.length} partido(s)${suffix} (fecha${plan.length > 1 ? 's' : ''} ${first}–${last})`)
   );
 });
 

@@ -5,6 +5,7 @@ import { formatDateShort, formatDateLong } from '../lib/format.ts';
 import { leagueNow } from '../lib/live.ts';
 import { groupBy, computeStandings, computeFairPlay, computeValla, FAIR_PLAY } from '../lib/standings.ts';
 import { crossoverRoundsOf, matchesForStandings } from '../lib/crossover.ts';
+import { zonesOf } from '../lib/zones.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
 import { buildBracketColumns, hasBracket, matchShortLabel, matchWinnerLoser, BRACKET_LABELS } from '../lib/bracket.ts';
 import {
@@ -376,13 +377,19 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
   const fpByTeam = new Map(fairPlay.map((r) => [r.teamId, r]));
   const nameOf = (id: number) => teamMap.get(id)?.name ?? '';
 
-  // Agrupar por zona usando el zone de los partidos.
+  // Agrupar por zona usando el zone de los partidos. Si todavía no hay
+  // fixture (sin partidos que marquen zona), usa la asignación de zonas de la
+  // configuración del torneo — así las tablas se ven divididas desde el día 1.
   const zoneOf = new Map<number, string>();
   for (const m of matches) {
     if (m.zone) {
       if (m.home_team_id != null) zoneOf.set(m.home_team_id, m.zone);
       if (m.away_team_id != null) zoneOf.set(m.away_team_id, m.zone);
     }
+  }
+  if (zoneOf.size === 0) {
+    const zc = zonesOf(t.config);
+    if (zc.enabled) for (const z of zc.zones) for (const id of z.teamIds) zoneOf.set(id, z.name);
   }
   const zones = groupBy(
     standings.map((r) => ({ row: r, zone: zoneOf.get(r.teamId) ?? '' })),

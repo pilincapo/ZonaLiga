@@ -15,6 +15,19 @@
 
 ---
 
+## [0.2.19] — 2026-09-24 — Partidos postergados y fecha de reposición
+
+### Nuevo
+- Si los partidos de una fecha superan las canchas × horarios del torneo, el excedente queda **postergado** (sin cancha, sin día) en vez de duplicar reservas: esos equipos libran la fecha hasta que se jueguen.
+- Botón **“Agendar fecha de reposición”**: junta TODOS los postergados al final del fixture, en bloques del tamaño de la capacidad (si no alcanzan los slots, se crean varias fechas de reposición seguidas, cada una con su día del calendario).
+- La página del fixture muestra el plan sugerido (“Fecha 16: 8 partidos · Fecha 17: 6 partidos…”), cuántos equipos tienen fechas libres, y la alternativa de reprogramar a mano desde Días, horas y canchas.
+- Cada fecha del fixture muestra un contador “N postergado(s)” junto al título.
+
+### Mejora
+- Generar el fixture ya nunca crea dobles reservas de cancha y horario: si no alcanzan los slots, posterga.
+
+---
+
 ## [0.2.18] — 2026-09-24 — Playoff opcional al terminar las fechas
 
 ### Nuevo
