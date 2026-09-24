@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.23] — 2026-09-24 — Sitio público más compacto
+
+### Mejora
+- Inspección visual del sitio público: menos aire entre secciones, títulos de sección pegados al contenido, tarjetas y tablas un punto más livianas, portada del inicio más baja y footer compacto en dos filas (de ~370px pasa a ocupar menos de la mitad). Tipografía base un punto más chica (14px). El panel admin hereda la compacción para verse consistente.
+- Tabla de posiciones con densidad de diario deportivo: filas bajas con franjas alternadas, números grises salvo los puntos (destacados) y escudos más bajos.
+
 ## [0.2.22] — 2026-09-24 — Postergados mitad y mitad por zona
 
 ### Mejora

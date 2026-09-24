@@ -144,7 +144,7 @@ img { max-width: 100%; }
 
 /* ---------- Hero ---------- */
 
-.hero { padding: 20px 0 4px; }
+.hero { padding: 16px 0 2px; }
 
 .hero-kicker {
   color: var(--accent-strong);
@@ -164,11 +164,11 @@ img { max-width: 100%; }
   background: var(--bg-band);
   border-bottom: 1px solid var(--border);
   margin: -28px -16px 0;
-  padding: 34px 0 34px;
+  padding: 20px 0 22px;
 }
-.hero-grid { max-width: 1040px; margin: 0 auto; padding: 0 16px; display: grid; gap: 30px; }
+.hero-grid { max-width: 1040px; margin: 0 auto; padding: 0 16px; display: grid; gap: 20px; }
 .hero-main { min-width: 0; }
-.hero-main h1 { font-size: clamp(1.7rem, 5.8vw, 2.5rem); margin: 6px 0 10px; }
+.hero-main h1 { font-size: clamp(1.7rem, 5.8vw, 2.5rem); margin: 4px 0 6px; }
 .hero-main .hero-sub { font-size: 1.05rem; max-width: 520px; }
 
 .search-bar {
@@ -177,7 +177,7 @@ img { max-width: 100%; }
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px;
-  margin-top: 16px;
+  margin-top: 12px;
   max-width: 520px;
 }
 .search-bar .search-icon { color: var(--faint); display: grid; place-items: center; padding-left: 8px; flex: none; }
@@ -188,7 +188,7 @@ img { max-width: 100%; }
 }
 .search-bar input:focus { outline: none; }
 
-.feats { display: grid; gap: 18px; align-content: center; }
+.feats { display: grid; gap: 14px; align-content: center; }
 .feat { display: flex; gap: 12px; align-items: flex-start; }
 .feat .feat-ico {
   width: 40px; height: 40px; flex: none;
@@ -205,7 +205,7 @@ img { max-width: 100%; }
 
 .section-head {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 14px;
-  margin: 0 0 16px;
+  margin: 0 0 10px;
 }
 .section-head h2 { font-size: clamp(1.15rem, 3vw, 1.45rem); }
 .section-head .sub { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
@@ -223,23 +223,23 @@ img { max-width: 100%; }
 
 .card-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
 }
 .card-head h2 { font-size: 0.98rem; letter-spacing: -0.2px; }
 .card-head .muted { font-size: 0.85rem; }
 
-.card-body { padding: 14px; }
-.card-body > * + * { margin-top: 10px; }
+.card-body { padding: 12px; }
+.card-body > * + * { margin-top: 8px; }
 
-section.block { margin-top: 22px; }
+section.block { margin-top: 14px; }
 
 section.block > .card-head h2 a { color: var(--text); }
 section.block > .card-head h2 a:hover { color: var(--accent-strong); }
 
 /* ---------- Torneos (tarjetas con imagen) ---------- */
 
-.tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 
 .tcard {
   display: flex; flex-direction: column;
@@ -255,7 +255,7 @@ section.block > .card-head h2 a:hover { color: var(--accent-strong); }
 
 .tcard-img {
   position: relative;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 21 / 9;
   display: grid; place-items: center;
   background: #123b2e;
   overflow: hidden;
@@ -287,18 +287,18 @@ section.block > .card-head h2 a:hover { color: var(--accent-strong); }
 .tcard-img .tcard-badge.next { background: var(--info); }
 .tcard-img .tcard-badge.done { background: #64748b; }
 
-.tcard-body { padding: 14px 16px 4px; }
+.tcard-body { padding: 12px 14px 2px; }
 .tcard-body .tcard-title {
   font-family: var(--font-head); font-weight: 800; font-size: 1.02rem;
   letter-spacing: -0.3px; line-height: 1.25;
 }
-.tcard-meta { margin-top: 8px; display: grid; gap: 5px; }
+.tcard-meta { margin-top: 6px; display: grid; gap: 4px; }
 .tcard-meta .row { display: flex; gap: 7px; align-items: center; color: var(--muted); font-size: 0.85rem; }
 .tcard-meta .row .ic { color: var(--faint); flex: none; display: grid; place-items: center; width: 15px; }
 
 .tcard-foot {
-  margin-top: 12px;
-  padding: 11px 16px;
+  margin-top: 10px;
+  padding: 9px 14px;
   border-top: 1px solid var(--border);
   display: flex; align-items: center; gap: 16px;
   font-size: 0.83rem; color: var(--muted);
@@ -316,12 +316,12 @@ section.block > .card-head h2 a:hover { color: var(--accent-strong); }
 
 /* ---------- Pasos / cómo funciona ---------- */
 
-.steps-grid { display: grid; gap: 14px; }
+.steps-grid { display: grid; gap: 12px; }
 .step {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 16px;
+  padding: 13px;
 }
 .step .step-ico {
   width: 42px; height: 42px; border-radius: 12px;
@@ -332,9 +332,9 @@ section.block > .card-head h2 a:hover { color: var(--accent-strong); }
 .step .step-t { font-weight: 800; font-size: 0.98rem; }
 .step .step-d { color: var(--muted); font-size: 0.86rem; margin-top: 3px; }
 
-.howto { display: grid; gap: 26px; }
+.howto { display: grid; gap: 20px; }
 .howto-lead h2 { font-size: clamp(1.35rem, 3.8vw, 1.9rem); margin: 6px 0 10px; }
-.howto-lead p { color: var(--muted); margin-bottom: 18px; }
+.howto-lead p { color: var(--muted); margin-bottom: 12px; }
 
 /* ---------- Tables ---------- */
 
@@ -349,14 +349,14 @@ table.data th {
   letter-spacing: 0.8px;
   color: var(--faint);
   font-weight: 800;
-  padding: 7px 8px;
+  padding: 6px 8px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 
 table.data td {
-  padding: 7px 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -366,6 +366,22 @@ table.data tbody tr:last-child td { border-bottom: none; }
 
 td.num, th.num { text-align: center; width: 36px; }
 td.r { text-align: right; white-space: nowrap; }
+
+/* ---------- Tabla de posiciones: densidad de diario deportivo ----------
+   Filas bajas con zebra sutil, números grises y chicos (solo los puntos
+   destacan), escudo bajo. Sin bordes por fila: separan las franjas. */
+
+.standings th { padding: 5px 6px; }
+.standings td { padding: 3px 6px; border-bottom-color: transparent; }
+.standings tbody tr:nth-child(even) { background: var(--bg-band); }
+.standings .crest { width: 18px; height: 18px; border-radius: 4px; font-size: 0.5rem; }
+.standings .team-cell { gap: 6px; }
+.standings .team-cell .tname a { font-weight: 700; font-size: 0.86rem; }
+.standings td.num { font-size: 0.8rem; color: var(--muted); }
+.standings td:nth-child(9) { color: var(--faint); font-size: 0.76rem; } /* DIF */
+.standings td:nth-child(10) { color: var(--text); }
+.standings td:nth-child(10) strong { font-size: 0.95rem; }
+.standings .pos-num { font-size: 0.72rem; width: 24px; }
 
 .pos-num { color: var(--faint); font-weight: 800; font-size: 0.8rem; width: 28px; }
 table.data tbody tr:nth-child(1) .pos-num { color: var(--accent-strong); }
@@ -393,12 +409,12 @@ table.data tbody tr:nth-child(1) .pos-num { color: var(--accent-strong); }
 
 /* ---------- Zonas / fixtures ---------- */
 
-.zone-title { font-family: var(--font-head); font-weight: 800; font-size: 1rem; margin: 18px 0 8px; }
+.zone-title { font-family: var(--font-head); font-weight: 800; font-size: 1rem; margin: 14px 0 6px; }
 .zone-title:first-child { margin-top: 0; }
 
 .match-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
 }
 .match-row:last-child { border-bottom: none; }
@@ -702,21 +718,27 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
 .site-footer a { color: #c3cfdb; }
 .site-footer a:hover { color: #fff; }
 
-.foot-grid { display: grid; gap: 22px; padding: 30px 0 22px; }
+.foot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 18px;
+  padding: 18px 0 12px;
+}
 
-.foot-brand .brand { font-size: 1.15rem; }
-.foot-brand p { color: #8fa2b5; margin-top: 10px; max-width: 260px; }
+.foot-brand { grid-column: 1 / -1; }
+.foot-brand .brand { font-size: 1.05rem; }
+.foot-brand p { color: #8fa2b5; margin-top: 5px; max-width: 340px; }
 
 .foot-col h3 {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 1.1px;
   color: #fff;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
-.foot-col ul { list-style: none; display: grid; gap: 7px; }
+.foot-col ul { list-style: none; display: grid; gap: 4px; }
 
-.foot-news { display: grid; gap: 10px; }
+.foot-news { display: grid; gap: 8px; }
 .foot-news .foot-form { display: flex; gap: 8px; flex-wrap: wrap; }
 .foot-news input {
   flex: 1; min-width: 150px;
@@ -729,7 +751,7 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
 
 .foot-bottom {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 16px 0 88px;
+  padding: 12px 0 44px;
   display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   color: #8fa2b5; font-size: 0.82rem;
 }
@@ -805,19 +827,26 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
 
 .grow { flex: 1; min-width: 0; }
 
-.empty-note { color: var(--faint); padding: 26px 0; text-align: center; font-size: 0.9rem; }
+.empty-note { color: var(--faint); padding: 18px 0; text-align: center; font-size: 0.9rem; }
 
 .share-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 
 /* ---------- Responsive ---------- */
 
 @media (min-width: 760px) {
-  body { font-size: 15px; }
-  .hero { padding: 28px 0 8px; }
-  section.block { margin-top: 28px; }
+  body { font-size: 14px; }
+  .hero { padding: 20px 0 4px; }
+  section.block { margin-top: 18px; }
   .steps-grid { grid-template-columns: repeat(3, 1fr); }
-  .foot-grid { grid-template-columns: 1.4fr 1fr 1fr 1.4fr; }
-  .foot-bottom { padding-bottom: 40px; }
+  /* Footer en dos filas: todo en una línea y abajo la línea legal */
+  .foot-grid { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 26px; }
+  .foot-brand { grid-column: auto; max-width: 235px; }
+  .foot-brand p { font-size: 0.8rem; }
+  .foot-col ul { display: flex; flex-wrap: wrap; gap: 3px 13px; }
+  .foot-col ul a { font-size: 0.84rem; }
+  .foot-news { margin-left: auto; max-width: 250px; }
+  .foot-news p { font-size: 0.8rem; }
+  .foot-bottom { padding-bottom: 28px; }
 }
 
 @media (min-width: 900px) {
@@ -850,7 +879,7 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
   .nav.open { display: flex; }
   .nav a { padding: 10px 8px; }
   .nav a.active::after { left: 0; right: auto; width: 3px; height: 18px; bottom: 12px; }
-  .hero-band { margin-top: -28px; padding: 26px 0; }
+  .hero-band { margin-top: -28px; padding: 16px 0 18px; }
   .hero-grid { padding: 0 16px; }
   .feats { border-left: none; padding-left: 0; }
 }
