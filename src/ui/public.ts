@@ -574,8 +574,8 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
     var url = location.origin + '/fixture' + (r ? '?f=' + r : '');
     var txt = '\u26BD ' + (TITULO ? TITULO.textContent + ' \u2014 ' : '') + d.label;
     if (d.day) txt += ' (' + fmtDia(d.day) + ')';
-    if (d.lines.length) txt += '\n' + d.lines.join('\n');
-    txt += '\n\uD83D\uDD17 ' + url;
+    if (d.lines.length) txt += '\\n' + d.lines.join('\\n');
+    txt += '\\n\uD83D\uDD17 ' + url;
     return 'https://wa.me/?text=' + encodeURIComponent(txt);
   }
   var DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
