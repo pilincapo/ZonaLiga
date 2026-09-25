@@ -254,10 +254,15 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
   );
   const topRows = standings.slice(0, 5);
 
-  // Compartir próxima fecha
+  // Compartir próxima fecha: los partidos se listan con la misma mezcla
+  // estable que el fixture (no en orden de zona).
   const nextRound = upcoming.length > 0 ? upcoming[0]!.round : null;
   const roundMatches = nextRound != null ? matches.filter((m) => m.round === nextRound) : [];
-  const shareLines = roundMatches.map((m) => {
+  const nextRoundList = orderMatchesForDisplay(
+    roundMatches,
+    { tournamentId: t.id, round: nextRound }
+  );
+  const shareLines = nextRoundList.map((m) => {
     const h = m.home_team_id != null ? teamMap.get(m.home_team_id)?.name : 'Por definir';
     const a = m.away_team_id != null ? teamMap.get(m.away_team_id)?.name : 'Por definir';
     const time = m.kickoff_time ? ` ${m.kickoff_time}` : '';
@@ -269,7 +274,14 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
     : waLink(shareTextHome(t.name, absoluteUrl('/', origin)));
 
   const upcomingHtml = upcoming.length
-    ? upcoming.map((m) => matchRow(m, teamMap)).join('')
+    ? orderMatchesForDisplay(
+        // Los de la primera fecha van mezclados; el resto sigue por día.
+        upcoming.filter((m) => m.round === nextRound),
+        { tournamentId: t.id, round: nextRound }
+      )
+        .concat(upcoming.filter((m) => m.round !== nextRound))
+        .map((m) => matchRow(m, teamMap))
+        .join('')
     : emptyNote('No hay partidos programados');
   const playedHtml = played.length
     ? played.map((m) => matchRow(m, teamMap)).join('')

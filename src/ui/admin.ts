@@ -1230,7 +1230,10 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
   const sections = [...byRound.keys()]
     .sort((a, b) => a - b)
     .map((r) => {
-      const rows = (byRound.get(r) ?? [])
+      // Misma mezcla estable que el fixture público: el orden no delata la
+      // zona que se generó primero. El guardado usa los ids en el name, así
+      // que el orden visual no afecta nada.
+      const rows = orderMatchesForDisplay(byRound.get(r) ?? [], { tournamentId: t.id, round: r })
         .map(
           (m) => `<tr>
       <td>${esc(teamMap.get(m.home_team_id ?? -1)?.name ?? '—')} <span class="faint">vs</span> ${esc(teamMap.get(m.away_team_id ?? -1)?.name ?? '—')}</td>
