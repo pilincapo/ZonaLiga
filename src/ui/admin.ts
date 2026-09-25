@@ -599,6 +599,30 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
 
   // Fecha de reposición: partidos postergados por falta de canchas/horarios.
   const postponed = postponedMatches(matches);
+  // Zonas y fechas de zona: se necesitan acá (destinos del plan) y en el
+  // cuadro de fechas libres de abajo.
+  const crossoverRounds = crossoverRoundsOf(t.config);
+  const activeTeamRows = teams.filter((x) => x.active);
+  const regularKeys = roundKeys.filter((r) => !crossoverRounds.has(r));
+  const crossoverKeys = roundKeys.filter((r) => crossoverRounds.has(r));
+  const juegaEn = (teamId: number, round: number): boolean =>
+    (byRound.get(round) ?? []).some((m) => m.home_team_id === teamId || m.away_team_id === teamId);
+  // Sugerencia ⭐: fecha de zona con más equipos libres que todavía tenga
+  // partidos pendientes (para reciclar postergados ahí en vez de al final).
+  const sugerida = suggestMakeUpRound(byRound, regularKeys, activeTeamRows.map((x) => x.id));
+  // Destinos del plan: la sugerida (⭐, preseleccionada), el resto de las
+  // fechas con partidos pendientes y una fecha nueva al final.
+  const destinos: { round: number | null; label: string }[] = [
+    ...(sugerida != null ? [{ round: sugerida as number | null, label: `Reciclar en la fecha ${sugerida} (sugerida ⭐)` }] : []),
+    ...regularKeys
+      .filter(
+        (r) =>
+          r !== sugerida &&
+          (byRound.get(r) ?? []).some((m) => m.status === 'scheduled' || m.status === 'postponed')
+      )
+      .map((r) => ({ round: r as number | null, label: `Reciclar en la fecha ${r}` })),
+    { round: null, label: 'Fecha nueva al final (según capacidad)' },
+  ];
   let makeUpBlock = '';
   if (postponed.length > 0) {
     const schedule = scheduleOf(t.config);
@@ -621,8 +645,14 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   <p class="hint">${postponed.length} partido(s) no entraron en las canchas y horarios del torneo y quedaron pendientes: ${equiposLibran.size} equipo(s) tienen fechas libres hasta que se jueguen. Plan sugerido: ${planText}.</p>
   <form method="post" action="/admin/fixture/reposicion" class="form-row">
     <input type="hidden" name="tournament_id" value="${t.id}">
+    <div class="field grow">
+      <label>¿Dónde agendar los postergados?</label>
+      <select name="destino">${destinos
+        .map((d) => `<option value="${d.round ?? 'nueva'}"${d.round === sugerida ? ' selected' : ''}>${esc(d.label)}</option>`)
+        .join('')}</select>
+    </div>
     <div class="field" style="align-self:flex-end">
-      <button class="btn btn-primary" type="submit" onclick="return confirm('Se agendan TODOS los partidos postergados juntos al final del fixture, respetando la capacidad de canchas. ¿Continuar?')">Agendar fecha de reposición</button>
+      <button class="btn btn-primary" type="submit" onclick="return confirm('Se reubican TODOS los partidos postergados en la fecha elegida (o al final, según la capacidad de canchas). ¿Continuar?')">Agendar fecha de reposición</button>
     </div>
   </form>
   <p class="hint">Alternativa: podés reprogramarlos de a uno desde <a href="/admin/fechas?t=${escUrl(t.slug)}">Días, horas y canchas</a> o editando cada partido.</p>
@@ -632,8 +662,6 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   // Fecha de cruce entre zonas: formulario + vista previa (solo con 2 zonas).
   const zones = zonesOf(t.config);
   const crossovers = parseCrossoverConfig(t.config);
-  const crossoverRounds = crossoverRoundsOf(t.config);
-  const activeTeamRows = teams.filter((x) => x.active);
 
   // Cuadro de fechas libres por equipo: en qué fechas cada equipo no tiene
   // partido asignado. Las fechas de zona van primero (F); las de cruce entre
@@ -641,13 +669,6 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   // libra por diseño (no cuentan como carga desigual). Ordenado por más
   // fechas libres de zona, para ver si la carga quedó equilibrada.
   let freeDatesBlock = '';
-  const regularKeys = roundKeys.filter((r) => !crossoverRounds.has(r));
-  const crossoverKeys = roundKeys.filter((r) => crossoverRounds.has(r));
-  const juegaEn = (teamId: number, round: number): boolean =>
-    (byRound.get(round) ?? []).some((m) => m.home_team_id === teamId || m.away_team_id === teamId);
-  // Sugerencia ⭐: fecha de zona con más equipos libres que todavía tenga
-  // partidos pendientes (para reciclar postergados ahí en vez de al final).
-  const sugerida = suggestMakeUpRound(byRound, regularKeys, activeTeamRows.map((x) => x.id));
   const libranPorEquipo = activeTeamRows
     .map((team) => ({
       team,
@@ -655,6 +676,17 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     }))
     .filter((row) => row.libres.length > 0)
     .sort((a, b) => b.libres.length - a.libres.length || a.team.name.localeCompare(b.team.name));
+  // Alerta de carga despareja: alguien con 2 o más fechas libres que el que
+  // menos tiene (la tabla ordena de más a menos libres).
+  const minLibres = libranPorEquipo[libranPorEquipo.length - 1]?.libres.length ?? 0;
+  const desparejos = libranPorEquipo.filter((row) => row.libres.length >= minLibres + 2);
+  const alertaDespareja =
+    desparejos.length > 0
+      ? `<div class="warning-box">⚠️ Carga despareja: ${desparejos
+          .slice(0, 5)
+          .map((row) => esc(row.team.name))
+          .join(', ')}${desparejos.length > 5 ? ` y ${desparejos.length - 5} más` : ''} con ${desparejos[0]!.libres.length} fecha(s) libres, mientras hay equipos con solo ${minLibres}. Revisá los postergados y dónde los agendás.</div>`
+      : '';
   if (libranPorEquipo.length > 0) {
     const cSep = 'border-left:1px dashed currentColor';
     const head = regularKeys
@@ -709,6 +741,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     freeDatesBlock = `
 <section class="block"><div class="card"><div class="card-body">
   <strong>Fechas libres por equipo</strong>
+  ${alertaDespareja}
   <p class="hint">En qué fechas cada equipo no tiene partido asignado: por postergados sin reprogramar o porque la fecha tiene impar. Ordenado por más fechas libres de zona; los cruces (C) van aparte.</p>
   <div class="table-wrap"><table class="data">
     <thead><tr><th>Equipo</th>${head}${headC}</tr></thead>

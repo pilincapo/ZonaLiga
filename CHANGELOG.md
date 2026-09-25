@@ -15,6 +15,17 @@
 
 ---
 
+## [0.2.27] — 2026-09-25 — Compartir posiciones y reposición con destino elegido
+
+### Nuevo
+- La página de posiciones tiene su botón "📲 Compartir tabla": manda por WhatsApp el top 3 de cada zona (o el top 5 general si no hay zonas) con el link.
+- En el panel, el formulario de reposición permite elegir dónde agendar los postergados: reciclarlos en una fecha existente (preseleccionada la sugerida ⭐) o crear la fecha nueva al final. Si no entran todos en los slots libres de esa fecha, los que sobran quedan con día pero sin cancha y hora, para asignarlos a mano.
+
+### Mejora
+- El cuadro de fechas libres del panel avisa cuando la carga queda despareja: marca con una alerta a los equipos con dos o más fechas libres más que el que menos tiene.
+
+---
+
 ## [0.2.26] — 2026-09-25 — Compartir fecha por WhatsApp y cuadro de libres afinado
 
 ### Nuevo

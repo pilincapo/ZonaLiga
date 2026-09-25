@@ -13,6 +13,7 @@ import {
   shareTextHome,
   shareTextMatchday,
   shareTextScorers,
+  shareTextStandings,
   shareTextMatch,
   waLink,
 } from '../lib/share.ts';
@@ -357,7 +358,7 @@ ${todayBanner}
 
 /* ============================== POSICIONES ============================== */
 
-export async function standingsPage(db: D1Database, slugParam?: string): Promise<string> {
+export async function standingsPage(db: D1Database, slugParam?: string, origin = ''): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam });
   if (!view) return layout({ title: 'Posiciones', active: 'posiciones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
   const t = view.tournament;
@@ -449,9 +450,30 @@ export async function standingsPage(db: D1Database, slugParam?: string): Promise
 </div></div></section>`
       : '';
 
+  // Compartir tabla: con zonas manda el top 3 de cada una; sin zonas, el top 5.
+  const standingsLines =
+    zones.size > 1
+      ? [...zones.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([zone, rows]) => {
+            const top = rows
+              .slice(0, 3)
+              .map(({ row: r }, i) => `${i + 1}º ${nameOf(r.teamId)} (${r.points})`)
+              .join(', ');
+            return `• Zona ${zone}: ${top}`;
+          })
+      : standings.slice(0, 5).map((r, i) => `• ${i + 1}º ${nameOf(r.teamId)} (${r.points} pts)`);
+  const standingsShare = shareBar([
+    {
+      label: '📲 Compartir tabla',
+      href: waLink(shareTextStandings(t.name, standingsLines, absoluteUrl('/posiciones', origin))),
+    },
+  ]);
+
   const body = `
 <section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Posiciones</h1></section>
 ${tables || emptyNote('Sin datos todavía')}
+${standingsShare}
 ${leaders}
 ${adjustmentsNote}`;
   return layout({ title: `Posiciones — ${t.name}`, active: 'posiciones', nav: PUBLIC_NAV, body });

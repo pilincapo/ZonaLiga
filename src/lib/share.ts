@@ -27,6 +27,10 @@ export function shareTextMatchday(
   return `${head}${date}\n${lines.join('\n')}\n🔗 ${url}`;
 }
 
+export function shareTextStandings(tournamentName: string, lines: string[], url: string): string {
+  return `🏆 Posiciones ${tournamentName}\n${lines.join('\n')}\n🔗 ${url}`;
+}
+
 export function shareTextScorers(tournamentName: string, lines: string[], url: string): string {
   return `🥇 Goleadores ${tournamentName}\n${lines.join('\n')}\n🔗 ${url}`;
 }

@@ -857,6 +857,61 @@ adminRoutes.post('/fixture/reposicion', async (c) => {
     return fail('Primero cargá canchas y horarios del torneo: sin slots no se puede agendar la reposición');
   }
 
+  // Destino elegido en el formulario: una fecha existente (reciclar) o una
+  // fecha nueva al final (comportamiento de siempre).
+  const destinoRaw = String(f['destino'] ?? 'nueva').trim();
+  const targetRound = destinoRaw !== '' && destinoRaw !== 'nueva' ? Number(destinoRaw) : null;
+
+  if (targetRound != null && Number.isFinite(targetRound)) {
+    if (!all.some((m) => m.round === targetRound)) {
+      return fail(`La fecha ${targetRound} no existe en el fixture`);
+    }
+    // Guardia: en la fecha destino no puede jugar un equipo que ya tiene
+    // partido agendado ahí (los postergados de esa fecha se reubican solos).
+    const agendados = all.filter((m) => m.round === targetRound && m.status === 'scheduled');
+    const ocupados = new Set<number>();
+    for (const m of agendados) {
+      if (m.home_team_id != null) ocupados.add(m.home_team_id);
+      if (m.away_team_id != null) ocupados.add(m.away_team_id);
+    }
+    const chocan = postponed.filter(
+      (m) =>
+        (m.home_team_id != null && ocupados.has(m.home_team_id)) ||
+        (m.away_team_id != null && ocupados.has(m.away_team_id))
+    );
+    if (chocan.length > 0) {
+      return fail(
+        `La fecha ${targetRound} ya tiene partidos de ${chocan.length} equipo(s) postergado(s): elegí otra fecha o “Fecha nueva al final”.`
+      );
+    }
+    // Slots libres de la fecha: la grilla canchas×horarios menos la que ya
+    // usan los agendados. Si no alcanzan, los últimos quedan con día pero sin
+    // cancha/hora (los asigna el admin desde Días, horas y canchas).
+    const usados = new Set(agendados.map((m) => `${m.venue}|${m.kickoff_time}`));
+    const libres = roundSlots(scheduleCapacity(schedule), schedule).filter(
+      (s) => !usados.has(`${s.venue}|${s.kickoff}`)
+    );
+    const dia = plannedRoundDate(schedule, targetRound);
+    const stmts: D1PreparedStatement[] = postponed.map((m, i) => {
+      const slot = libres[i];
+      return c.env.DB
+        .prepare(
+          'UPDATE matches SET round = ?1, status = ?2, played_on = ?3, kickoff_time = ?4, venue = ?5 WHERE id = ?6 AND status = ?7'
+        )
+        .bind(targetRound, 'scheduled', dia, slot?.kickoff ?? '', slot?.venue ?? '', m.id, 'postponed');
+    });
+    await c.env.DB.batch(stmts);
+    const conCancha = Math.min(postponed.length, libres.length);
+    const suffix =
+      conCancha < postponed.length
+        ? ` (${conCancha} con cancha y hora, ${postponed.length - conCancha} sin asignar)`
+        : '';
+    return c.redirect(
+      `${dest}&msg=` +
+        encodeURIComponent(`Reposición agendada: ${postponed.length} partido(s) en la fecha ${targetRound}${suffix}`)
+    );
+  }
+
   // La reposición va después de la última fecha existente.
   const maxRound = all.reduce((mx, m) => Math.max(mx, m.round ?? 0), 0);
   const plan = buildMakeUpPlan(postponed, maxRound, schedule);

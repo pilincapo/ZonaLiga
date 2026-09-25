@@ -16,7 +16,7 @@ app.route('/delegado', delegateRoutes);
 
 app.get('/', async (c) => c.html(await pub.homePage(c.env.DB, new URL(c.req.url).origin, c.req.query('t'))));
 
-app.get('/posiciones', async (c) => c.html(await pub.standingsPage(c.env.DB, c.req.query('t'))));
+app.get('/posiciones', async (c) => c.html(await pub.standingsPage(c.env.DB, c.req.query('t'), new URL(c.req.url).origin)));
 
 app.get('/fixture', async (c) =>
   c.html(await pub.fixturePage(c.env.DB, c.req.query('t'), c.req.query('f'), new URL(c.req.url).origin))
