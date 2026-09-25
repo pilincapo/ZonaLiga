@@ -1324,12 +1324,21 @@ export function fixturePreviewPage(opts: {
   teamNames: Map<number, string>;
 }): string {
   let plan: PlannedMatch[] = [];
+  let crossoverOverflow: number[] = [];
+  let crossoverAnchor: number | null = null;
   try {
     const parsed: unknown = JSON.parse(opts.payload);
-    // Payload nuevo: { matches, crossover }. Payload viejo: array plano.
-    if (Array.isArray(parsed)) plan = parsed as PlannedMatch[];
-    else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { matches?: unknown }).matches)) {
-      plan = (parsed as { matches: PlannedMatch[] }).matches;
+    // Payload nuevo: { matches, crossover, crossoverOverflow }. Payload
+    // viejo: array plano (sin declaración de cruce ni desborde).
+    if (Array.isArray(parsed)) {
+      plan = parsed as PlannedMatch[];
+    } else if (parsed && typeof parsed === 'object') {
+      const o = parsed as { matches?: unknown; crossover?: { round?: number } | null; crossoverOverflow?: unknown };
+      if (Array.isArray(o.matches)) plan = o.matches as PlannedMatch[];
+      if (typeof o.crossover?.round === 'number') crossoverAnchor = o.crossover.round;
+      if (Array.isArray(o.crossoverOverflow)) {
+        crossoverOverflow = o.crossoverOverflow.filter((x): x is number => typeof x === 'number');
+      }
     }
   } catch {
     plan = [];
@@ -1342,9 +1351,17 @@ export function fixturePreviewPage(opts: {
     .filter((x) => x.n > 0);
   const crucesStat =
     crucesPorFecha.length > 0
-      ? `<div class="card"><div class="card-body"><strong>Cruces por fecha</strong><p class="hint">Distribución de los partidos de cruce entre zonas en las fechas del borrador.</p><div class="table-wrap"><table class="data"><thead><tr><th>Fecha</th><th>Cruces</th></tr></thead><tbody>${crucesPorFecha
-          .map((x) => `<tr><td>Fecha ${x.round}</td><td>${x.n}</td></tr>`)
+      ? `<div class="card"><div class="card-body"><strong>Cruces por fecha</strong><p class="hint">Distribución de los partidos de cruce entre zonas en las fechas del borrador${crossoverAnchor != null ? ` (fecha elegida: ${crossoverAnchor})` : ''}.</p><div class="table-wrap"><table class="data"><thead><tr><th>Fecha</th><th>Cruces</th></tr></thead><tbody>${crucesPorFecha
+          .map((x) => `<tr><td>Fecha ${x.round}${crossoverOverflow.includes(x.round) ? ' <span class="badge amber">desbordado</span>' : ''}</td><td>${x.n}</td></tr>`)
           .join('')}</tbody></table></div></div></div>`
+      : '';
+  // Aviso de desborde: cruces que no entraron en la fecha elegida y cayeron
+  // en fechas siguientes (por falta de slots o equipos ya ocupados).
+  const overflowNote =
+    crossoverOverflow.length > 0
+      ? `<div class="warning-box">⚠️ La fecha del cruce elegida (${crossoverAnchor ?? '—'}) no alcanzó para todos: ${crossoverOverflow
+          .map((r) => `Fecha ${r}`)
+          .join(', ')} quedaron cruces fuera de la fecha elegida. Si querés que entren todos ahí, elegí otra fecha con más lugares o generá sin cruces.</div>`
       : '';
   const sections = fechas
     .map((round) => {
@@ -1373,6 +1390,7 @@ ${flash('success', 'Vista previa lista (' + cuando + '). Nada se guardó todaví
 ${pageHead(`Vista previa — ${opts.tournamentName}`, { href: `/admin/fixture?t=${escUrl(opts.tournamentSlug)}`, label: '← Volver al fixture' })}
 <section class="block"><div class="card"><div class="card-body">
   <strong>${esc(opts.summary)}</strong>
+  ${overflowNote}
   <p class="hint">Revisá las fechas de abajo. Al confirmar se reemplaza TODO el fixture actual (solo se puede si no hay partidos jugados). Al descartar no cambia nada.</p>
   <span style="display:flex;gap:8px">
     <form method="post" action="/admin/fixture/confirmar" style="display:inline">

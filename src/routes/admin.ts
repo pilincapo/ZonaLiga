@@ -456,9 +456,14 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
         'ON CONFLICT (tournament_id) DO UPDATE SET summary = ?2, payload = ?3, created_at = datetime(\'now\')'
     )
     // El borrador guarda el plan completo: partidos + la declaración de
-    // cruce resuelta (fecha automática incluida), para que el confirmar
-    // aplique exactamente lo que se vio en la vista previa.
-    .bind(tournamentId, summaryText, JSON.stringify({ matches: plan.matches, crossover: plan.crossover }))
+    // cruce resuelta (fecha automática incluida) + las fechas de desborde,
+    // para que el confirmar aplique exactamente lo que se vio en la vista
+    // previa y la página pueda avisar del desborde.
+    .bind(
+      tournamentId,
+      summaryText,
+      JSON.stringify({ matches: plan.matches, crossover: plan.crossover, crossoverOverflow: plan.crossoverOverflow })
+    )
     .run();
 
   return c.redirect(`/admin/fixture/vista-previa?t=${encodeURIComponent(tRow.slug)}`);

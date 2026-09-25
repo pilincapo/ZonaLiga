@@ -15,6 +15,17 @@
 
 ---
 
+## [0.2.34] — 2026-09-25 — Aviso de desborde del cruce en la vista previa
+
+### Nuevo
+
+- Si la fecha del cruce elegida no alcanza para todos los cruces (más cruces que canchas y horarios, o equipos ya ocupados ese día), los sobrantes caen a las fechas siguientes y la vista previa muestra un aviso claro antes de confirmar: qué fecha elegiste, cuáles quedaron desbordadas y cómo corregirlo.
+- La tabla "Cruces por fecha" marca con una etiqueta las fechas desbordadas.
+
+### Mejora
+
+- Antes, pedir una fecha sin lugar suficiente cancelaba la generación con un error. Ahora nada se pierde: los cruces entran de a uno por fecha y el plan se arma igual, avisando el desborde.
+
 ## [0.2.33] — 2026-09-25 — El cruce respeta la fecha que elegís
 
 ### Arreglo

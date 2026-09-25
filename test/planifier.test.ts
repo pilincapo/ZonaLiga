@@ -120,6 +120,45 @@ describe('planFixture', () => {
     expect(plan.crossover).toEqual({ round: 5, rule: 'espejo', counts: false });
   });
 
+  it('desborde: si la fecha elegida no alcanza, los sobrantes caen a la siguiente y se avisa', () => {
+    // 1 cancha × 1 horario = 1 slot por fecha. El cruce anclado entra uno
+    // por fecha; con 4 cruces anclados en la fecha 4, los 3 restantes
+    // desbordan a las fechas 5, 6 y 7.
+    const chico = scheduleWith(['C1'], ['10:00']);
+    const plan = planFixture({
+      teamIds: [1, 2, 3, 4, 5, 6, 7, 8],
+      configJson: CONFIG_ZONAS,
+      mode: 'single',
+      schedule: chico,
+      crossoverRule: 'espejo',
+      crossoverCounts: false,
+      crossoverRound: 4,
+      rng,
+    });
+    const cruces = plan.matches.filter((m) => m.kind === 'cruce');
+    expect(cruces).toHaveLength(4);
+    const enAncla = cruces.filter((m) => m.fixtureRound === 4);
+    const desbordados = cruces.filter((m) => m.fixtureRound > 4);
+    expect(enAncla).toHaveLength(1);
+    expect(desbordados).toHaveLength(3);
+    // Cada desborde cae en la fecha siguiente con lugar, de a uno.
+    expect(desbordados.map((m) => m.fixtureRound).sort((a, b) => a - b)).toEqual([5, 6, 7]);
+    // El plan informa el desborde para que la vista previa avise.
+    expect(plan.crossoverOverflow).toEqual([5, 6, 7]);
+    // Sin desborde, la lista viene vacía.
+    const ok = planFixture({
+      teamIds: [1, 2, 3, 4, 5, 6, 7, 8],
+      configJson: CONFIG_ZONAS,
+      mode: 'single',
+      schedule: S,
+      crossoverRule: 'espejo',
+      crossoverCounts: false,
+      crossoverRound: 4,
+      rng,
+    });
+    expect(ok.crossoverOverflow).toEqual([]);
+  });
+
   it('sin fecha elegida, el cruce cae en la primera libre tras las de zona', () => {
     const plan = planFixture({
       teamIds: [1, 2, 3, 4, 5, 6, 7, 8],

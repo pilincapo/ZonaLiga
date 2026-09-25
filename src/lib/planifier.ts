@@ -49,6 +49,12 @@ export interface PlannedFixture {
    * config del torneo, para que quede registrada una fecha = un cruce.
    */
   crossover: CrossoverDate | null;
+  /**
+   * Fechas donde quedaron cruces que no entraron en la fecha anclada
+   * (desborde por falta de slots o por equipos ya ocupados ese día).
+   * Vacío = todos los cruces respetaron la fecha elegida.
+   */
+  crossoverOverflow: number[];
 }
 
 export interface PlanInput {
@@ -280,22 +286,38 @@ export function planFixture(input: PlanInput): PlannedFixture {
   };
 
   // 4a) Los cruces primero: fijan la fecha anclada y consumen slots de ella.
-  for (const m of crossoverMatches) {
-    const i = Math.max(0, crossoverRound - 1); // índice 0-based del día calendario
-    openDay(i);
-    const used = usedSlots.get(i)!;
-    const free = catalog.find((s) => !used.has(`${s.venue}|${s.kickoff}`));
-    if (!free) {
-      // La fecha elegida no tiene slots libres: el cruce cae al final.
-      throw new Error(`la fecha ${crossoverRound} no tiene slots libres para ${crossoverMatches.length} cruce(s): elegí otra fecha`);
+  // Si la fecha elegida no alcanza (más cruces que slots, o equipos que ya
+  // quedaron ocupados), los que no entran caen a la PRIMERA FECHA SIGUIENTE
+  // con lugar: nada se pierde, y la vista previa muestra el aviso del
+  // desborde para que el admin decida antes de confirmar.
+  let overflowRounds: number[] = [];
+  {
+    let i = Math.max(0, crossoverRound - 1); // índice 0-based del día ancla
+    for (const m of crossoverMatches) {
+      let placed = false;
+      for (;;) {
+        openDay(i);
+        const busy = teamsOfDay.get(i)!.has(m.home) || teamsOfDay.get(i)!.has(m.away);
+        const full = perDay[i]!.length >= capacity;
+        const used = usedSlots.get(i)!;
+        const free = busy || full ? undefined : catalog.find((s) => !used.has(`${s.venue}|${s.kickoff}`));
+        if (!free) {
+          i += 1; // sin lugar en esta fecha: probar con la siguiente
+          continue;
+        }
+        used.add(`${free.venue}|${free.kickoff}`);
+        m.day = days[i]!;
+        m.venue = free.venue;
+        m.kickoff = free.kickoff;
+        perDay[i]!.push(m);
+        teamsOfDay.get(i)!.add(m.home);
+        teamsOfDay.get(i)!.add(m.away);
+        if (i + 1 > crossoverRound) overflowRounds.push(i + 1);
+        placed = true;
+        break;
+      }
+      void placed;
     }
-    used.add(`${free.venue}|${free.kickoff}`);
-    m.day = days[i]!;
-    m.venue = free.venue;
-    m.kickoff = free.kickoff;
-    perDay[i]!.push(m);
-    teamsOfDay.get(i)!.add(m.home);
-    teamsOfDay.get(i)!.add(m.away);
   }
 
   // 4b) Los de zona: mismo algoritmo de siempre, saltando los días ocupados
@@ -340,6 +362,7 @@ export function planFixture(input: PlanInput): PlannedFixture {
   const dayKeys = days.filter((d, i): d is string => Boolean(d) && (perDay[i] ?? []).length > 0);
 
   const matches = [...crossoverMatches, ...bag].filter((m) => m.day);
+  const crossoverOverflow = [...new Set(overflowRounds)].sort((a, b) => a - b);
   // 6) Verificación dura antes de devolver el plan.
   verifyPlan(matches, input.schedule);
   return {
@@ -347,6 +370,7 @@ export function planFixture(input: PlanInput): PlannedFixture {
     rounds: lastUsed,
     maxPerDay: Math.max(0, ...dayKeys.map((k) => (matches.filter((m) => m.day === k)).length)),
     crossover: matches.some((m) => m.kind === 'cruce') ? crossoverDate : null,
+    crossoverOverflow,
   };
 }
 
