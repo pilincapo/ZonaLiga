@@ -18,7 +18,7 @@ app.get('/', async (c) => c.html(await pub.homePage(c.env.DB, new URL(c.req.url)
 
 app.get('/posiciones', async (c) => c.html(await pub.standingsPage(c.env.DB, c.req.query('t'))));
 
-app.get('/fixture', async (c) => c.html(await pub.fixturePage(c.env.DB, c.req.query('t'))));
+app.get('/fixture', async (c) => c.html(await pub.fixturePage(c.env.DB, c.req.query('t'), c.req.query('f'))));
 
 app.get('/goleadores', async (c) =>
   c.html(await pub.scorersPage(c.env.DB, new URL(c.req.url).origin, c.req.query('t')))

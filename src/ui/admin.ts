@@ -634,6 +634,58 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   const crossovers = parseCrossoverConfig(t.config);
   const crossoverRounds = crossoverRoundsOf(t.config);
   const activeTeamRows = teams.filter((x) => x.active);
+
+  // Cuadro de fechas libres por equipo: en qué fechas cada equipo no tiene
+  // partido asignado (por postergados sin reprogramar o por fechas con
+  // número impar de equipos). Ordenado por más fechas libres, para ver de
+  // un vistazo si la carga quedó equilibrada y qué fecha tiene más libres.
+  let freeDatesBlock = '';
+  const libranPorEquipo = activeTeamRows
+    .map((team) => ({
+      team,
+      libres: roundKeys.filter(
+        (r) => !(byRound.get(r) ?? []).some((m) => m.home_team_id === team.id || m.away_team_id === team.id)
+      ),
+    }))
+    .filter((row) => row.libres.length > 0)
+    .sort((a, b) => b.libres.length - a.libres.length || a.team.name.localeCompare(b.team.name));
+  if (libranPorEquipo.length > 0) {
+    const head = roundKeys
+      .map(
+        (r) =>
+          `<th style="text-align:center"${crossoverRounds.has(r) ? ` title="Fecha ${r} — Cruce entre zonas"` : ''}>F${r}</th>`
+      )
+      .join('');
+    const rows = libranPorEquipo
+      .map(
+        (row) =>
+          `<tr><td>${esc(row.team.name)}</td>${roundKeys
+            .map((r) =>
+              row.libres.includes(r)
+                ? '<td style="text-align:center">□</td>'
+                : '<td style="text-align:center"><span class="faint">—</span></td>'
+            )
+            .join('')}</tr>`
+      )
+      .join('');
+    const totals = roundKeys
+      .map((r) => {
+        const n = libranPorEquipo.filter((row) => row.libres.includes(r)).length;
+        return `<td style="text-align:center">${n > 0 ? n : '<span class="faint">0</span>'}</td>`;
+      })
+      .join('');
+    freeDatesBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <strong>Fechas libres por equipo</strong>
+  <p class="hint">En qué fechas cada equipo no tiene partido asignado: por postergados sin reprogramar o porque la fecha tiene impar. Ordenado por más fechas libres, para ver si la carga quedó equilibrada.</p>
+  <div class="table-wrap"><table class="data">
+    <thead><tr><th>Equipo</th>${head}</tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td><strong>Libres por fecha</strong></td>${totals}</tr></tfoot>
+  </table></div>
+  <p class="hint">□ = fecha libre · ${libranPorEquipo.length} equipo(s) con fechas libres. Para llenar una fecha con lugar: “Agendar fecha de reposición” (arriba) o <a href="/admin/fixture/nuevo?t=${escUrl(t.slug)}">+ Partido suelto</a>.</p>
+</div></div></section>`;
+  }
   const standings = computeStandings(
     matchesForStandings(matches, t.config),
     activeTeamRows.map((x) => ({ id: x.id, name: x.name })),
@@ -817,6 +869,7 @@ ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, 
 ${crossoverBlock}
 ${playoffBlock}
 ${makeUpBlock}
+${freeDatesBlock}
 ${roundSections || '<section class="block"><div class="card"><div class="card-body">Fixture vacío. Generá uno automático o agregá partidos.</div></div></section>'}`;
   return adminLayout({ title: 'Fixture', active: 'fixture', body });
 }

@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.25] — 2026-09-25 — Fecha compartible por link y fechas libres en el panel
+
+### Nuevo
+- El fixture recuerda la fecha en la dirección: al navegar por fechas el link cambia a `/fixture?f=3` y se puede compartir — quien lo abre ve directamente esa fecha.
+- En el panel de fixture, cuadro de fechas libres por equipo: muestra en qué fechas cada equipo no tiene partido (por postergados o impar), ordenado por más fechas libres, con el total de libres por fecha para elegir dónde agendar la reposición.
+
+---
+
 ## [0.2.24] — 2026-09-24 — Navegación de fechas y home reacomodada
 
 ### Nuevo

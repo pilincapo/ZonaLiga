@@ -459,7 +459,24 @@ ${adjustmentsNote}`;
 
 /* ============================== FIXTURE ============================== */
 
-export async function fixturePage(db: D1Database, slugParam?: string): Promise<string> {
+/**
+ * Índice de página (0-based) que pide /fixture?f=N para compartir el link de
+ * una fecha. Devuelve -1 si el parámetro no señala ninguna fecha (vacío, no
+ * numérico o menor a 1) y en ese caso se usa la lógica de "próxima fecha".
+ * Si N apunta a una fecha inexistente, cae a la más cercana (f=99 con 13
+ * fechas muestra la última).
+ */
+export function fxPageIndexFromUrl(raw: string | undefined, roundKeys: readonly string[]): number {
+  if (!raw) return -1;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return -1;
+  const numKeys = roundKeys.map(Number).filter(Number.isInteger).sort((a, b) => a - b);
+  if (numKeys.length === 0) return -1;
+  const target = Math.min(Math.max(n, numKeys[0]!), numKeys[numKeys.length - 1]!);
+  return roundKeys.indexOf(String(target));
+}
+
+export async function fixturePage(db: D1Database, slugParam?: string, roundParam?: string): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam });
   if (!view) return layout({ title: 'Fixture', active: 'fixture', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
   const t = view.tournament;
@@ -471,19 +488,26 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
   const roundKeys = [...rounds.keys()].sort((a, b) => Number(a) - Number(b));
   const crossoverRounds = crossoverRoundsOf(t.config);
 
-  const fxPages: { label: string; day: string; html: string; upcoming: boolean }[] = [];
+  const fxPages: { label: string; day: string; html: string; upcoming: boolean; round: string }[] = [];
+  const fIdx = fxPageIndexFromUrl(roundParam, roundKeys);
   let defaultIdx = 0;
   for (const key of roundKeys) {
     const list = rounds.get(key)!;
     const label = key === 'x' ? 'Sin fecha asignada' : roundLabel(Number(key), crossoverRounds);
     const day = list.find((m) => m.played_on)?.played_on ?? '';
     const upcoming = list.some((m) => m.status === 'scheduled');
-    // Por defecto se muestra la PRIMERA fecha con partidos pendientes.
-    if (upcoming && fxPages.every((p) => !p.upcoming)) defaultIdx = fxPages.length;
+    if (fIdx >= 0) {
+      // El link trae ?f=N: se muestra esa fecha, sin importar si está jugada.
+      defaultIdx = fIdx;
+    } else if (upcoming && fxPages.every((p) => !p.upcoming)) {
+      // Sin ?f: por defecto se muestra la PRIMERA fecha con partidos pendientes.
+      defaultIdx = fxPages.length;
+    }
     fxPages.push({
       label,
       day,
       upcoming,
+      round: key === 'x' ? '' : key,
       html: `<div class="card">${list.map((m) => matchRow(m, teamMap)).join('')}</div>`,
     });
   }
@@ -503,7 +527,7 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
   const fxPagesHtml = fxPages
     .map(
       (p, i) =>
-        `<section class="fx-page" data-day="${esc(p.day)}"${i === defaultIdx ? '' : ' hidden'}><h3 class="zone-title">${esc(p.label)}</h3>${p.html}</section>`
+        `<section class="fx-page" data-round="${esc(p.round)}" data-day="${esc(p.day)}"${i === defaultIdx ? '' : ' hidden'}><h3 class="zone-title">${esc(p.label)}</h3>${p.html}</section>`
     )
     .join('');
   const fxScript = `
@@ -524,6 +548,11 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
   }
   var cur = pages.findIndex(function (p) { return !p.hidden; });
   if (cur < 0) cur = 0;
+  // La URL acompaña a la fecha visible: /fixture?f=3 se puede compartir.
+  function setUrl(i) {
+    var r = pages[i].getAttribute('data-round');
+    try { history.replaceState(null, '', r ? '/fixture?f=' + r : '/fixture'); } catch (e) {}
+  }
   function show(i) {
     cur = (i + pages.length) % pages.length;
     pages.forEach(function (p, k) { p.hidden = k !== cur; });
@@ -532,6 +561,7 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
     day.textContent = fmtDia(p.getAttribute('data-day'));
     if (jump) jump.value = String(cur);
     if (all) all.textContent = 'Ver todas';
+    setUrl(cur);
   }
   document.getElementById('fxPrev').addEventListener('click', function () { show(cur - 1); });
   document.getElementById('fxNext').addEventListener('click', function () { show(cur + 1); });
@@ -543,6 +573,7 @@ export async function fixturePage(db: D1Database, slugParam?: string): Promise<s
       label.textContent = 'Todas las fechas';
       day.textContent = pages.length + ' fechas';
       all.textContent = 'Ver una';
+      try { history.replaceState(null, '', '/fixture'); } catch (e) {}
     } else {
       show(cur);
     }
