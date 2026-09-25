@@ -152,3 +152,35 @@ export function buildMakeUpPlan(
 function makeUpRoundDate(s: TournamentSchedule, maxRound: number, blockIndex: number): string {
   return plannedRoundDate(s, maxRound + 1 + blockIndex);
 }
+
+/**
+ * Sugiere en qué fecha de zona reciclar los partidos postergados: la que
+ * tiene MÁS equipos libres (sus lugares alcanzan para los postergados) y
+ * todavía tiene partidos pendientes. Empate: la primera. Si ninguna fecha
+ * tiene pendientes (o no hay fechas), null: toca crear la fecha de
+ * reposición al final del fixture.
+ *
+ * Es la base de la sugerencia ⭐ del cuadro de fechas libres del panel.
+ */
+export function suggestMakeUpRound(
+  byRound: ReadonlyMap<number, Match[]>,
+  roundKeys: readonly number[],
+  teamIds: readonly number[]
+): number | null {
+  let best: { round: number; libres: number } | null = null;
+  for (const round of roundKeys) {
+    const list = byRound.get(round) ?? [];
+    // Solo fechas con partidos pendientes: en una fecha toda jugada no
+    // hay nada que reubicar.
+    if (list.length === 0) continue;
+    if (!list.some((m) => m.status === 'scheduled' || m.status === 'postponed')) continue;
+    const ocupados = new Set<number>();
+    for (const m of list) {
+      if (m.home_team_id != null) ocupados.add(m.home_team_id);
+      if (m.away_team_id != null) ocupados.add(m.away_team_id);
+    }
+    const libres = teamIds.reduce((n, id) => n + (ocupados.has(id) ? 0 : 1), 0);
+    if (best === null || libres > best.libres) best = { round, libres };
+  }
+  return best?.round ?? null;
+}

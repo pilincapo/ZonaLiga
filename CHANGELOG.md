@@ -15,6 +15,17 @@
 
 ---
 
+## [0.2.26] — 2026-09-25 — Compartir fecha por WhatsApp y cuadro de libres afinado
+
+### Nuevo
+- El fixture público tiene botón "📲 Compartir": abre WhatsApp con la lista de partidos de la fecha que estás viendo y su link directo (`/fixture?f=N`), listo para mandar al grupo. Funciona también sin JavaScript (comparte la fecha por defecto).
+- En el panel de fixture, el cuadro de fechas libres sugiere con un ⭐ qué fecha conviene para reciclar los partidos postergados: la de más equipos libres que todavía tiene pendientes.
+
+### Mejora
+- En el cuadro de fechas libres del panel, las fechas de cruce entre zonas van en columnas aparte (C) y aclaradas: solo juegan los emparejados, el resto libra por diseño, así que ya no confunden la lectura del desequilibrio.
+
+---
+
 ## [0.2.25] — 2026-09-25 — Fecha compartible por link y fechas libres en el panel
 
 ### Nuevo

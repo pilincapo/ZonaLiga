@@ -47,7 +47,7 @@ import {
   pendingLeagueCount,
   playoffFormatLabel,
 } from '../lib/playoff.ts';
-import { buildMakeUpPlan, postponedMatches } from '../lib/oversub.ts';
+import { buildMakeUpPlan, postponedMatches, suggestMakeUpRound } from '../lib/oversub.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
@@ -636,54 +636,87 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   const activeTeamRows = teams.filter((x) => x.active);
 
   // Cuadro de fechas libres por equipo: en qué fechas cada equipo no tiene
-  // partido asignado (por postergados sin reprogramar o por fechas con
-  // número impar de equipos). Ordenado por más fechas libres, para ver de
-  // un vistazo si la carga quedó equilibrada y qué fecha tiene más libres.
+  // partido asignado. Las fechas de zona van primero (F); las de cruce entre
+  // zonas (C) van aparte, porque ahí solo juegan los emparejados y el resto
+  // libra por diseño (no cuentan como carga desigual). Ordenado por más
+  // fechas libres de zona, para ver si la carga quedó equilibrada.
   let freeDatesBlock = '';
+  const regularKeys = roundKeys.filter((r) => !crossoverRounds.has(r));
+  const crossoverKeys = roundKeys.filter((r) => crossoverRounds.has(r));
+  const juegaEn = (teamId: number, round: number): boolean =>
+    (byRound.get(round) ?? []).some((m) => m.home_team_id === teamId || m.away_team_id === teamId);
+  // Sugerencia ⭐: fecha de zona con más equipos libres que todavía tenga
+  // partidos pendientes (para reciclar postergados ahí en vez de al final).
+  const sugerida = suggestMakeUpRound(byRound, regularKeys, activeTeamRows.map((x) => x.id));
   const libranPorEquipo = activeTeamRows
     .map((team) => ({
       team,
-      libres: roundKeys.filter(
-        (r) => !(byRound.get(r) ?? []).some((m) => m.home_team_id === team.id || m.away_team_id === team.id)
-      ),
+      libres: regularKeys.filter((r) => !juegaEn(team.id, r)),
     }))
     .filter((row) => row.libres.length > 0)
     .sort((a, b) => b.libres.length - a.libres.length || a.team.name.localeCompare(b.team.name));
   if (libranPorEquipo.length > 0) {
-    const head = roundKeys
+    const cSep = 'border-left:1px dashed currentColor';
+    const head = regularKeys
+      .map((r) =>
+        r === sugerida
+          ? `<th style="text-align:center" title="Sugerida para agendar la reposición: es la fecha con más equipos libres que aún tiene partidos pendientes">F${r} ⭐</th>`
+          : `<th style="text-align:center">F${r}</th>`
+      )
+      .join('');
+    const headC = crossoverKeys
       .map(
         (r) =>
-          `<th style="text-align:center"${crossoverRounds.has(r) ? ` title="Fecha ${r} — Cruce entre zonas"` : ''}>F${r}</th>`
+          `<th style="text-align:center;${cSep}" title="Fecha ${r} — Cruce entre zonas: solo juegan los emparejados"><span class="muted">C${r}</span></th>`
       )
       .join('');
     const rows = libranPorEquipo
       .map(
         (row) =>
-          `<tr><td>${esc(row.team.name)}</td>${roundKeys
+          `<tr><td>${esc(row.team.name)}</td>${regularKeys
             .map((r) =>
               row.libres.includes(r)
                 ? '<td style="text-align:center">□</td>'
                 : '<td style="text-align:center"><span class="faint">—</span></td>'
             )
+            .join('')}${crossoverKeys
+            .map((r) =>
+              juegaEn(row.team.id, r)
+                ? `<td style="text-align:center;${cSep}"><span class="faint">—</span></td>`
+                : `<td style="text-align:center;${cSep}">□</td>`
+            )
             .join('')}</tr>`
       )
       .join('');
-    const totals = roundKeys
+    const totals = regularKeys
       .map((r) => {
         const n = libranPorEquipo.filter((row) => row.libres.includes(r)).length;
         return `<td style="text-align:center">${n > 0 ? n : '<span class="faint">0</span>'}</td>`;
       })
       .join('');
+    // En los cruces cuenta TODOS los activos: un equipo sin fechas libres de
+    // zona (ni siquiera aparece en la tabla) también puede librar un cruce.
+    const totalsC = crossoverKeys
+      .map((r) => {
+        const n = activeTeamRows.filter((team) => !juegaEn(team.id, r)).length;
+        return `<td style="text-align:center;${cSep}">${n > 0 ? n : '<span class="faint">0</span>'}</td>`;
+      })
+      .join('');
+    const sugNote =
+      sugerida != null
+        ? `<p class="hint">⭐ F${sugerida} es la sugerida para reciclar los postergados: es la fecha con más equipos libres que todavía tiene partidos pendientes.</p>`
+        : '<p class="hint">Ninguna fecha tiene partidos pendientes para reciclar postergados: usá “Agendar fecha de reposición” para crear una fecha nueva al final.</p>';
     freeDatesBlock = `
 <section class="block"><div class="card"><div class="card-body">
   <strong>Fechas libres por equipo</strong>
-  <p class="hint">En qué fechas cada equipo no tiene partido asignado: por postergados sin reprogramar o porque la fecha tiene impar. Ordenado por más fechas libres, para ver si la carga quedó equilibrada.</p>
+  <p class="hint">En qué fechas cada equipo no tiene partido asignado: por postergados sin reprogramar o porque la fecha tiene impar. Ordenado por más fechas libres de zona; los cruces (C) van aparte.</p>
   <div class="table-wrap"><table class="data">
-    <thead><tr><th>Equipo</th>${head}</tr></thead>
+    <thead><tr><th>Equipo</th>${head}${headC}</tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td><strong>Libres por fecha</strong></td>${totals}</tr></tfoot>
+    <tfoot><tr><td><strong>Libres por fecha</strong></td>${totals}${totalsC}</tr></tfoot>
   </table></div>
-  <p class="hint">□ = fecha libre · ${libranPorEquipo.length} equipo(s) con fechas libres. Para llenar una fecha con lugar: “Agendar fecha de reposición” (arriba) o <a href="/admin/fixture/nuevo?t=${escUrl(t.slug)}">+ Partido suelto</a>.</p>
+  ${sugNote}
+  <p class="hint">□ = fecha libre · <span class="muted">C</span> = cruce entre zonas: solo juegan los emparejados, el resto libra por diseño · ${libranPorEquipo.length} equipo(s) con fechas libres. Para llenar una fecha con lugar: “Agendar fecha de reposición” (arriba) o <a href="/admin/fixture/nuevo?t=${escUrl(t.slug)}">+ Partido suelto</a>.</p>
 </div></div></section>`;
   }
   const standings = computeStandings(

@@ -476,7 +476,7 @@ export function fxPageIndexFromUrl(raw: string | undefined, roundKeys: readonly 
   return roundKeys.indexOf(String(target));
 }
 
-export async function fixturePage(db: D1Database, slugParam?: string, roundParam?: string): Promise<string> {
+export async function fixturePage(db: D1Database, slugParam?: string, roundParam?: string, origin = ''): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam });
   if (!view) return layout({ title: 'Fixture', active: 'fixture', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
   const t = view.tournament;
@@ -488,7 +488,7 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
   const roundKeys = [...rounds.keys()].sort((a, b) => Number(a) - Number(b));
   const crossoverRounds = crossoverRoundsOf(t.config);
 
-  const fxPages: { label: string; day: string; html: string; upcoming: boolean; round: string }[] = [];
+  const fxPages: { label: string; day: string; html: string; upcoming: boolean; round: string; lines: string[]; share: string }[] = [];
   const fIdx = fxPageIndexFromUrl(roundParam, roundKeys);
   let defaultIdx = 0;
   for (const key of roundKeys) {
@@ -503,14 +503,38 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
       // Sin ?f: por defecto se muestra la PRIMERA fecha con partidos pendientes.
       defaultIdx = fxPages.length;
     }
+    // Texto para el botón Compartir: lista de partidos + link ?f=N de esta
+    // fecha. Va en un data-attr JSON; el script lo une con la URL del día.
+    const shareLines = list.map((m) => {
+      const h = m.home_team_id != null ? teamMap.get(m.home_team_id)?.name : 'Por definir';
+      const a = m.away_team_id != null ? teamMap.get(m.away_team_id)?.name : 'Por definir';
+      const time = m.kickoff_time ? ` ${m.kickoff_time}` : '';
+      return `• ${h ?? '?'} vs ${a ?? '?'}${time}`;
+    });
     fxPages.push({
       label,
       day,
       upcoming,
       round: key === 'x' ? '' : key,
+      lines: shareLines,
+      share: JSON.stringify({ label, day, lines: shareLines }),
       html: `<div class="card">${list.map((m) => matchRow(m, teamMap)).join('')}</div>`,
     });
   }
+
+  // Link de compartir inicial (funciona sin JavaScript): la fecha por defecto.
+  const p0 = fxPages[defaultIdx] ?? fxPages[0];
+  const shareHref0 = p0
+    ? waLink(
+        shareTextMatchday(
+          t.name,
+          p0.label,
+          p0.day,
+          p0.lines,
+          absoluteUrl(p0.round ? `/fixture?f=${p0.round}` : '/fixture', origin)
+        )
+      )
+    : '';
 
   // Navegación de fechas: ‹ › + selector de salto. Sin JS, se ven todas
   // (progressive enhancement: el atributo hidden lo aplica el script).
@@ -523,11 +547,12 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
     .map((p, i) => `<option value="${i}">${esc(p.label)}</option>`)
     .join('')}</select>
   <a href="#" id="fxAll" class="muted small">Ver todas</a>
+  <a href="${escUrl(shareHref0)}" id="fxShare" class="btn btn-ghost btn-sm" target="_blank" rel="noopener" aria-label="Compartir esta fecha por WhatsApp">📲 Compartir</a>
 </div>`;
   const fxPagesHtml = fxPages
     .map(
       (p, i) =>
-        `<section class="fx-page" data-round="${esc(p.round)}" data-day="${esc(p.day)}"${i === defaultIdx ? '' : ' hidden'}><h3 class="zone-title">${esc(p.label)}</h3>${p.html}</section>`
+        `<section class="fx-page" data-round="${esc(p.round)}" data-day="${esc(p.day)}" data-share="${escUrl(p.share)}"${i === defaultIdx ? '' : ' hidden'}><h3 class="zone-title">${esc(p.label)}</h3>${p.html}</section>`
     )
     .join('');
   const fxScript = `
@@ -539,6 +564,20 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
   var day = document.getElementById('fxDay');
   var jump = document.getElementById('fxJump');
   var all = document.getElementById('fxAll');
+  var share = document.getElementById('fxShare');
+  // Texto para WhatsApp: torneo + fecha + partidos + link ?f=N compartible.
+  var TITULO = document.querySelector('.hero-kicker');
+  function shareHref(p) {
+    var d;
+    try { d = JSON.parse(p.getAttribute('data-share')); } catch (e) { return '/fixture'; }
+    var r = p.getAttribute('data-round');
+    var url = location.origin + '/fixture' + (r ? '?f=' + r : '');
+    var txt = '\u26BD ' + (TITULO ? TITULO.textContent + ' \u2014 ' : '') + d.label;
+    if (d.day) txt += ' (' + fmtDia(d.day) + ')';
+    if (d.lines.length) txt += '\n' + d.lines.join('\n');
+    txt += '\n\uD83D\uDD17 ' + url;
+    return 'https://wa.me/?text=' + encodeURIComponent(txt);
+  }
   var DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
   var MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   function fmtDia(iso) {
@@ -561,10 +600,12 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
     day.textContent = fmtDia(p.getAttribute('data-day'));
     if (jump) jump.value = String(cur);
     if (all) all.textContent = 'Ver todas';
+    if (share) share.href = shareHref(p);
     setUrl(cur);
   }
   document.getElementById('fxPrev').addEventListener('click', function () { show(cur - 1); });
   document.getElementById('fxNext').addEventListener('click', function () { show(cur + 1); });
+  if (share) share.addEventListener('click', function () { share.href = shareHref(pages[cur]); });
   if (jump) jump.addEventListener('change', function () { show(Number(jump.value)); });
   if (all) all.addEventListener('click', function (e) {
     e.preventDefault();
