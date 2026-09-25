@@ -391,6 +391,17 @@ table.data tbody tr:nth-child(1) .pos-num { color: var(--accent-strong); }
 .team-cell a { color: var(--text); font-weight: 600; }
 .team-cell a:hover { color: var(--accent-strong); text-decoration: none; }
 
+/* Distintivo de zona junto al nombre en las filas de partido. Compacto
+   para no empujar el nombre: solo el texto de la zona (A, B, Norte…). */
+.zone-badge {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 0.6rem;
+}
+@media (max-width: 640px) {
+  .zone-badge { display: none; } /* en móvil angosto manda el escudo */
+}
+
 .crest {
   width: 22px; height: 22px;
   border-radius: 5px;

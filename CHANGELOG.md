@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.40] — 2026-09-25 — Distintivo de zona junto a cada equipo
+
+### Nuevo
+
+- En las filas de partido del sitio público (fixture, inicio), cada equipo muestra su distintivo de zona (A, B, Norte…): como la lista va mezclada, el badge permite ver de un vistazo quién pertenece a cada zona. En pantallas de celular angostas se oculta para no romper la fila.
+
 ## [0.2.39] — 2026-09-25 — En vivo también mezcla la fecha del día
 
 ### Arreglo

@@ -53,6 +53,20 @@ export function crossoverBadge(): string {
   return '<span class="badge amber" title="Cruce entre zonas: no suma a la tabla de zona">Cruce</span> ';
 }
 
+/**
+ * Distintivo de zona del equipo en una fila de partido. Con la lista
+ * mezclada (ya no agrupada por zona), el badge es lo que permite ver de un
+ * vistazo quién pertenece a cada zona. El color sale del accent del tema;
+ * el texto es el nombre de la zona (A, B, Norte…).
+ */
+export function zoneBadge(zone: string, align: 'left' | 'right' = 'left'): string {
+  const z = zone.trim();
+  if (!z) return '';
+  const title = `Equipo de la zona ${z}`;
+  const side = align === 'right' ? ' style="margin-left:6px"' : ' style="margin-right:6px"';
+  return `<span class="badge info zone-badge" title="${esc(title)}"${side}>${esc(z)}</span>`;
+}
+
 /** Centro de la fila: hora/fecha, marcador con link a la ficha, o estado. Detalle interno de matchRow. */
 function matchCenter(m: Match): string {
   if (m.status === 'scheduled') {
@@ -73,9 +87,9 @@ export function matchRow(
   const away = m.away_team_id != null ? teamMap.get(m.away_team_id) : undefined;
   const cruce = isCrossoverMatch(m) ? crossoverBadge() : '';
   return `<div class="match-row">
-  ${teamCell(home, { placeholder: opts.homePlaceholder, align: 'left' })}
+  ${teamCell(home, { placeholder: opts.homePlaceholder, align: 'left' })}${zoneBadge(m.zone, 'left')}
   ${cruce}${matchCenter(m)}
-  ${teamCell(away, { placeholder: opts.awayPlaceholder, align: 'right' })}
+  ${zoneBadge(m.zone, 'right')}${teamCell(away, { placeholder: opts.awayPlaceholder, align: 'right' })}
 </div>`;
 }
 
