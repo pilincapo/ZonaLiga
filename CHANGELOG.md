@@ -21,6 +21,7 @@
 
 - El bloque "Próxima fecha" del inicio y el texto para compartir por WhatsApp ahora listan los partidos con la misma mezcla estable que el fixture (antes iban en orden de zona).
 - La página "Días, horas y canchas" del panel también muestra cada fecha mezclada; guardar sigue funcionando igual porque el orden visual no afecta los datos.
+- En el inicio, los 5 próximos partidos salen mezclados de toda la fecha: antes se cortaban por orden de carga y mostraban solo los de una zona.
 
 ## [0.2.36] — 2026-09-25 — Mezclado real de las fechas (v2)
 

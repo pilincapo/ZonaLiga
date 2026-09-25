@@ -238,10 +238,17 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
 
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = matches
+  // Los 5 próximos salen de la PRIMERA fecha pendiente, mezclados con la
+  // misma clave estable del fixture: si se cortara por id antes de mezclar,
+  // el bloque mostraría solo los de la zona que se generó primero.
+  const upcomingAll = matches
     .filter((m) => m.status === 'scheduled' && (!m.played_on || m.played_on >= today))
-    .sort((a, b) => (a.played_on || '9999').localeCompare(b.played_on || '9999') || a.id - b.id)
-    .slice(0, 5);
+    .sort((a, b) => (a.played_on || '9999').localeCompare(b.played_on || '9999') || a.id - b.id);
+  const firstPendingRound = upcomingAll[0]?.round ?? null;
+  const upcoming = orderMatchesForDisplay(
+    upcomingAll.filter((m) => m.round === firstPendingRound),
+    { tournamentId: t.id, round: firstPendingRound }
+  ).slice(0, 5);
   const played = matches
     .filter((m) => m.status === 'played' || m.status === 'walkover')
     .sort((a, b) => (b.played_on || '').localeCompare(a.played_on || '') || b.id - a.id)
