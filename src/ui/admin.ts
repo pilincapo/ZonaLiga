@@ -1356,6 +1356,7 @@ export function fixturePreviewPage(opts: {
   summary: string;
   payload: string;
   createdAt: string;
+  teamNames: Map<number, string>;
 }): string {
   let plan: PlannedMatch[] = [];
   try {
@@ -1370,10 +1371,11 @@ export function fixturePreviewPage(opts: {
     .map((round) => {
       const list = porFecha.get(round)!;
       const day = list[0]?.day ?? '';
+      const nombre = (id: number): string => opts.teamNames.get(id) ?? `#${id}`;
       const rows = list
         .map(
           (m) =>
-            `<tr><td>${esc(KIND_LABEL[m.kind] ? KIND_LABEL[m.kind] + ' · ' : '')}${esc(m.zone || '')}</td><td>${esc(String(m.home))} <span class="faint">vs</span> ${esc(String(m.away))}</td><td>${esc(m.venue || '')}</td><td>${esc(m.kickoff || '')}</td></tr>`
+            `<tr><td>${esc(KIND_LABEL[m.kind] ? KIND_LABEL[m.kind] + ' · ' : '')}${esc(m.zone || '')}</td><td>${esc(nombre(m.home))} <span class="faint">vs</span> ${esc(nombre(m.away))}</td><td>${esc(m.venue || '')}</td><td>${esc(m.kickoff || '')}</td></tr>`
         )
         .join('');
       return `<h3 class="zone-title">Fecha ${round}${day ? ` — ${esc(formatDateShort(day))}` : ''} <span class="faint small">(${list.length} partido(s))</span></h3>

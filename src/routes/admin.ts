@@ -453,6 +453,9 @@ adminRoutes.get('/fixture/vista-previa', async (c) => {
     .bind(t.id)
     .first<{ summary: string; payload: string; created_at: string }>();
   if (!draft) return c.redirect(`/admin/fixture?t=${encodeURIComponent(t.slug)}&err=` + encodeURIComponent('No hay vista previa: prepará una primero'));
+  // Nombres de equipos para mostrar el plan legible (el payload trae ids).
+  const teamRows = await c.env.DB.prepare('SELECT id, name FROM teams').all<{ id: number; name: string }>();
+  const teamNames = new Map((teamRows.results ?? []).map((r) => [r.id, r.name]));
   return c.html(
     admin.fixturePreviewPage({
       tournamentId: t.id,
@@ -461,6 +464,7 @@ adminRoutes.get('/fixture/vista-previa', async (c) => {
       summary: draft.summary,
       payload: draft.payload,
       createdAt: draft.created_at,
+      teamNames,
     })
   );
 });
