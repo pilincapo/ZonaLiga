@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.41] — 2026-09-25 — Mezcla real en el generador: cancha y hora por sorteo por día
+
+### Arreglo
+
+- Se descubrió la causa raíz de que "el azar no impactaba": la función que baraja del generador tenía un error y en realidad nunca mezclaba nada (devolvía los elementos a sus mismos lugares). Todas las barajas del generador eran falsas desde siempre.
+- Además, la asignación ahora es en dos fases, como se sugirió: primero se arma cada día (quién juega contra quién), después cada día baraja sus partidos y les sortea cancha y hora. Un partido de cualquier zona puede tocarle la hora temprana o la tardía.
+
 ## [0.2.40] — 2026-09-25 — Distintivo de zona junto a cada equipo
 
 ### Nuevo
