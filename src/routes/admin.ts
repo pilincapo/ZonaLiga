@@ -398,6 +398,9 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
   // El select de cruces: 'con' (default) incluye la bolsa de cruces; 'sin'
   // arma el fixture solo con los partidos de zona.
   const includeCrossovers = String(f['crossover_include'] ?? 'con') !== 'sin';
+  // Fecha del cruce: vacío = automática (la primera libre tras las de zona).
+  const crossoverRoundRaw = String(f['crossover_round'] ?? '').trim();
+  const crossoverRound = crossoverRoundRaw ? Number(crossoverRoundRaw) : undefined;
   if (!Number.isFinite(tournamentId)) {
     return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
   }
@@ -432,6 +435,7 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
       crossoverRule: rule,
       crossoverCounts,
       includeCrossovers,
+      crossoverRound,
     });
   } catch (e) {
     const text = e instanceof Error ? e.message : 'error desconocido';
@@ -451,7 +455,10 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
       "INSERT INTO fixture_drafts (tournament_id, summary, payload, created_at) VALUES (?1, ?2, ?3, datetime('now')) " +
         'ON CONFLICT (tournament_id) DO UPDATE SET summary = ?2, payload = ?3, created_at = datetime(\'now\')'
     )
-    .bind(tournamentId, summaryText, JSON.stringify(plan.matches))
+    // El borrador guarda el plan completo: partidos + la declaración de
+    // cruce resuelta (fecha automática incluida), para que el confirmar
+    // aplique exactamente lo que se vio en la vista previa.
+    .bind(tournamentId, summaryText, JSON.stringify({ matches: plan.matches, crossover: plan.crossover }))
     .run();
 
   return c.redirect(`/admin/fixture/vista-previa?t=${encodeURIComponent(tRow.slug)}`);
@@ -528,9 +535,20 @@ adminRoutes.post('/fixture/confirmar', async (c) => {
     return c.redirect(dest + '&err=' + encodeURIComponent('No hay vista previa para confirmar: prepará una primero'));
   }
   let plan: { home: number; away: number; zone: string; kind: string; counts?: boolean; day: string; venue: string; kickoff: string; fixtureRound: number }[] = [];
+  let planCrossover: CrossoverDate | null = null;
   try {
     const parsed: unknown = JSON.parse(draft.payload);
-    if (Array.isArray(parsed)) plan = parsed as typeof plan;
+    // Payload nuevo: { matches, crossover }. Payload viejo: array plano
+    // (borradores previos a la unificación; sin declaración de cruce).
+    if (Array.isArray(parsed)) {
+      plan = parsed as typeof plan;
+    } else if (parsed && typeof parsed === 'object') {
+      const o = parsed as { matches?: typeof plan; crossover?: CrossoverDate | null };
+      if (Array.isArray(o.matches)) plan = o.matches;
+      if (o.crossover && typeof o.crossover.round === 'number') {
+        planCrossover = { round: o.crossover.round, rule: parseCrossoverRule(o.crossover.rule), counts: o.crossover.counts === true };
+      }
+    }
   } catch {
     plan = [];
   }
@@ -572,20 +590,20 @@ adminRoutes.post('/fixture/confirmar', async (c) => {
         )
     );
   }
-  // La config de cruces previa queda: los cruces nuevos ya viven en el plan
-  // como partidos comunes (kind 'cruce') y las fechas registradas siguen
-  // sirviendo para el filtrado de la tabla y el playoff. Si el plan salió
-  // sin cruces (opción "sin cruces" del formulario), las fechas declaradas
-  // se sacan de la config: quedarse con ellas volvería a meter cruces en la
-  // próxima generación y ya no habría partidos que las respalden.
-  if (!plan.some((m) => m.kind === 'cruce')) {
+  // La config de cruces se reescribe desde el plan: una fecha = un cruce,
+  // declarado por el formulario de generar. Si el plan salió sin cruces
+  // (opción "sin cruces"), la declaración se saca: quedarse con ella volvería
+  // a meter cruces en la próxima generación sin partidos que la respalden.
+  {
     const cfg = JSON.parse(tRow.config ?? '{}') as Record<string, unknown>;
-    if ('crossover' in cfg) {
+    if (planCrossover) {
+      cfg['crossover'] = crossoverConfigJson([planCrossover]).crossover;
+    } else {
       delete cfg['crossover'];
-      stmts.push(
-        c.env.DB.prepare('UPDATE tournaments SET config = ?1 WHERE id = ?2').bind(JSON.stringify(cfg), tournamentId)
-      );
     }
+    stmts.push(
+      c.env.DB.prepare('UPDATE tournaments SET config = ?1 WHERE id = ?2').bind(JSON.stringify(cfg), tournamentId)
+    );
   }
   await c.env.DB.batch(stmts);
   await c.env.DB.prepare('DELETE FROM fixture_drafts WHERE tournament_id = ?1').bind(tournamentId).run();
@@ -715,100 +733,6 @@ adminRoutes.post('/fixture/regenerar', async (c) => {
   }
   return c.redirect(
     `${dest}&msg=` + encodeURIComponent(`${resumen}. ✓ Verificado: los nuevos no pisan los jugados`)
-  );
-});
-
-/**
- * Genera la fecha especial de cruce entre zonas: los equipos de una zona se
- * enfrentan a los de la otra según su posición en la tabla (1º vs 1º, etc.).
- */
-adminRoutes.post('/fixture/cruce', async (c) => {
-  const f = await c.req.parseBody();
-  const tournamentId = Number(f['tournament_id']);
-  const rule = parseCrossoverRule(f['rule']);
-  const counts = f['counts'] === 'on' || f['counts'] === '1';
-  const round = Math.max(1, Math.round(Number(f['round']) || 0));
-  if (!Number.isFinite(tournamentId)) {
-    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
-  }
-  const t = await resolveTournament(c.env.DB, undefined, tournamentId);
-  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
-  const dest = `/admin/fixture?t=${encodeURIComponent(t.slug)}`;
-
-  // Solo con 2 zonas activas: el cruce se define entre exactamente dos zonas.
-  const zones = zonesOf(t.config);
-  if (!zones.enabled || zones.zones.length !== 2) {
-    return c.redirect(`${dest}&err=` + encodeURIComponent('La fecha de cruce necesita exactamente 2 zonas configuradas'));
-  }
-
-  const [teamRows, matchRows] = await Promise.all([
-    c.env.DB.prepare('SELECT id, name, active FROM teams ORDER BY id').all<{ id: number; name: string; active: number }>(),
-    c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id').bind(tournamentId).all<Match>(),
-  ]);
-  const matches = matchRows.results ?? [];
-  const names = new Map((teamRows.results ?? []).map((r) => [r.id, r.name]));
-
-  // Guardia: no pisar partidos ya existentes en esa fecha.
-  const existingInRound = matches.filter((m) => m.round === round);
-  if (existingInRound.length > 0) {
-    return c.redirect(
-      `${dest}&err=` +
-        encodeURIComponent(`La fecha ${round} ya tiene ${existingInRound.length} partido(s). Elegí otra fecha libre.`)
-    );
-  }
-
-  // Tabla por zona (los cruces previos que no cuentan no ensucian la tabla).
-  const standings = computeStandings(matchesForStandings(matches, t.config), (teamRows.results ?? []).map((r) => ({ id: r.id, name: r.name })), rulesOf(t));
-  const zoneA = zones.zones[0]!;
-  const zoneB = zones.zones[1]!;
-  const activeIds = new Set((teamRows.results ?? []).filter((r) => r.active).map((r) => r.id));
-  const byZone = (z: { name: string; teamIds: number[] }): typeof standings =>
-    standings.filter((row) => z.teamIds.includes(row.teamId) && activeIds.has(row.teamId));
-  const tableA = byZone(zoneA);
-  const tableB = byZone(zoneB);
-  if (tableA.length === 0 || tableB.length === 0) {
-    return c.redirect(`${dest}&err=` + encodeURIComponent('Cada zona necesita al menos un equipo activo para el cruce'));
-  }
-
-  const { pairs, unpaired } = buildCrossoverPairs(tableA, tableB, rule);
-  const schedule = scheduleOf(t.config);
-  const day = plannedRoundDate(schedule, round);
-  const slots = roundSlots(pairs.length, schedule);
-
-  const stmts: D1PreparedStatement[] = [];
-  for (const [i, p] of pairs.entries()) {
-    // La marca vive en la nota (igual que en la bolsa mezclada): la tabla,
-    // el playoff y la regeneración la leen del dato, no de la fecha.
-    const notes = counts ? CROSSOVER_NOTE_COUNTS : CROSSOVER_NOTE;
-    stmts.push(
-      c.env.DB.prepare(
-        'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, played_on, kickoff_time, venue, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
-      ).bind(tournamentId, round, p.home, p.away, 'scheduled', day, slots[i]?.kickoff ?? '', slots[i]?.venue ?? '', notes)
-    );
-  }
-  await c.env.DB.batch(stmts);
-
-  // Registrar la fecha de cruce en la config del torneo. Una fecha = un
-  // cruce: si la fecha ya estaba declarada (con otra regla o flag), se
-  // reemplaza en vez de acumular (duplicar la fecha duplicaría los cruces
-  // en la bolsa del planificador).
-  const dates: CrossoverDate[] = [
-    ...parseCrossoverConfig(t.config).filter((d) => d.round !== round),
-    { round, rule, counts },
-  ];
-  await c.env.DB
-    .prepare('UPDATE tournaments SET config = ?1 WHERE id = ?2')
-    .bind(JSON.stringify({ ...JSON.parse(t.config || '{}'), ...crossoverConfigJson(dates) }), tournamentId)
-    .run();
-
-  const zoneName = (id: number): string => (zoneA.teamIds.includes(id) ? zoneA.name : zoneB.teamIds.includes(id) ? zoneB.name : '');
-  const pairsText = pairs
-    .map((p) => `${names.get(p.home) ?? p.home} (${zoneName(p.home)}) vs ${names.get(p.away) ?? p.away} (${zoneName(p.away)})`)
-    .join(' · ');
-  const libran = unpaired.length ? ` · Libran: ${unpaired.map((id) => names.get(id) ?? id).join(', ')}` : '';
-  return c.redirect(
-    `${dest}&msg=` +
-      encodeURIComponent(`Fecha ${round} de cruce generada: ${pairsText}${libran}${counts ? '' : ' · No cuenta para la tabla'}`)
   );
 });
 

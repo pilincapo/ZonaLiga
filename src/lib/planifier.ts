@@ -43,6 +43,12 @@ export interface PlannedFixture {
   rounds: number;
   /** Máximo de partidos en un día. */
   maxPerDay: number;
+  /**
+   * Declaración del cruce usada por este plan (regla, fecha resuelta y si
+   * suma): null si el plan no incluye cruces. El confirmar la escribe en la
+   * config del torneo, para que quede registrada una fecha = un cruce.
+   */
+  crossover: CrossoverDate | null;
 }
 
 export interface PlanInput {
@@ -64,6 +70,11 @@ export interface PlanInput {
   crossoverCounts?: boolean;
   /** false = plan solo con partidos de zona, sin la bolsa de cruces. */
   includeCrossovers?: boolean;
+  /**
+   * Número de fecha donde vive el cruce. Vacío/undefined = automático: la
+   * primera fecha libre después de las fechas de zona.
+   */
+  crossoverRound?: number;
 }
 
 /** Mezcla Fisher-Yates con rng inyectable. */
@@ -112,9 +123,11 @@ export function crossoverPoolFor(input: {
   /** Regla y flag de suma de puntos elegidos en el formulario (pisan la config). */
   rule?: CrossoverRule;
   counts?: boolean;
+  /** Declaración única del formulario: si viene, reemplaza la config. */
+  date?: CrossoverDate;
 }): { home: number; away: number; counts: boolean }[] {
   void input.mode;
-  const dates = parseCrossoverConfig(input.configJson);
+  const dates = input.date ? [input.date] : parseCrossoverConfig(input.configJson);
   if (dates.length === 0) return [];
   const zc = zonesOf(input.configJson);
   if (!zc.enabled || zc.zones.length < 2) return [];
@@ -186,7 +199,30 @@ export function planFixture(input: PlanInput): PlannedFixture {
   }
 
   // 2) Cruces a la misma bolsa (caen mezclados en cualquier día), salvo que
-  // el formulario pida un fixture sin cruces entre zonas.
+  // el formulario pida un fixture sin cruces entre zonas. La declaración del
+  // cruce (regla, fecha, si suma) viene del formulario: si el formulario no
+  // declara una fecha de cruce explícita, se usa la config como antes.
+  // Fechas que ocupa la fase de zona (o el círculo global): n equipos →
+  // n-1 fechas, o n si hay impar (la del libre). La fecha automática del
+  // cruce es la primera libre después de eso.
+  const roundsList = zoned
+    ? zc.zones.map((z) => {
+        const n = z.teamIds.filter((id) => input.teamIds.includes(id)).length;
+        return n >= 2 ? (n % 2 === 1 ? n : n - 1) : 0;
+      })
+    : [input.teamIds.length % 2 === 1 ? input.teamIds.length : input.teamIds.length - 1];
+  const zoneRounds = Math.max(0, ...roundsList);
+  const autoRound = zoneRounds + 1; // primera fecha libre tras las de zona
+  const crossoverDate: CrossoverDate | null =
+    input.includeCrossovers === false
+      ? null
+      : input.crossoverRule || input.crossoverCounts !== undefined || input.crossoverRound
+        ? {
+            round: Math.max(1, Math.round(input.crossoverRound || 0)) || autoRound,
+            rule: input.crossoverRule ?? 'espejo',
+            counts: input.crossoverCounts ?? false,
+          }
+        : null;
   const crossovers =
     input.includeCrossovers === false
       ? []
@@ -198,6 +234,7 @@ export function planFixture(input: PlanInput): PlannedFixture {
           shuffleZones: input.standings ? false : true,
           rule: input.crossoverRule,
           counts: input.crossoverCounts,
+          date: crossoverDate ?? undefined,
           rng,
         });
   for (const p of crossovers) {
@@ -271,6 +308,7 @@ export function planFixture(input: PlanInput): PlannedFixture {
     matches,
     rounds: dayKeys.length,
     maxPerDay: Math.max(0, ...dayKeys.map((k) => byDay.get(k)!.length)),
+    crossover: matches.some((m) => m.kind === 'cruce') ? crossoverDate : null,
   };
 }
 

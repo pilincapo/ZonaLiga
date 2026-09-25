@@ -15,6 +15,17 @@
 
 ---
 
+## [0.2.32] — 2026-09-25 — El cruce se configura solo al generar el fixture
+
+### Nuevo
+
+- El formulario de generar fixture ahora también define en qué fecha vive el cruce: escribís el número o lo dejás vacío y el sistema lo pone en la primera fecha libre después de las fechas de zona.
+- El panel muestra el cruce vigente (fecha, regla y si suma puntos) y aclara que se reemplaza al generar de nuevo: para cambiar un cruce hay que regenerar el fixture.
+
+### Mejora
+
+- Se quitó la sección "Fecha especial de cruce entre zonas" del panel y su creación manual: el cruce solo se configura y genera desde el formulario de generar fixture, una sola vez por generación. La vista previa sigue mostrando los cruces antes de confirmar.
+
 ## [0.2.31] — 2026-09-25 — Fixture sin cruces y arreglo del doble cruce
 
 ### Nuevo

@@ -761,69 +761,6 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     rulesOf(t)
   );
   const twoZones = zones.enabled && zones.zones.length === 2;
-  const usedRounds = new Set(roundKeys);
-  const nextFreeRound = roundKeys.length ? Math.max(...roundKeys) + 1 : 1;
-  let crossoverBlock = '';
-  if (twoZones) {
-    const zoneA = zones.zones[0]!;
-    const zoneB = zones.zones[1]!;
-    const tableA = standings.filter((row) => zoneA.teamIds.includes(row.teamId) && activeTeamRows.some((x) => x.id === row.teamId));
-    const tableB = standings.filter((row) => zoneB.teamIds.includes(row.teamId) && activeTeamRows.some((x) => x.id === row.teamId));
-    const posOf = new Map(standings.map((row, i) => [row.teamId, i + 1]));
-    const preview = (rule: 'espejo' | 'invertido' | 'cruzado') =>
-      buildCrossoverPairs(tableA, tableB, rule);
-    const ruleOptions = CROSSOVER_RULES.map(
-      (r) => `<option value="${r.value}">${esc(r.label)}</option>`
-    ).join('');
-    const previewRows = (rule: 'espejo' | 'invertido' | 'cruzado') => {
-      const { pairs, unpaired } = preview(rule);
-      const zoneName = (id: number): string =>
-        zoneA.teamIds.includes(id) ? zoneA.name : zoneB.teamIds.includes(id) ? zoneB.name : '';
-      const rows = pairs
-        .map(
-          (p) =>
-            `<tr><td>${esc(zoneName(p.home))}</td><td>${esc(teamMap.get(p.home)?.name ?? '?')}</td><td class="faint">vs</td><td>${esc(
-              teamMap.get(p.away)?.name ?? '?'
-            )}</td><td>${esc(zoneName(p.away))}</td></tr>`
-        )
-        .join('');
-      const libre = unpaired.length
-        ? `<tr><td colspan="5" class="muted small">Libran (sin rival): ${unpaired.map((id) => esc(teamMap.get(id)?.name ?? '?')).join(', ')}</td></tr>`
-        : '';
-      return `<div class="table-wrap"><table class="data">
-        <thead><tr><th colspan="2">${esc(zoneA.name)}</th><th></th><th colspan="2">${esc(zoneB.name)}</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" class="muted small">Sin equipos para el cruce</td></tr>'}${libre}</tbody></table></div>`;
-    };
-    const existingList = crossovers.length
-      ? `<p class="hint">Fechas de cruce ya generadas: ${crossovers
-          .map((d) => `Fecha ${d.round} (${esc(d.rule)}${d.counts ? '' : ', no cuenta'})`)
-          .join(' · ')}</p>`
-      : '';
-    crossoverBlock = `
-<section class="block"><div class="card"><div class="card-body">
-  <strong>Fecha especial de cruce entre zonas</strong>
-  <p class="hint">Los equipos de una zona se enfrentan a los de la otra según la tabla: primero contra primero, último contra primero, etc. Los partidos se crean en la fecha que elijas y la tabla se calcula según cómo va el torneo hoy.</p>
-  ${existingList}
-  <form method="post" action="/admin/fixture/cruce" class="form-row">
-    <input type="hidden" name="tournament_id" value="${t.id}">
-    <div class="field"><label>Fecha</label><input type="number" name="round" min="1" value="${nextFreeRound}" style="width:100px"></div>
-    <div class="field grow"><label>Regla de emparejamiento</label><select name="rule">${ruleOptions}</select></div>
-    <div class="field" style="align-self:flex-end">
-      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="counts" style="width:auto"> Los puntos cuentan para la tabla</label>
-    </div>
-    <div class="field" style="align-self:flex-end"><button class="btn btn-primary" type="submit" onclick="return confirm('Se crean los partidos de la fecha de cruce según la tabla actual. ¿Continuar?')">Generar fecha de cruce</button></div>
-  </form>
-  <details class="mt-2">
-    <summary>Ver cómo quedaría con cada regla (tabla de hoy)</summary>
-    <div class="grid-2" style="margin-top:8px">
-      <div><strong>Espejo</strong>${previewRows('espejo')}</div>
-      <div><strong>Invertido</strong>${previewRows('invertido')}</div>
-      <div><strong>Cruzado</strong>${previewRows('cruzado')}</div>
-    </div>
-  </details>
-</div></div></section>`;
-  }
-
   // Playoff (llave opcional entre zonas): se habilita con todo jugado.
   const playoff = parsePlayoffConfig(t.config);
   let playoffBlock = '';
@@ -938,6 +875,10 @@ ${
         <option value="con">Con cruces (mezclados en el fixture)</option>
         <option value="sin">Sin cruces (solo partidos de zona)</option>
       </select>
+    </div>
+    <div class="field">
+      <label>Fecha del cruce</label>
+      <input type="number" name="crossover_round" min="1" placeholder="auto" style="width:90px">
     </div>`
     : ''
 }
@@ -948,12 +889,16 @@ ${
       </span>
     </div>
   </form>
-  <p class="hint">Usa los equipos activos (${teams.filter((x) => x.active).length}). <strong>Generar</strong> arma todo de cero. <strong>Regenerar cruce</strong> es para cuando entró un equipo nuevo o cambió un participante a mitad de torneo: conserva lo jugado, rearma los pendientes y avisa si algún partido nuevo chocaría con uno ya jugado (cruces repetidos, equipo en dos partidos de la misma fecha o cancha doblemente reservada).</p>
+  <p class="hint">Usa los equipos activos (${teams.filter((x) => x.active).length}). <strong>Generar</strong> arma todo de cero: con la opción de cruces eliges si hay fecha de cruce entre zonas, con qué regla y en qué fecha (vacío = automática, la primera libre después de las fechas de zona). Para cambiar un cruce ya generado hay que regenerar el fixture. <strong>Regenerar cruce</strong> es otra cosa: rearma solo los pendientes cuando entró un equipo nuevo, conservando lo jugado.</p>
+  ${
+    twoZones && crossovers.length
+      ? `<p class="hint">Cruce vigente: fecha ${crossovers[0]!.round} · ${esc(crossovers[0]!.rule)}${crossovers[0]!.counts ? ' · suma puntos' : ' · no suma'}. Se reemplaza al generar de nuevo.</p>`
+      : ''
+  }
 </div></div></section>
 <section class="block"><div class="card"><div class="card-body">
   <strong>Orden de partidos por fecha:</strong> <a href="/admin/fechas?t=${escUrl(t.slug)}">asignar día, hora y cancha →</a>
 </div></div></section>
-${crossoverBlock}
 ${playoffBlock}
 ${makeUpBlock}
 ${freeDatesBlock}
@@ -1381,7 +1326,11 @@ export function fixturePreviewPage(opts: {
   let plan: PlannedMatch[] = [];
   try {
     const parsed: unknown = JSON.parse(opts.payload);
+    // Payload nuevo: { matches, crossover }. Payload viejo: array plano.
     if (Array.isArray(parsed)) plan = parsed as PlannedMatch[];
+    else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { matches?: unknown }).matches)) {
+      plan = (parsed as { matches: PlannedMatch[] }).matches;
+    }
   } catch {
     plan = [];
   }

@@ -723,12 +723,12 @@ describe.skipIf(!has)('e2e: declaración de goles en la planilla', () => {
   });
 });
 
-describe.skipIf(!has)('e2e: vista previa con regla de cruce y puntos', () => {
+describe.skipIf(!has)('e2e: cruce solo desde el generador de fixture', () => {
   // Id del torneo de cruce, compartido entre los tests del describe (el
-  // primero lo crea y lo guarda; el segundo lo reutiliza).
+  // primero lo crea y lo guarda; los siguientes lo reutilizan).
   let tidCruce = '';
 
-  it('preparar con regla invertido + counts, confirmar y verificar las notas en la base', async () => {
+  it('la seccion manual de cruce ya no existe y el generador declara el cruce', async () => {
     const admin = client();
     await admin.loginAdmin(ADMIN_PASSWORD);
 
@@ -759,85 +759,89 @@ describe.skipIf(!has)('e2e: vista previa con regla de cruce y puntos', () => {
     expect(tid, 'el torneo de cruce debe existir').toBeTruthy();
     tidCruce = tid;
 
-    // El formulario de generación expone la regla y el checkbox de puntos
-    // (solo con 2 zonas activas).
+    // La seccion manual fue removida: no hay form hacia /admin/fixture/cruce.
+    expect(fxPage).not.toContain('action="/admin/fixture/cruce"');
+    expect(fxPage).not.toContain('Fecha especial de cruce entre zonas');
+
+    // La ruta manual ya no existe: el POST no genera partidos ni registra
+    // la fecha en la config (responde 404 o un redirect que no crea nada).
+    const manual = await admin.post('/admin/fixture/cruce', { tournament_id: tid, round: '4', rule: 'espejo' });
+    expect([302, 404]).toContain(manual.status);
+
+    // El formulario de generar expone las opciones del cruce.
     expect(fxPage).toContain('name="crossover_rule"');
     expect(fxPage).toContain('name="crossover_counts"');
+    expect(fxPage).toContain('name="crossover_include"');
+    expect(fxPage).toContain('name="crossover_round"');
 
-    // Declarar una fecha de cruce en la config: la bolsa del planificador
-    // solo incluye cruces para fechas declaradas, así que generamos la fecha
-    // manual (queda registrada y crea partidos que el confirmar va a
-    // reemplazar). Con 5 equipos: zona A con 3, zona B con 2 → 2 cruces.
-    const cruce = await admin.post('/admin/fixture/cruce', {
-      tournament_id: tid,
-      round: '4',
-      rule: 'espejo',
-    });
-    expect(cruce.status).toBe(302);
-    const cruceLoc = decodeURIComponent(cruce.headers.get('location') ?? '');
-    expect(cruceLoc).toContain('de cruce generada');
-
-    // Paso 1: preparar la vista previa pidiendo regla "invertido" y que los
-    // cruces sumen puntos (pisa el espejo/no-cuenta de la fecha declarada).
+    // Genero con regla invertido, fecha 4 elegida y que sume puntos: el
+    // plan incluye los cruces y la fecha queda registrada al confirmar.
     const prev = await admin.post('/admin/fixture/previsualizar', {
       tournament_id: tid,
       mode: 'single',
       crossover_rule: 'invertido',
       crossover_counts: 'on',
+      crossover_round: '4',
     });
     expect(prev.status).toBe(302);
-    expect(prev.headers.get('location') ?? '').toContain('vista-previa');
-
-    // La vista previa muestra la estadística de cruces por fecha.
     const previewHtml = await (await admin.get('/admin/fixture/vista-previa?t=copa-cruce-e2e')).text();
     expect(previewHtml).toContain('Cruces por fecha');
     expect(previewHtml).toContain('Cruce (cuenta)');
 
-    // Paso 2: confirmar. Sin partidos jugados en este torneo, se aplica.
     const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'copa-cruce-e2e' });
     expect(conf.status).toBe(302);
-    const confLoc = decodeURIComponent(conf.headers.get('location') ?? '');
-    expect(confLoc).toContain('Fixture guardado');
-    expect(confLoc).not.toContain('err=');
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
 
-    // Verificación en la base: el panel del fixture lista los partidos y la
-    // planilla de cada uno expone su nota tal como quedó guardada. Los
-    // partidos de cruce deben llevar la marca "cruce entre zonas (cuenta)".
+    // En la base: los cruces llevan la marca (cuenta) y el resto no.
     const fixtureHtml = await (await admin.get('/admin/fixture?t=copa-cruce-e2e')).text();
-    expect(fixtureHtml).not.toContain('err=');
-    const matchIds = [...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!);
+    const matchIds = [...new Set([...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!))];
     expect(matchIds.length).toBeGreaterThan(0);
-
-    // Contamos por nota, no por posición.
     let cruces = 0;
     let deZona = 0;
-    for (const mid of [...new Set(matchIds)]) {
+    for (const mid of matchIds) {
       const sheet = await (await admin.get(`/admin/planilla/${mid}`)).text();
       const note = /<textarea name="notes"[^>]*>([\s\S]*?)<\/textarea>/.exec(sheet)?.[1] ?? '';
       if (note.includes('cruce entre zonas')) {
         cruces += 1;
-        // El flag counts del formulario llegó hasta la nota.
         expect(note, `la planilla ${mid} debe marcar el cruce como cuenta`).toContain('(cuenta)');
       } else {
         deZona += 1;
         expect(note, `la planilla ${mid} no debe llevar marca de cruce`).toBe('');
       }
     }
-    // Con 2 zonas y la bolsa mezclada, el plan incluye cruces: la regla
-    // elegida y el flag counts definieron la marca de todos.
     expect(cruces).toBeGreaterThan(0);
     expect(deZona).toBeGreaterThan(0);
-    // Ficha pública: la fecha 4 registrada como cruce muestra su etiqueta.
-    const publicFx = await (await fetch(`${BASE}/fixture?t=copa-cruce-e2e`)).text();
-    expect(publicFx).toContain('Cruce');
+
+    // El panel muestra el cruce vigente declarado por el generador.
+    const after = await (await admin.get('/admin/fixture?t=copa-cruce-e2e')).text();
+    expect(after).toContain('Cruce vigente: fecha 4');
+  });
+
+  it('fecha de cruce automatica: cae en la primera libre tras las fechas de zona', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const prev = await admin.post('/admin/fixture/previsualizar', {
+      tournament_id: tidCruce,
+      mode: 'single',
+      crossover_rule: 'espejo',
+      // crossover_round vacio: automatica.
+    });
+    expect(prev.status).toBe(302);
+    const previewHtml = await (await admin.get('/admin/fixture/vista-previa?t=copa-cruce-e2e')).text();
+    expect(previewHtml).toContain('Cruces por fecha');
+    // Sin fecha elegida, el cruce se coloca solo.
+    expect(previewHtml).not.toContain('err=');
+
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tidCruce, t: 'copa-cruce-e2e' });
+    expect(conf.status).toBe(302);
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
   });
 
   it('generar con "sin cruces": no hay cruces y la config de fechas se limpia', async () => {
     const admin = client();
     await admin.loginAdmin(ADMIN_PASSWORD);
 
-    // El torneo copa-cruce-e2e quedó con cruces (fecha 4 declarada).
-    // Genero de nuevo con "sin cruces": el plan sale solo con partidos de zona.
     const prev = await admin.post('/admin/fixture/previsualizar', {
       tournament_id: tidCruce,
       mode: 'single',
@@ -846,17 +850,13 @@ describe.skipIf(!has)('e2e: vista previa con regla de cruce y puntos', () => {
     expect(prev.status).toBe(302);
     const previewHtml = await (await admin.get('/admin/fixture/vista-previa?t=copa-cruce-e2e')).text();
     expect(previewHtml).not.toContain('Cruces por fecha');
-    expect(previewHtml).not.toContain('badge amber');
 
-    // Confirmo: los cruces anteriores se borran (el fixture se reemplaza
-    // completo) y la config queda sin fechas de cruce declaradas.
     const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tidCruce, t: 'copa-cruce-e2e' });
     expect(conf.status).toBe(302);
     expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
 
     // En la base: ninguna planilla lleva marca de cruce.
     const fixtureHtml = await (await admin.get('/admin/fixture?t=copa-cruce-e2e')).text();
-    expect(fixtureHtml).not.toContain('crossoverBadge');
     const matchIds = [...new Set([...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!))];
     expect(matchIds.length).toBeGreaterThan(0);
     for (const mid of matchIds) {
@@ -864,8 +864,7 @@ describe.skipIf(!has)('e2e: vista previa con regla de cruce y puntos', () => {
       const note = /<textarea name="notes"[^>]*>([\s\S]*?)<\/textarea>/.exec(sheet)?.[1] ?? '';
       expect(note, `la planilla ${mid} no debe llevar marca de cruce`).not.toContain('cruce entre zonas');
     }
-    // El formulario ya no ofrece las opciones de cruce (la config quedó sin
-    // fechas declaradas y el panel muestra el bloque de cruce por zonas).
-    expect(fixtureHtml).not.toContain('Fechas de cruce ya generadas');
+    // La config quedo sin declaracion: el panel no muestra cruce vigente.
+    expect(fixtureHtml).not.toContain('Cruce vigente');
   });
 });
