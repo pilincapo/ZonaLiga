@@ -1,6 +1,6 @@
 // Tests del orden de lectura de partidos: pseudoaleatorio estable por fecha.
-// El cronograma (hora) manda; el azar estable solo desempata la misma hora,
-// para que no encabece siempre la misma zona.
+// NO mira la hora: los horarios se asignan por zona, así que ordenar por hora
+// reproducía el orden por zona (la A siempre arriba).
 
 import { describe, expect, it } from 'vitest';
 import { orderMatchesForDisplay } from '../src/lib/order.ts';
@@ -31,14 +31,11 @@ function mk(id: number, round: number, zone: string, kickoff = ''): Match {
 
 describe('orderMatchesForDisplay', () => {
   it('mezcla las zonas: no siempre queda primero el partido de menor id', () => {
-    // Fecha con 4 partidos insertados por zona: A(1,2) y B(3,4), misma hora.
-    const list = [mk(1, 1, 'A', '10:00'), mk(2, 1, 'A', '10:00'), mk(3, 1, 'B', '10:00'), mk(4, 1, 'B', '10:00')];
+    const list = [mk(1, 1, 'A'), mk(2, 1, 'A'), mk(3, 1, 'B'), mk(4, 1, 'B')];
     const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1 });
     const ids = out.map((m) => m.id);
-    // Deja de ser el orden de inserción (1,2,3,4).
-    expect(ids).not.toEqual([1, 2, 3, 4]);
-    // No pierde ningún partido.
-    expect([...ids].sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+    expect(ids).not.toEqual([1, 2, 3, 4]); // ya no es el orden de inserción
+    expect([...ids].sort((a, b) => a - b)).toEqual([1, 2, 3, 4]); // no pierde ninguno
   });
 
   it('el orden es estable: la misma fecha siempre se ve igual', () => {
@@ -52,20 +49,20 @@ describe('orderMatchesForDisplay', () => {
     const mkRound = (round: number) => [mk(1, round, 'A'), mk(2, round, 'B'), mk(3, round, 'A'), mk(4, round, 'B')];
     const r1 = orderMatchesForDisplay(mkRound(1), { tournamentId: 5, round: 1 }).map((m) => m.id);
     const r2 = orderMatchesForDisplay(mkRound(2), { tournamentId: 5, round: 2 }).map((m) => m.id);
-    // Con seeds distintos por fecha, es muy improbable que ambas fechas
-    // queden en el mismo orden (probabilidad 1/24 por coincidencia).
     expect(r1).not.toEqual(r2);
   });
 
-  it('la hora manda: el cronograma del día se respeta aunque haya mezcla', () => {
-    const list = [mk(1, 1, 'A', '12:00'), mk(2, 1, 'B', '10:00'), mk(3, 1, 'A', '11:00')];
+  it('no respeta la hora: partidos con horarios distintos también se mezclan', () => {
+    // El caso real del torneo: zona A a las 12:00, zona B a las 15:00.
+    // Antes (orden por hora) quedaba A arriba y B abajo siempre.
+    const list = [mk(1, 1, 'A', '12:00'), mk(2, 1, 'A', '12:00'), mk(3, 1, 'B', '15:00'), mk(4, 1, 'B', '15:00')];
     const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1 });
-    expect(out.map((m) => m.id)).toEqual([2, 3, 1]); // 10:00, 11:00, 12:00
+    const zonas = out.map((m) => m.zone);
+    expect(zonas).not.toEqual(['A', 'A', 'B', 'B']); // mezclado real
   });
 
-  it('sin hora: solo azar estable desempata (no explota con strings vacíos)', () => {
-    const list = [mk(1, 1, 'A'), mk(2, 1, 'B')];
-    const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1 });
-    expect(out).toHaveLength(2);
+  it('lista vacía o de un solo partido: no explota', () => {
+    expect(orderMatchesForDisplay([], { tournamentId: 1, round: 1 })).toEqual([]);
+    expect(orderMatchesForDisplay([mk(1, 1, 'A')], { tournamentId: 1, round: 1 })).toHaveLength(1);
   });
 });

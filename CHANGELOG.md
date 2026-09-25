@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.36] — 2026-09-25 — Mezclado real de las fechas (v2)
+
+### Arreglo
+
+- El mezclado de la versión anterior respetaba la hora, pero como los horarios se asignan por zona (la A juega temprano y la B tarde, por ejemplo), el resultado visual seguía siendo zona A arriba y zona B abajo. Ahora el orden dentro de cada fecha es puramente mezclado y estable: las zonas quedan entremezcladas de verdad.
+
 ## [0.2.35] — 2026-09-25 — Partidos de cada fecha en orden mezclado
 
 ### Mejora
