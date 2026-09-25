@@ -367,6 +367,10 @@ describe.skipIf(!has)('e2e: sesión delegado end-to-end', () => {
   });
 
   it('login con código, carga de resultado y aprobación del admin', async () => {
+    // Login admin primero: la localía del partido se lee del panel fixture.
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
     // Home del delegado: solo los partidos de su equipo.
     const delegate = client();
     const login = await delegate.loginDelegate(delegateCode);
@@ -374,11 +378,18 @@ describe.skipIf(!has)('e2e: sesión delegado end-to-end', () => {
 
     const home = await delegate.get('/delegado');
     expect(home.status).toBe(200);
-    const homeHtml = await home.text();
-    expect(homeHtml).toContain('Deportivo E2E');
+    expect(await home.text()).toContain('Deportivo E2E');
 
-    matchId = /href="\/delegado\/partido\/(\d+)">Cargar resultado/.exec(homeHtml)?.[1] ?? '';
-    expect(matchId, 'el partido del fixture debe aparecer en su home').toBeTruthy();
+    // Elegimos un partido donde Deportivo sea LOCAL: los tests siguientes
+    // cargan goles con hg* (autores del local). Con el fixture mezclado, el
+    // primer partido del delegado puede ser de visitante. La localía sale
+    // del panel del fixture (celda "Deportivo E2E vs …" al inicio de la
+    // fila), no de la tarjeta del delegado (que muestra su equipo primero).
+    const fixtureHtml = await (await admin.get('/admin/fixture')).text();
+    const filas = fixtureHtml.split('<tr>').slice(1);
+    const filaLocal = filas.find((f) => /<td>Deportivo E2E <span class="faint">vs/.test(f));
+    matchId = /href="\/admin\/planilla\/(\d+)"/.exec(filaLocal ?? '')?.[1] ?? '';
+    expect(matchId, 'debe haber un partido con Deportivo de local').toBeTruthy();
 
     // Carga el resultado 3-1.
     const submit = await delegate.post(`/delegado/partido/${matchId}`, {
@@ -389,8 +400,6 @@ describe.skipIf(!has)('e2e: sesión delegado end-to-end', () => {
     expect(submit.status).toBe(302);
 
     // Bandeja del admin: la entrega pendiente aparece con el equipo.
-    const admin = client();
-    await admin.loginAdmin(ADMIN_PASSWORD);
     const trayHtml = await (await admin.get('/admin/entregas')).text();
     expect(trayHtml).toContain('Deportivo E2E');
     const subId = /\/admin\/entregas\/(\d+)\/aprobar/.exec(trayHtml)?.[1] ?? '';

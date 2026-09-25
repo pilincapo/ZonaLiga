@@ -2,7 +2,7 @@
 // un partido por equipo por día y slots sin forzar.
 
 import { describe, expect, it } from 'vitest';
-import { planFixture, verifyPlan, crossoverPoolFor, planSummary } from '../src/lib/planifier.ts';
+import { planFixture, verifyPlan, crossoverPoolFor, planSummary, groupByFixtureRound } from '../src/lib/planifier.ts';
 import { EMPTY_SCHEDULE, type TournamentSchedule } from '../src/lib/schedule.ts';
 
 function scheduleWith(venues: string[], kickoffs: string[], startDate = '2026-10-03', gap = 7): TournamentSchedule {
@@ -98,6 +98,41 @@ describe('planFixture', () => {
     const cruces = plan.matches.filter((m) => m.kind === 'cruce');
     // Una fecha declarada dos veces genera UNA tanda de cruces (4 pares).
     expect(cruces).toHaveLength(4);
+  });
+
+  it('slots barajados: las horas tempranas no quedan reservadas a una sola zona', () => {
+    // 2 zonas de 4, 1 cancha × 4 horarios. Por fecha juegan 4 partidos (2 por
+    // zona): con slots en orden fijo, la zona A se quedaba las 2 primeras
+    // horas y la B las últimas. Barajados, ambas zonas aparecen en la
+    // primera mitad del día al menos en alguna fecha.
+    const chico = scheduleWith(['C1'], ['10:00', '11:00', '12:00', '13:00']);
+    // rng variado (como Math.random): un rng constante degrada la baraja
+    // Fisher-Yates y los slots saldrían casi en orden.
+    let seed = 7;
+    const rngVariado = (): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    const plan = planFixture({
+      teamIds: [1, 2, 3, 4, 5, 6, 7, 8],
+      configJson: CONFIG_ZONAS,
+      mode: 'single',
+      schedule: chico,
+      rng: rngVariado,
+    });
+    // En el conjunto del fixture, la zona A ocupa al menos un horario de la
+    // primera mitad del día y la B también (si no, habría patrón por zona).
+    const zonasPorHora = new Map<string, Set<string>>();
+    for (const m of plan.matches) {
+      const mitad = m.kickoff <= '11:00' ? 'temprano' : 'tarde';
+      const set = zonasPorHora.get(mitad) ?? new Set<string>();
+      set.add(m.zone);
+      zonasPorHora.set(mitad, set);
+    }
+    expect(zonasPorHora.get('temprano')?.has('A')).toBe(true);
+    expect(zonasPorHora.get('temprano')?.has('B')).toBe(true);
+    expect(zonasPorHora.get('tarde')?.has('A')).toBe(true);
+    expect(zonasPorHora.get('tarde')?.has('B')).toBe(true);
   });
 
   it('la fecha de cruce elegida ancla los cruces en esa fecha exacta', () => {

@@ -88,10 +88,11 @@ function shuffle<T>(arr: T[], rng: () => number): T[] {
   const out = [...arr];
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
-    const a = out[i]!;
-    const b = out[j]!;
-    out[i] = a;
-    out[j] = b;
+    // Intercambio real: la versión anterior leía out[i] y out[j] y se las
+    // devolvía a sus mismos lugares (un no-op): nada se mezclaba nunca.
+    const tmp = out[i]!;
+    out[i] = out[j]!;
+    out[j] = tmp;
   }
   return out;
 }
@@ -268,9 +269,15 @@ export function planFixture(input: PlanInput): PlannedFixture {
   // 3) Mezcla: los de zona entre sí (el orden dentro de la fecha no importa).
   const bag = shuffle(zonePool, rng);
 
-  // 4) Distribución día por día.
-  const catalog = slotCatalog(input.schedule);
-  const capacity = Math.max(1, catalog.length);
+  // 4) Distribución en DOS FASES:
+  //   a) Empaquetar por DÍA (un partido por equipo por día, capacidad por
+  //      día), sin tocar canchas ni horarios.
+  //   b) Por cada día, MEZCLAR sus partidos y repartir slots (cancha × hora)
+  //      al azar. Así el cronograma no hereda el orden de generación: un
+  //      partido de cualquier zona puede tocarle la hora temprana o la
+  //      tardía, la cancha 1 o la última.
+  const allSlots = slotCatalog(input.schedule);
+  const capacity = Math.max(1, allSlots.length);
 
   const days: string[] = [];
   const perDay: PlannedMatch[][] = [];
@@ -285,7 +292,7 @@ export function planFixture(input: PlanInput): PlannedFixture {
     usedSlots.set(i, new Set());
   };
 
-  // 4a) Los cruces primero: fijan la fecha anclada y consumen slots de ella.
+  // 4a) Los cruces primero: fijan la fecha anclada (sin slots todavía).
   // Si la fecha elegida no alcanza (más cruces que slots, o equipos que ya
   // quedaron ocupados), los que no entran caen a la PRIMERA FECHA SIGUIENTE
   // con lugar: nada se pierde, y la vista previa muestra el aviso del
@@ -294,34 +301,25 @@ export function planFixture(input: PlanInput): PlannedFixture {
   {
     let i = Math.max(0, crossoverRound - 1); // índice 0-based del día ancla
     for (const m of crossoverMatches) {
-      let placed = false;
       for (;;) {
         openDay(i);
         const busy = teamsOfDay.get(i)!.has(m.home) || teamsOfDay.get(i)!.has(m.away);
         const full = perDay[i]!.length >= capacity;
-        const used = usedSlots.get(i)!;
-        const free = busy || full ? undefined : catalog.find((s) => !used.has(`${s.venue}|${s.kickoff}`));
-        if (!free) {
+        if (busy || full) {
           i += 1; // sin lugar en esta fecha: probar con la siguiente
           continue;
         }
-        used.add(`${free.venue}|${free.kickoff}`);
         m.day = days[i]!;
-        m.venue = free.venue;
-        m.kickoff = free.kickoff;
         perDay[i]!.push(m);
         teamsOfDay.get(i)!.add(m.home);
         teamsOfDay.get(i)!.add(m.away);
         if (i + 1 > crossoverRound) overflowRounds.push(i + 1);
-        placed = true;
         break;
       }
-      void placed;
     }
   }
 
-  // 4b) Los de zona: mismo algoritmo de siempre, saltando los días ocupados
-  // por sus propios equipos (los cruces ya bloquearon a los emparejados).
+  // 4b) Los de zona: empaquetan por día, sin tocar slots.
   for (const m of bag) {
     let i = 0;
     for (;;) {
@@ -332,22 +330,28 @@ export function planFixture(input: PlanInput): PlannedFixture {
         i += 1;
         continue;
       }
-      const used = usedSlots.get(i)!;
-      const free = catalog.find((s) => !used.has(`${s.venue}|${s.kickoff}`));
-      if (!free) {
-        i += 1;
-        continue;
-      }
-      used.add(`${free.venue}|${free.kickoff}`);
       m.day = days[i]!;
-      m.venue = free.venue;
-      m.kickoff = free.kickoff;
       perDay[i]!.push(m);
       teamsOfDay.get(i)!.add(m.home);
       teamsOfDay.get(i)!.add(m.away);
       break;
     }
   }
+
+  // 4c) Fase de slots: por cada día, mezclar sus partidos y repartir
+  // cancha × hora al azar. Es la sugerencia del admin: "primero genera los
+  // partidos por día, después mezclá cada día y asigná cancha y hora".
+  days.forEach((day, i) => {
+    const list = perDay[i] ?? [];
+    if (!day || list.length === 0) return;
+    const slots = shuffle(allSlots, rng);
+    for (const [j, m] of list.entries()) {
+      const slot = slots[j] ?? allSlots[j % allSlots.length]!;
+      m.venue = slot.venue;
+      m.kickoff = slot.kickoff;
+    }
+    usedSlots.set(i, new Set(slots.slice(0, list.length).map((s) => `${s.venue}|${s.kickoff}`)));
+  });
 
   // 5) Renumerar fechas por posición en el calendario (no se compactan):
   // el cruce anclado conserva el número elegido aunque deje fechas vacías
