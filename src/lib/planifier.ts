@@ -27,6 +27,8 @@ export interface PlannedMatch {
   zone: string;
   /** 'zona' | 'cruce' | 'global' (círculo sin zonas). */
   kind: 'zona' | 'cruce' | 'global';
+  /** Solo cruces: si suman puntos a la tabla (flag de la config). */
+  counts?: boolean;
   /** Día calendario: único por fecha del fixture. */
   day: string;
   venue: string;
@@ -98,7 +100,10 @@ export function crossoverPoolFor(input: {
   standings?: { zone: string; rows: StandingRow[] }[];
   teamIds: number[];
   mode: 'single' | 'double';
-}): { home: number; away: number }[] {
+  /** Baraja el orden interno de cada zona antes de emparejar (fixture desde cero: la "tabla" es al azar). */
+  shuffleZones?: boolean;
+  rng?: () => number;
+}): { home: number; away: number; counts: boolean }[] {
   void input.mode;
   const dates = parseCrossoverConfig(input.configJson);
   if (dates.length === 0) return [];
@@ -107,13 +112,20 @@ export function crossoverPoolFor(input: {
   const zoneA = zc.zones[0]!;
   const zoneB = zc.zones[1]!;
   const activeIds = new Set(input.teamIds);
-  const rowsA = rowsForZone(zoneA, input.standings, activeIds);
-  const rowsB = rowsForZone(zoneB, input.standings, activeIds);
-  const pool: { home: number; away: number }[] = [];
+  const rng = input.rng ?? Math.random;
+  const maybeShuffle = (rows: StandingRow[]): StandingRow[] =>
+    input.shuffleZones === false ? rows : shuffle(rows, rng);
+  // Fixture desde cero: nadie tiene puntos, así que la "posición" es el
+  // orden de la zona barajado al azar (siempre que no venga una tabla real).
+  // B se baraja desde el orden INVERSO: desacopla las dos barajas (con un
+  // rng constante, la misma permutación en ambas preservaría los pares).
+  const rowsA = maybeShuffle(rowsForZone(zoneA, input.standings, activeIds));
+  const rowsB = maybeShuffle(rowsForZone(zoneB, input.standings, activeIds).slice().reverse());
+  const pool: { home: number; away: number; counts: boolean }[] = [];
   for (const date of dates) {
     const rule: CrossoverRule = date.rule;
     const { pairs } = buildCrossoverPairs(rowsA, rowsB, rule);
-    for (const p of pairs) pool.push({ home: p.home, away: p.away });
+    for (const p of pairs) pool.push({ home: p.home, away: p.away, counts: date.counts });
   }
   return pool;
 }
@@ -169,9 +181,11 @@ export function planFixture(input: PlanInput): PlannedFixture {
     standings: input.standings,
     teamIds: input.teamIds,
     mode: input.mode,
+    shuffleZones: input.standings ? false : true,
+    rng,
   });
   for (const p of crossovers) {
-    pool.push({ home: p.home, away: p.away, zone: '', kind: 'cruce', day: '', venue: '', kickoff: '', fixtureRound: 0 });
+    pool.push({ home: p.home, away: p.away, zone: '', kind: 'cruce', counts: p.counts, day: '', venue: '', kickoff: '', fixtureRound: 0 });
   }
 
   // 3) Mezcla de la bolsa: los cruces quedan esparcidos, no agrupados.

@@ -15,6 +15,18 @@
 
 ---
 
+## [0.2.29] — 2026-09-25 — Cruces marcados y al azar al generar desde cero
+
+### Nuevo
+- Los partidos de cruce entre zonas generados con la bolsa mezclada llevan una marca distintiva "Cruce" (en el fixture público, en el panel y en la vista previa), con la aclaración de que no suman a la tabla de zona.
+- La marca vive en el dato (nota interna del partido), así que la tabla, el playoff y "Regenerar cruce" los tratan bien aunque convivan con partidos de zona en la misma fecha.
+
+### Mejora
+- Al generar el fixture desde cero, los cruces se arman con posiciones al azar de cada zona (nadie tiene puntos todavía; antes quedaban ordenados por carga del sistema, prácticamente por ID).
+- Si la config del cruce marca "los puntos cuentan para la tabla", la marca lo respeta y ese cruce sí suma.
+
+---
+
 ## [0.2.28] — 2026-09-25 — Fixture con vista previa y confirmación (generador nuevo)
 
 ### Nuevo

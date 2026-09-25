@@ -48,6 +48,7 @@ import {
 } from '../lib/playoff.ts';
 import { buildMakeUpPlan, postponedMatches, overflowOfRound, pickDeferred, splitOverflowByZone } from '../lib/oversub.ts';
 import { planFixture, planSummary } from '../lib/planifier.ts';
+import { CROSSOVER_NOTE, CROSSOVER_NOTE_COUNTS } from '../lib/crossover.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
@@ -513,7 +514,7 @@ adminRoutes.post('/fixture/confirmar', async (c) => {
   if (!draft) {
     return c.redirect(dest + '&err=' + encodeURIComponent('No hay vista previa para confirmar: prepará una primero'));
   }
-  let plan: { home: number; away: number; zone: string; kind: string; day: string; venue: string; kickoff: string; fixtureRound: number }[] = [];
+  let plan: { home: number; away: number; zone: string; kind: string; counts?: boolean; day: string; venue: string; kickoff: string; fixtureRound: number }[] = [];
   try {
     const parsed: unknown = JSON.parse(draft.payload);
     if (Array.isArray(parsed)) plan = parsed as typeof plan;
@@ -530,10 +531,19 @@ adminRoutes.post('/fixture/confirmar', async (c) => {
   );
   stmts.push(c.env.DB.prepare('DELETE FROM matches WHERE tournament_id = ?1').bind(tournamentId));
   for (const m of plan) {
+    // La marca de cruce viaja en la nota del partido: es lo que usa la tabla,
+    // el playoff y la regeneración para tratarlo como cruce (las fechas de
+    // la bolsa mezclada ya no bastan para distinguirlos).
+    const notes =
+      m.kind === 'cruce'
+        ? m.counts
+          ? CROSSOVER_NOTE_COUNTS
+          : CROSSOVER_NOTE
+        : '';
     stmts.push(
       c.env.DB
         .prepare(
-          'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status, played_on, kickoff_time, venue) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
+          'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status, played_on, kickoff_time, venue, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)'
         )
         .bind(
           tournamentId,
@@ -544,7 +554,8 @@ adminRoutes.post('/fixture/confirmar', async (c) => {
           'scheduled',
           m.day,
           m.kickoff,
-          m.venue
+          m.venue,
+          notes
         )
     );
   }

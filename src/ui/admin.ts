@@ -54,9 +54,10 @@ import type { SubmissionEventRow } from '../lib/delegates.ts';
 import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
 import { waLink } from '../lib/share.ts';
 import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
-import { crest } from './match.ts';
+import { crest, crossoverBadge } from './match.ts';
 import { layout, type NavItem } from './components.ts';
 import { planFixture, groupByFixtureRound, planSummary, type PlannedMatch } from '../lib/planifier.ts';
+import { isCrossoverMatch } from '../lib/crossover.ts';
 
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Resumen', match: 'admin' },
@@ -883,7 +884,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
           return `<tr>
       <td class="num">${m.id}</td>
       <td>${esc(h ?? 'Por definir')} <span class="faint">vs</span> ${esc(a ?? 'Por definir')}</td>
-      <td>${esc(m.zone || '')}${m.bracket_round ? ' ' + esc(BRACKET_LABELS[m.bracket_round] ?? m.bracket_round) : ''}</td>
+      <td>${esc(m.zone || '')}${m.bracket_round ? ' ' + esc(BRACKET_LABELS[m.bracket_round] ?? m.bracket_round) : ''}${isCrossoverMatch(m) ? ' ' + crossoverBadge() : ''}</td>
       <td>${m.played_on ? esc(formatDateShort(m.played_on)) : ''} ${esc(m.kickoff_time || '')}</td>
       <td>${esc(m.venue || '')}</td>
       <td class="actions-cell">
@@ -1373,10 +1374,13 @@ export function fixturePreviewPage(opts: {
       const day = list[0]?.day ?? '';
       const nombre = (id: number): string => opts.teamNames.get(id) ?? `#${id}`;
       const rows = list
-        .map(
-          (m) =>
-            `<tr><td>${esc(KIND_LABEL[m.kind] ? KIND_LABEL[m.kind] + ' · ' : '')}${esc(m.zone || '')}</td><td>${esc(nombre(m.home))} <span class="faint">vs</span> ${esc(nombre(m.away))}</td><td>${esc(m.venue || '')}</td><td>${esc(m.kickoff || '')}</td></tr>`
-        )
+        .map((m) => {
+          const tipo =
+            m.kind === 'cruce'
+              ? `<span class="badge amber" title="Cruce entre zonas: no suma a la tabla de zona">Cruce${m.counts ? ' (cuenta)' : ''}</span>`
+              : esc(m.zone || '');
+          return `<tr><td>${tipo}</td><td>${esc(nombre(m.home))} <span class="faint">vs</span> ${esc(nombre(m.away))}</td><td>${esc(m.venue || '')}</td><td>${esc(m.kickoff || '')}</td></tr>`;
+        })
         .join('');
       return `<h3 class="zone-title">Fecha ${round}${day ? ` — ${esc(formatDateShort(day))}` : ''} <span class="faint small">(${list.length} partido(s))</span></h3>
 <div class="card"><div class="table-wrap"><table class="data">

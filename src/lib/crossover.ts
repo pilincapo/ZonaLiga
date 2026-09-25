@@ -115,6 +115,29 @@ export function buildCrossoverPairs(
  * Rounds que son fechas de cruce. Con `onlyNonCounting`, solo los que NO
  * suman a la tabla (los que hay que excluir del cálculo de posiciones).
  */
+/**
+ * Marca viva en el dato: los partidos de cruce generados con la bolsa
+ * mezclada llevan esta nota. Es la fuente de verdad para la tabla y la
+ * regeneración (el número de fecha ya no alcanza, porque los cruces
+ * conviven con partidos de zona en la misma fecha).
+ */
+export const CROSSOVER_NOTE = 'cruce entre zonas';
+/** Variante que SÍ suma puntos a la tabla (flag "counts" de la config). */
+export const CROSSOVER_NOTE_COUNTS = 'cruce entre zonas (cuenta)';
+
+export function isCrossoverMatch(m: Match): boolean {
+  return m.notes.includes(CROSSOVER_NOTE);
+}
+
+/** Un cruce marcado cuenta para la tabla solo si su nota lo dice. */
+export function isCountingCrossoverMatch(m: Match): boolean {
+  return m.notes.includes(CROSSOVER_NOTE_COUNTS);
+}
+
+/**
+ * Fechas que actúan como cruce: las declaradas en la config MÁS cualquier
+ * fecha que tenga al menos un partido marcado como cruce.
+ */
 export function crossoverRoundsOf(configJson: string, onlyNonCounting = false): Set<number> {
   const dates = parseCrossoverConfig(configJson);
   return new Set(dates.filter((d) => (onlyNonCounting ? !d.counts : true)).map((d) => d.round));
@@ -122,9 +145,15 @@ export function crossoverRoundsOf(configJson: string, onlyNonCounting = false): 
 
 /**
  * Partidos que computan para la tabla: excluye los cruces marcados como "no
- * cuentan" y los partidos de llave/playoff (la tabla es de la fase regular).
+ * cuentan" (por nota O por fecha configurada) y los partidos de llave
+ * /playoff (la tabla es de la fase regular).
  */
 export function matchesForStandings(matches: Match[], configJson: string): Match[] {
   const rounds = crossoverRoundsOf(configJson, true);
-  return matches.filter((m) => !m.bracket_round && !(m.round != null && rounds.has(m.round)));
+  return matches.filter(
+    (m) =>
+      !m.bracket_round &&
+      !(m.round != null && rounds.has(m.round)) &&
+      !(isCrossoverMatch(m) && !isCountingCrossoverMatch(m))
+  );
 }

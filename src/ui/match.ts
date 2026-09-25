@@ -7,6 +7,7 @@ import { formatDateShort } from '../lib/format.ts';
 import type { Event, Match, Team } from '../lib/types.ts';
 import type { BracketColumn, BracketMatchView } from '../lib/bracket.ts';
 import { sourceLabel } from '../lib/bracket.ts';
+import { isCrossoverMatch } from '../lib/crossover.ts';
 
 export function crest(
   team: { name?: string; short_name: string; color: string; logo_url: string } | null | undefined,
@@ -47,6 +48,11 @@ export function statusTag(m: Match): string {
   return `<span class="status-tag ${m.status}">${labels[m.status] ?? m.status}</span>`;
 }
 
+/** Marca distintiva de cruce entre zonas (partidos generados con la bolsa mezclada). */
+export function crossoverBadge(): string {
+  return '<span class="badge amber" title="Cruce entre zonas: no suma a la tabla de zona">Cruce</span> ';
+}
+
 /** Centro de la fila: hora/fecha, marcador con link a la ficha, o estado. Detalle interno de matchRow. */
 function matchCenter(m: Match): string {
   if (m.status === 'scheduled') {
@@ -65,9 +71,10 @@ export function matchRow(
 ): string {
   const home = m.home_team_id != null ? teamMap.get(m.home_team_id) : undefined;
   const away = m.away_team_id != null ? teamMap.get(m.away_team_id) : undefined;
+  const cruce = isCrossoverMatch(m) ? crossoverBadge() : '';
   return `<div class="match-row">
   ${teamCell(home, { placeholder: opts.homePlaceholder, align: 'left' })}
-  ${matchCenter(m)}
+  ${cruce}${matchCenter(m)}
   ${teamCell(away, { placeholder: opts.awayPlaceholder, align: 'right' })}
 </div>`;
 }

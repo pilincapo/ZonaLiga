@@ -6,6 +6,7 @@
 
 import type { BracketRound, Match, StandingRow } from './types.ts';
 import { matchShortLabel, matchWinnerLoser } from './bracket.ts';
+import { isCrossoverMatch } from './crossover.ts';
 
 export type PlayoffFormat = 'final' | 'semis_final' | 'semis_final_3p';
 
@@ -52,6 +53,9 @@ export function playoffConfigJson(p: PlayoffConfig | null): { playoff?: PlayoffC
 /** Partido de la llave pendiente de jugar (bloquea la generación). */
 export function isPendingLeague(m: Match): boolean {
   if (m.bracket_round) return false;
+  // Los cruces mezclados en la bolsa no bloquean el playoff: no son de la
+  // fase regular (si su fecha fue configurada como cruce, ya queda excluido).
+  if (isCrossoverMatch(m)) return false;
   return m.status === 'scheduled' || m.status === 'postponed' || m.status === 'suspended';
 }
 

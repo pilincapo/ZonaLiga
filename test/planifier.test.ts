@@ -62,6 +62,20 @@ describe('planFixture', () => {
     expect(cruces.every((m) => m.day && m.venue && m.kickoff)).toBe(true);
   });
 
+  it('fixture desde cero: los cruces se arman con posiciones al azar (no por id)', () => {
+    // rng determinista; con orden fijo por id los pares serian 1-5, 2-6, 3-7, 4-8.
+    const plan = planFixture({ teamIds: [1, 2, 3, 4, 5, 6, 7, 8], configJson: CONFIG_ZONAS_CRUCE, mode: 'single', schedule: S, rng });
+    const cruces = plan.matches.filter((m) => m.kind === 'cruce');
+    const pares = cruces.map((m) => [m.home, m.away].sort((a, b) => a - b).join('-'));
+    expect(pares).not.toEqual(['1-5', '2-6', '3-7', '4-8']);
+  });
+
+  it('los cruces llevan la marca counts de la config', () => {
+    const plan = planFixture({ teamIds: [1, 2, 3, 4, 5, 6, 7, 8], configJson: CONFIG_ZONAS_CRUCE, mode: 'single', schedule: S, rng });
+    const cruces = plan.matches.filter((m) => m.kind === 'cruce');
+    expect(cruces.every((m) => m.counts === false)).toBe(true);
+  });
+
   it('ningún equipo juega dos veces el mismo día (regla dura)', () => {
     const plan = planFixture({ teamIds: [1, 2, 3, 4, 5, 6, 7, 8], configJson: CONFIG_ZONAS_CRUCE, mode: 'single', schedule: S, rng });
     expect(() => verifyPlan(plan.matches, S)).not.toThrow();

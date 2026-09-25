@@ -7,6 +7,7 @@ import type { Match } from './types.ts';
 import { plannedRoundDate, roundSlots, scheduleCapacity, type TournamentSchedule } from './schedule.ts';
 import type { ZoneConfig } from './zones.ts';
 import type { CrossoverDate } from './crossover.ts';
+import { isCrossoverMatch } from './crossover.ts';
 
 export interface RoundPair {
   home: number;
@@ -226,7 +227,7 @@ export function regeneratePairings(input: RegenInput): RegenPlan {
   for (const m of existing) {
     // Fechas de cruce y partidos de llave (playoff): intocables, aunque estén
     // pendientes — la regeneración solo rearma el fixture de la fase regular.
-    if (m.bracket_round || (m.round != null && crossoverRounds.has(m.round))) kept.push(m);
+    if (m.bracket_round || (m.round != null && crossoverRounds.has(m.round)) || isCrossoverMatch(m)) kept.push(m);
     else (LOCKED_STATUSES.has(m.status) ? kept : remove).push(m);
   }
 
