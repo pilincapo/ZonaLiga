@@ -58,6 +58,7 @@ import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
 import { crest, crossoverBadge } from './match.ts';
 import { layout, type NavItem } from './components.ts';
 import { planFixture, groupByFixtureRound, planSummary, type PlannedMatch } from '../lib/planifier.ts';
+import { orderMatchesForDisplay } from '../lib/order.ts';
 import { isCrossoverMatch } from '../lib/crossover.ts';
 
 export const ADMIN_NAV: NavItem[] = [
@@ -814,7 +815,9 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
 
   const roundSections = roundKeys
     .map((r) => {
-      const list = byRound.get(r)!;
+      // Misma mezcla estable que el sitio público: la hora manda, el azar
+      // desempata (si no, siempre encabeza la zona generada primero).
+      const list = orderMatchesForDisplay(byRound.get(r)!, { tournamentId: t.id, round: r });
       const rows = list
         .map((m) => {
           const h = m.home_team_id != null ? teamMap.get(m.home_team_id)?.name : (m.home_source ? `→ ${m.home_source}` : 'Por definir');

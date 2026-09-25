@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.35] — 2026-09-25 — Partidos de cada fecha en orden mezclado
+
+### Mejora
+
+- En el fixture público, el panel y la página En vivo, los partidos de cada fecha ya no salen agrupados por zona (siempre la A primero): se muestran mezclados. El horario manda — el cronograma del día se respeta — y el mezclado es estable: la misma fecha se ve siempre igual, así que compartir por WhatsApp sigue sirviendo.
+
 ## [0.2.34] — 2026-09-25 — Aviso de desborde del cruce en la vista previa
 
 ### Nuevo

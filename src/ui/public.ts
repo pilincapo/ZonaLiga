@@ -5,6 +5,7 @@ import { formatDateShort, formatDateLong } from '../lib/format.ts';
 import { leagueNow } from '../lib/live.ts';
 import { groupBy, computeStandings, computeFairPlay, computeValla, FAIR_PLAY } from '../lib/standings.ts';
 import { crossoverRoundsOf, matchesForStandings, isCrossoverMatch } from '../lib/crossover.ts';
+import { orderMatchesForDisplay } from '../lib/order.ts';
 import { crossoverBadge } from './match.ts';
 import { zonesOf } from '../lib/zones.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
@@ -515,7 +516,10 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
   const fIdx = fxPageIndexFromUrl(roundParam, roundKeys);
   let defaultIdx = 0;
   for (const key of roundKeys) {
-    const list = rounds.get(key)!;
+    const rawList = rounds.get(key)!;
+    // Mezcla estable dentro de la fecha: la hora manda, el azar desempata
+    // (si no, siempre encabeza la zona que se generó primero).
+    const list = orderMatchesForDisplay(rawList, { tournamentId: t.id, round: key === 'x' ? null : Number(key) });
     const label = key === 'x' ? 'Sin fecha asignada' : roundLabel(Number(key), crossoverRounds);
     const day = list.find((m) => m.played_on)?.played_on ?? '';
     const upcoming = list.some((m) => m.status === 'scheduled');
