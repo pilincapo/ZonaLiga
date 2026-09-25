@@ -81,15 +81,25 @@ function matchCenter(m: Match): string {
 export function matchRow(
   m: Match,
   teamMap: Map<number, Team>,
-  opts: { homePlaceholder?: string; awayPlaceholder?: string } = {}
+  opts: {
+    homePlaceholder?: string;
+    awayPlaceholder?: string;
+    /** equipo → zona: para los cruces, cuya columna zone está vacía. */
+    zoneOfTeam?: Map<number, string>;
+  } = {}
 ): string {
   const home = m.home_team_id != null ? teamMap.get(m.home_team_id) : undefined;
   const away = m.away_team_id != null ? teamMap.get(m.away_team_id) : undefined;
   const cruce = isCrossoverMatch(m) ? crossoverBadge() : '';
+  // Los partidos de zona traen la zona en el partido (misma para los dos).
+  // Los cruces entre zonas no: cada equipo es de una zona distinta, que se
+  // deriva de la config del torneo vía zoneOfTeam.
+  const zonaHome = m.zone || opts.zoneOfTeam?.get(m.home_team_id ?? -1) || '';
+  const zonaAway = m.zone || opts.zoneOfTeam?.get(m.away_team_id ?? -1) || '';
   return `<div class="match-row">
-  ${teamCell(home, { placeholder: opts.homePlaceholder, align: 'left' })}${zoneBadge(m.zone, 'left')}
+  ${teamCell(home, { placeholder: opts.homePlaceholder, align: 'left' })}${zoneBadge(zonaHome, 'left')}
   ${cruce}${matchCenter(m)}
-  ${zoneBadge(m.zone, 'right')}${teamCell(away, { placeholder: opts.awayPlaceholder, align: 'right' })}
+  ${zoneBadge(zonaAway, 'right')}${teamCell(away, { placeholder: opts.awayPlaceholder, align: 'right' })}
 </div>`;
 }
 

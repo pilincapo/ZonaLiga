@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.42] — 2026-09-25 — Zonas visibles también en los cruces
+
+### Nuevo
+
+- En los partidos de cruce entre zonas del fixture público, cada equipo muestra su distintivo de zona (viene de la configuración del torneo): así se distingue de un vistazo que el cruce enfrenta a un equipo de cada zona. También en el inicio y en la página de cada equipo.
+
 ## [0.2.41] — 2026-09-25 — Mezcla real en el generador: cancha y hora por sorteo por día
 
 ### Arreglo

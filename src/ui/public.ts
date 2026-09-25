@@ -236,6 +236,12 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
   const teams = view.teams;
   const scorers = view.scorers;
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
+  // equipo → zona: para los badges de los cruces entre zonas.
+  const zonesHome = zonesOf(t.config);
+  const zoneOfTeamHome = new Map<number, string>();
+  if (zonesHome.enabled) {
+    for (const z of zonesHome.zones) for (const id of z.teamIds) zoneOfTeamHome.set(id, z.name);
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   // Los 5 próximos salen de la PRIMERA fecha pendiente, mezclados con la
@@ -287,11 +293,11 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
         { tournamentId: t.id, round: nextRound }
       )
         .concat(upcoming.filter((m) => m.round !== nextRound))
-        .map((m) => matchRow(m, teamMap))
+        .map((m) => matchRow(m, teamMap, { zoneOfTeam: zoneOfTeamHome }))
         .join('')
     : emptyNote('No hay partidos programados');
   const playedHtml = played.length
-    ? played.map((m) => matchRow(m, teamMap)).join('')
+    ? played.map((m) => matchRow(m, teamMap, { zoneOfTeam: zoneOfTeamHome })).join('')
     : emptyNote('Todavía no se jugaron partidos');
 
   const scorersHtml = scorers.length
@@ -530,6 +536,13 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
   const rounds = groupBy(matches, (m) => (m.round != null ? String(m.round) : 'x'));
   const roundKeys = [...rounds.keys()].sort((a, b) => Number(a) - Number(b));
   const crossoverRounds = crossoverRoundsOf(t.config);
+  // equipo → zona: los cruces entre zonas no llevan zona en el partido
+  // (cada equipo es de una distinta); el badge de zona sale de acá.
+  const zonesCfg = zonesOf(t.config);
+  const zoneOfTeam = new Map<number, string>();
+  if (zonesCfg.enabled) {
+    for (const z of zonesCfg.zones) for (const id of z.teamIds) zoneOfTeam.set(id, z.name);
+  }
 
   const fxPages: { label: string; day: string; html: string; upcoming: boolean; round: string; lines: string[]; share: string }[] = [];
   const fIdx = fxPageIndexFromUrl(roundParam, roundKeys);
@@ -564,7 +577,7 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
       round: key === 'x' ? '' : key,
       lines: shareLines,
       share: JSON.stringify({ label, day, lines: shareLines }),
-      html: `<div class="card">${list.map((m) => matchRow(m, teamMap)).join('')}</div>`,
+      html: `<div class="card">${list.map((m) => matchRow(m, teamMap, { zoneOfTeam })).join('')}</div>`,
     });
   }
 
@@ -767,8 +780,12 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
   for (const { tournament: t, matches: all } of views) {
     const mine = all.filter((m) => m.home_team_id === team.id || m.away_team_id === team.id);
     if (mine.length === 0) continue;
+    // Mapa zona por equipo del torneo (para los cruces entre zonas).
+    const zc = zonesOf(t.config);
+    const zoneOfTeam = new Map<number, string>();
+    if (zc.enabled) for (const z of zc.zones) for (const id of z.teamIds) zoneOfTeam.set(id, z.name);
     sections.push(`<h3 class="zone-title">${esc(t.name)}</h3>
-  <div class="card">${mine.map((m) => matchRow(m, teamMap)).join('')}</div>`);
+  <div class="card">${mine.map((m) => matchRow(m, teamMap, { zoneOfTeam })).join('')}</div>`);
   }
 
   const roster = players.length
