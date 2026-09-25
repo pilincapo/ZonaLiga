@@ -15,6 +15,19 @@
 
 ---
 
+## [0.2.30] — 2026-09-25 — Cruces: un solo camino y más control al generar
+
+### Nuevo
+
+- Al preparar la vista previa del fixture podés elegir la regla de cruce entre zonas (Espejo, Invertido o Cruzado) y si esos cruces suman puntos a la tabla, igual que en la fecha de cruce manual.
+- La vista previa muestra una estadística con cuántos cruces quedaron en cada fecha del borrador.
+- La ficha individual de cada partido en el sitio público muestra la marca "Cruce" cuando es un cruce entre zonas, igual que en el fixture.
+
+### Mejora
+
+- La fecha de cruce manual ahora escribe la marca de cruce en la nota de cada partido, igual que el generador automático: los dos caminos dejan el mismo rastro y la tabla, el playoff y la regeneración tratan los cruces idéntico.
+- Nuevo test e2e que recorre el camino completo: preparar la vista previa eligiendo regla de cruce y puntos, confirmar, y verificar en la base que cada partido quedó con su nota de cruce correcta.
+
 ## [0.2.29] — 2026-09-25 — Cruces marcados y al azar al generar desde cero
 
 ### Nuevo

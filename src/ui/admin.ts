@@ -39,6 +39,7 @@ import {
   crossoverRoundsOf,
   parseCrossoverConfig,
   CROSSOVER_RULES,
+  parseCrossoverRule,
   matchesForStandings,
 } from '../lib/crossover.ts';
 import {
@@ -922,6 +923,17 @@ ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, 
         <option value="double">Ida y vuelta</option>
       </select>
     </div>
+${
+  twoZones
+    ? `<div class="field">
+      <label>Regla de cruce</label>
+      <select name="crossover_rule">${CROSSOVER_RULES.map((r) => `<option value="${r.value}">${esc(r.label)}</option>`).join('')}</select>
+    </div>
+    <div class="field" style="align-self:flex-end">
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="crossover_counts" style="width:auto"> Los cruces suman puntos</label>
+    </div>`
+    : ''
+}
     <div class="field" style="align-self:flex-end">
       <span style="display:flex;gap:8px">
         <button class="btn btn-primary" type="submit" ${genBlocked ? 'disabled' : ''}>Preparar vista previa</button>
@@ -1368,6 +1380,16 @@ export function fixturePreviewPage(opts: {
   }
   const porFecha = groupByFixtureRound(plan);
   const fechas = [...porFecha.keys()].sort((a, b) => a - b);
+  // Estadística de cruces por fecha: en qué fechas quedaron y cuántos son.
+  const crucesPorFecha = fechas
+    .map((round) => ({ round, n: (porFecha.get(round) ?? []).filter((m) => m.kind === 'cruce').length }))
+    .filter((x) => x.n > 0);
+  const crucesStat =
+    crucesPorFecha.length > 0
+      ? `<div class="card"><div class="card-body"><strong>Cruces por fecha</strong><p class="hint">Distribución de los partidos de cruce entre zonas en las fechas del borrador.</p><div class="table-wrap"><table class="data"><thead><tr><th>Fecha</th><th>Cruces</th></tr></thead><tbody>${crucesPorFecha
+          .map((x) => `<tr><td>Fecha ${x.round}</td><td>${x.n}</td></tr>`)
+          .join('')}</tbody></table></div></div></div>`
+      : '';
   const sections = fechas
     .map((round) => {
       const list = porFecha.get(round)!;
@@ -1409,7 +1431,12 @@ ${pageHead(`Vista previa — ${opts.tournamentName}`, { href: `/admin/fixture?t=
     </form>
   </span>
 </div></div></section>
-${sections || '<section class="block"><div class="card"><div class="card-body">El borrador está vacío o ilegible: volvé a preparar la vista previa.</div></div></section>'}`;
+${
+  crucesStat
+    ? `<section class="block">${crucesStat}</section>
+`
+    : ''
+}${sections || '<section class="block"><div class="card"><div class="card-body">El borrador está vacío o ilegible: volvé a preparar la vista previa.</div></div></section>'}`;
   return adminLayout({ title: 'Vista previa del fixture', active: 'fixture', body });
 }
 

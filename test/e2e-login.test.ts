@@ -722,3 +722,108 @@ describe.skipIf(!has)('e2e: declaración de goles en la planilla', () => {
     expect(sheet4).toMatch(/name="away_goals"[^>]*value="0"/);
   });
 });
+
+describe.skipIf(!has)('e2e: vista previa con regla de cruce y puntos', () => {
+  it('preparar con regla invertido + counts, confirmar y verificar las notas en la base', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Torneo de zonas propio, para no pisar el estado de los otros tests.
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const allIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!);
+    expect(allIds.length).toBeGreaterThanOrEqual(4);
+    const form: Record<string, string> = {
+      name: 'Copa Cruce E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'active',
+      venues: 'Cancha Norte\nCancha Sur',
+      kickoffs: '10:00, 12:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      play_weekday: '6',
+      zones_enabled: 'on',
+      zone_names: 'Zona Cruce A\nZona Cruce B',
+    };
+    allIds.forEach((id, i) => {
+      form[`zone_of_${id}`] = i % 2 === 0 ? '1' : '2';
+    });
+    expect((await admin.post('/admin/torneos', form)).status).toBe(302);
+
+    const fxPage = await (await admin.get('/admin/fixture?t=copa-cruce-e2e')).text();
+    const tid = /name="tournament_id" value="(\d+)"/.exec(fxPage)?.[1] ?? '';
+    expect(tid, 'el torneo de cruce debe existir').toBeTruthy();
+
+    // El formulario de generación expone la regla y el checkbox de puntos
+    // (solo con 2 zonas activas).
+    expect(fxPage).toContain('name="crossover_rule"');
+    expect(fxPage).toContain('name="crossover_counts"');
+
+    // Declarar una fecha de cruce en la config: la bolsa del planificador
+    // solo incluye cruces para fechas declaradas, así que generamos la fecha
+    // manual (queda registrada y crea partidos que el confirmar va a
+    // reemplazar). Con 5 equipos: zona A con 3, zona B con 2 → 2 cruces.
+    const cruce = await admin.post('/admin/fixture/cruce', {
+      tournament_id: tid,
+      round: '4',
+      rule: 'espejo',
+    });
+    expect(cruce.status).toBe(302);
+    const cruceLoc = decodeURIComponent(cruce.headers.get('location') ?? '');
+    expect(cruceLoc).toContain('de cruce generada');
+
+    // Paso 1: preparar la vista previa pidiendo regla "invertido" y que los
+    // cruces sumen puntos (pisa el espejo/no-cuenta de la fecha declarada).
+    const prev = await admin.post('/admin/fixture/previsualizar', {
+      tournament_id: tid,
+      mode: 'single',
+      crossover_rule: 'invertido',
+      crossover_counts: 'on',
+    });
+    expect(prev.status).toBe(302);
+    expect(prev.headers.get('location') ?? '').toContain('vista-previa');
+
+    // La vista previa muestra la estadística de cruces por fecha.
+    const previewHtml = await (await admin.get('/admin/fixture/vista-previa?t=copa-cruce-e2e')).text();
+    expect(previewHtml).toContain('Cruces por fecha');
+    expect(previewHtml).toContain('Cruce (cuenta)');
+
+    // Paso 2: confirmar. Sin partidos jugados en este torneo, se aplica.
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'copa-cruce-e2e' });
+    expect(conf.status).toBe(302);
+    const confLoc = decodeURIComponent(conf.headers.get('location') ?? '');
+    expect(confLoc).toContain('Fixture guardado');
+    expect(confLoc).not.toContain('err=');
+
+    // Verificación en la base: el panel del fixture lista los partidos y la
+    // planilla de cada uno expone su nota tal como quedó guardada. Los
+    // partidos de cruce deben llevar la marca "cruce entre zonas (cuenta)".
+    const fixtureHtml = await (await admin.get('/admin/fixture?t=copa-cruce-e2e')).text();
+    expect(fixtureHtml).not.toContain('err=');
+    const matchIds = [...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!);
+    expect(matchIds.length).toBeGreaterThan(0);
+
+    // Contamos por nota, no por posición.
+    let cruces = 0;
+    let deZona = 0;
+    for (const mid of [...new Set(matchIds)]) {
+      const sheet = await (await admin.get(`/admin/planilla/${mid}`)).text();
+      const note = /<textarea name="notes"[^>]*>([\s\S]*?)<\/textarea>/.exec(sheet)?.[1] ?? '';
+      if (note.includes('cruce entre zonas')) {
+        cruces += 1;
+        // El flag counts del formulario llegó hasta la nota.
+        expect(note, `la planilla ${mid} debe marcar el cruce como cuenta`).toContain('(cuenta)');
+      } else {
+        deZona += 1;
+        expect(note, `la planilla ${mid} no debe llevar marca de cruce`).toBe('');
+      }
+    }
+    // Con 2 zonas y la bolsa mezclada, el plan incluye cruces: la regla
+    // elegida y el flag counts definieron la marca de todos.
+    expect(cruces).toBeGreaterThan(0);
+    expect(deZona).toBeGreaterThan(0);
+    // Ficha pública: la fecha 4 registrada como cruce muestra su etiqueta.
+    const publicFx = await (await fetch(`${BASE}/fixture?t=copa-cruce-e2e`)).text();
+    expect(publicFx).toContain('Cruce');
+  });
+});

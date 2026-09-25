@@ -76,6 +76,32 @@ describe('planFixture', () => {
     expect(cruces.every((m) => m.counts === false)).toBe(true);
   });
 
+  it('la regla y el counts elegidos en el formulario pisan la config', () => {
+    const config = JSON.stringify({
+      ...JSON.parse(CONFIG_ZONAS),
+      crossover: [{ round: 5, rule: 'espejo', counts: false }],
+    });
+    const base = {
+      teamIds: [1, 2, 3, 4, 5, 6, 7, 8],
+      configJson: config,
+      mode: 'single' as const,
+      schedule: S,
+      rng,
+    };
+    // Mismo rng: la única diferencia entre ambos planes es la regla elegida.
+    const espejo = planFixture({ ...base, crossoverRule: 'espejo', crossoverCounts: true });
+    const invertido = planFixture({ ...base, crossoverRule: 'invertido', crossoverCounts: true });
+    const paresDe = (p: typeof espejo): string[] =>
+      p.matches
+        .filter((m) => m.kind === 'cruce')
+        .map((m) => [m.home, m.away].sort((a, b) => a - b).join('-'))
+        .sort();
+    expect(paresDe(invertido)).toHaveLength(4);
+    expect(paresDe(invertido)).not.toEqual(paresDe(espejo));
+    // El checkbox "los cruces suman" pisa el counts: false de la config.
+    expect(invertido.matches.filter((m) => m.kind === 'cruce').every((m) => m.counts === true)).toBe(true);
+  });
+
   it('ningún equipo juega dos veces el mismo día (regla dura)', () => {
     const plan = planFixture({ teamIds: [1, 2, 3, 4, 5, 6, 7, 8], configJson: CONFIG_ZONAS_CRUCE, mode: 'single', schedule: S, rng });
     expect(() => verifyPlan(plan.matches, S)).not.toThrow();

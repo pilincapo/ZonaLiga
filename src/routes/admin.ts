@@ -393,6 +393,8 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
   const f = await c.req.parseBody();
   const tournamentId = Number(f['tournament_id']);
   const mode = String(f['mode'] ?? 'single') === 'double' ? 'double' : 'single';
+  const rule = parseCrossoverRule(f['crossover_rule']);
+  const crossoverCounts = f['crossover_counts'] === 'on' || f['crossover_counts'] === '1';
   if (!Number.isFinite(tournamentId)) {
     return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
   }
@@ -419,7 +421,7 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
 
   let plan;
   try {
-    plan = planFixture({ teamIds: ids, configJson, mode, schedule });
+    plan = planFixture({ teamIds: ids, configJson, mode, schedule, crossoverRule: rule, crossoverCounts });
   } catch (e) {
     const text = e instanceof Error ? e.message : 'error desconocido';
     return c.redirect(dest + '&err=' + encodeURIComponent(`No se pudo armar el plan: ${text}`));
@@ -752,10 +754,13 @@ adminRoutes.post('/fixture/cruce', async (c) => {
 
   const stmts: D1PreparedStatement[] = [];
   for (const [i, p] of pairs.entries()) {
+    // La marca vive en la nota (igual que en la bolsa mezclada): la tabla,
+    // el playoff y la regeneración la leen del dato, no de la fecha.
+    const notes = counts ? CROSSOVER_NOTE_COUNTS : CROSSOVER_NOTE;
     stmts.push(
       c.env.DB.prepare(
-        'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, played_on, kickoff_time, venue) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
-      ).bind(tournamentId, round, p.home, p.away, 'scheduled', day, slots[i]?.kickoff ?? '', slots[i]?.venue ?? '')
+        'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, played_on, kickoff_time, venue, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
+      ).bind(tournamentId, round, p.home, p.away, 'scheduled', day, slots[i]?.kickoff ?? '', slots[i]?.venue ?? '', notes)
     );
   }
   await c.env.DB.batch(stmts);

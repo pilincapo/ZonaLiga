@@ -15,7 +15,7 @@
 // tabla fixture_drafts y "Confirmar" lo aplica tal cual.
 
 import type { StandingRow } from './types.ts';
-import { buildCrossoverPairs, parseCrossoverConfig, type CrossoverRule } from './crossover.ts';
+import { buildCrossoverPairs, parseCrossoverConfig, type CrossoverDate, type CrossoverRule } from './crossover.ts';
 import { generateRoundRobin, generateDoubleRoundRobin } from './fixture.ts';
 import { plannedRoundDate, type TournamentSchedule } from './schedule.ts';
 import { zonesOf } from './zones.ts';
@@ -58,6 +58,10 @@ export interface PlanInput {
   standings?: { zone: string; rows: StandingRow[] }[];
   /** rng inyectable para tests. */
   rng?: () => number;
+  /** Regla de cruce elegida en el formulario (si la config declara cruces, la pisa). */
+  crossoverRule?: CrossoverRule;
+  /** Si los cruces suman puntos a la tabla (si viene, pisa el flag de la config). */
+  crossoverCounts?: boolean;
 }
 
 /** Mezcla Fisher-Yates con rng inyectable. */
@@ -103,6 +107,9 @@ export function crossoverPoolFor(input: {
   /** Baraja el orden interno de cada zona antes de emparejar (fixture desde cero: la "tabla" es al azar). */
   shuffleZones?: boolean;
   rng?: () => number;
+  /** Regla y flag de suma de puntos elegidos en el formulario (pisan la config). */
+  rule?: CrossoverRule;
+  counts?: boolean;
 }): { home: number; away: number; counts: boolean }[] {
   void input.mode;
   const dates = parseCrossoverConfig(input.configJson);
@@ -123,9 +130,10 @@ export function crossoverPoolFor(input: {
   const rowsB = maybeShuffle(rowsForZone(zoneB, input.standings, activeIds).slice().reverse());
   const pool: { home: number; away: number; counts: boolean }[] = [];
   for (const date of dates) {
-    const rule: CrossoverRule = date.rule;
+    const rule: CrossoverRule = input.rule ?? date.rule;
+    const counts = input.counts ?? date.counts;
     const { pairs } = buildCrossoverPairs(rowsA, rowsB, rule);
-    for (const p of pairs) pool.push({ home: p.home, away: p.away, counts: date.counts });
+    for (const p of pairs) pool.push({ home: p.home, away: p.away, counts });
   }
   return pool;
 }
@@ -182,6 +190,8 @@ export function planFixture(input: PlanInput): PlannedFixture {
     teamIds: input.teamIds,
     mode: input.mode,
     shuffleZones: input.standings ? false : true,
+    rule: input.crossoverRule,
+    counts: input.crossoverCounts,
     rng,
   });
   for (const p of crossovers) {

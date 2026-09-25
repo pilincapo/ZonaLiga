@@ -4,7 +4,8 @@ import { esc, escUrl } from '../lib/html.ts';
 import { formatDateShort, formatDateLong } from '../lib/format.ts';
 import { leagueNow } from '../lib/live.ts';
 import { groupBy, computeStandings, computeFairPlay, computeValla, FAIR_PLAY } from '../lib/standings.ts';
-import { crossoverRoundsOf, matchesForStandings } from '../lib/crossover.ts';
+import { crossoverRoundsOf, matchesForStandings, isCrossoverMatch } from '../lib/crossover.ts';
+import { crossoverBadge } from './match.ts';
 import { zonesOf } from '../lib/zones.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
 import { buildBracketColumns, hasBracket, matchShortLabel, matchWinnerLoser, BRACKET_LABELS } from '../lib/bracket.ts';
@@ -853,6 +854,9 @@ export async function matchPage(db: D1Database, id: number, origin: string): Pro
     shareTextMatch(home?.name ?? 'Local', away?.name ?? 'Visitante', m.home_goals, m.away_goals, tournament?.name ?? '', absoluteUrl(`/partido/${m.id}`, origin))
   );
 
+  // Badge de cruce entre zonas, igual que en el fixture público.
+  const cruceBadge = isCrossoverMatch(m) ? crossoverBadge() : '';
+
   const scoreLine =
     m.status === 'played' || m.status === 'walkover'
       ? `<div class="flex" style="gap:18px;justify-content:center;font-family:var(--font-head);font-size:clamp(2.2rem,9vw,3.4rem)">
@@ -878,7 +882,7 @@ export async function matchPage(db: D1Database, id: number, origin: string): Pro
     <div style="text-align:center">${teamCell(home, { align: 'left' })}</div>
     <div style="text-align:center">${teamCell(away, { align: 'right' })}</div>
   </div>
-  <div class="mt-3">${scoreLine}</div>
+  <div class="mt-3">${cruceBadge}${scoreLine}</div>
   ${m.notes ? `<p class="muted small mt-2" style="text-align:center">${esc(m.notes)}</p>` : ''}
   ${shareBar([{ label: '📲 Compartir resultado', href: shareHref }])}
 </section>
