@@ -931,6 +931,13 @@ ${
     </div>
     <div class="field" style="align-self:flex-end">
       <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="crossover_counts" style="width:auto"> Los cruces suman puntos</label>
+    </div>
+    <div class="field">
+      <label>Cruces entre zonas</label>
+      <select name="crossover_include">
+        <option value="con">Con cruces (mezclados en el fixture)</option>
+        <option value="sin">Sin cruces (solo partidos de zona)</option>
+      </select>
     </div>`
     : ''
 }

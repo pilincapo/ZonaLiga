@@ -76,6 +76,30 @@ describe('planFixture', () => {
     expect(cruces.every((m) => m.counts === false)).toBe(true);
   });
 
+  it('includeCrossovers: false saca los cruces de la bolsa (solo zona)', () => {
+    const con = planFixture({ teamIds: [1, 2, 3, 4, 5, 6, 7, 8], configJson: CONFIG_ZONAS_CRUCE, mode: 'single', schedule: S, rng });
+    const sin = planFixture({ teamIds: [1, 2, 3, 4, 5, 6, 7, 8], configJson: CONFIG_ZONAS_CRUCE, mode: 'single', schedule: S, includeCrossovers: false, rng });
+    expect(con.matches.filter((m) => m.kind === 'cruce')).toHaveLength(4);
+    expect(sin.matches.filter((m) => m.kind === 'cruce')).toHaveLength(0);
+    // Los de zona están completos en ambos planes.
+    expect(sin.matches.filter((m) => m.kind === 'zona')).toHaveLength(12);
+    expect(sin.matches).toHaveLength(12);
+  });
+
+  it('fechas de cruce duplicadas en la config: no duplica partidos', () => {
+    const config = JSON.stringify({
+      ...JSON.parse(CONFIG_ZONAS),
+      crossover: [
+        { round: 5, rule: 'espejo', counts: true },
+        { round: 5, rule: 'invertido', counts: false },
+      ],
+    });
+    const plan = planFixture({ teamIds: [1, 2, 3, 4, 5, 6, 7, 8], configJson: config, mode: 'single', schedule: S, rng });
+    const cruces = plan.matches.filter((m) => m.kind === 'cruce');
+    // Una fecha declarada dos veces genera UNA tanda de cruces (4 pares).
+    expect(cruces).toHaveLength(4);
+  });
+
   it('la regla y el counts elegidos en el formulario pisan la config', () => {
     const config = JSON.stringify({
       ...JSON.parse(CONFIG_ZONAS),

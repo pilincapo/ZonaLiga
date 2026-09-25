@@ -48,7 +48,11 @@ export function parseCrossoverConfig(configJson: string): CrossoverDate[] {
       counts: o['counts'] === true,
     });
   }
-  return out;
+  // Una fecha = un cruce: si la config acumuló declaraciones repetidas del
+  // mismo round (pasa al regenerar), gana la última y las demás se descartan.
+  const byRound = new Map<number, CrossoverDate>();
+  for (const d of out) byRound.set(d.round, d);
+  return [...byRound.values()].sort((a, b) => a.round - b.round);
 }
 
 export function crossoverConfigJson(dates: CrossoverDate[]): { crossover: CrossoverDate[] } {

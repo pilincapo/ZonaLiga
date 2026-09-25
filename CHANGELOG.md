@@ -15,6 +15,16 @@
 
 ---
 
+## [0.2.31] — 2026-09-25 — Fixture sin cruces y arreglo del doble cruce
+
+### Nuevo
+
+- El formulario de generar fixture tiene un selector de cruces: "Con cruces" (como siempre) o "Sin cruces", que arma el fixture solo con los partidos de zona y al confirmar borra también los cruces que ya existían.
+
+### Arreglo
+
+- Si la misma fecha quedaba declarada dos veces como cruce (por ejemplo, generando la fecha de cruce dos veces con distinta regla), el generador armaba el doble de partidos de cruce. Ahora una fecha = un cruce: la última declaración reemplaza a la anterior, y la config se deduplica al leer.
+
 ## [0.2.30] — 2026-09-25 — Cruces: un solo camino y más control al generar
 
 ### Nuevo

@@ -62,6 +62,8 @@ export interface PlanInput {
   crossoverRule?: CrossoverRule;
   /** Si los cruces suman puntos a la tabla (si viene, pisa el flag de la config). */
   crossoverCounts?: boolean;
+  /** false = plan solo con partidos de zona, sin la bolsa de cruces. */
+  includeCrossovers?: boolean;
 }
 
 /** Mezcla Fisher-Yates con rng inyectable. */
@@ -183,17 +185,21 @@ export function planFixture(input: PlanInput): PlannedFixture {
     }
   }
 
-  // 2) Cruces a la misma bolsa (caen mezclados en cualquier día).
-  const crossovers = crossoverPoolFor({
-    configJson: input.configJson,
-    standings: input.standings,
-    teamIds: input.teamIds,
-    mode: input.mode,
-    shuffleZones: input.standings ? false : true,
-    rule: input.crossoverRule,
-    counts: input.crossoverCounts,
-    rng,
-  });
+  // 2) Cruces a la misma bolsa (caen mezclados en cualquier día), salvo que
+  // el formulario pida un fixture sin cruces entre zonas.
+  const crossovers =
+    input.includeCrossovers === false
+      ? []
+      : crossoverPoolFor({
+          configJson: input.configJson,
+          standings: input.standings,
+          teamIds: input.teamIds,
+          mode: input.mode,
+          shuffleZones: input.standings ? false : true,
+          rule: input.crossoverRule,
+          counts: input.crossoverCounts,
+          rng,
+        });
   for (const p of crossovers) {
     pool.push({ home: p.home, away: p.away, zone: '', kind: 'cruce', counts: p.counts, day: '', venue: '', kickoff: '', fixtureRound: 0 });
   }

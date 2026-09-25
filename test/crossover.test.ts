@@ -99,6 +99,25 @@ describe('parseCrossoverConfig / crossoverRoundsOf', () => {
     expect(parseCrossoverRule('otra')).toBe('espejo');
     expect(parseCrossoverRule(undefined)).toBe('espejo');
   });
+
+  it('fechas duplicadas en la config: gana la última declaración por round', () => {
+    const dup = JSON.stringify({
+      crossover: [
+        { round: 22, rule: 'espejo', counts: true },
+        { round: 22, rule: 'invertido', counts: false },
+      ],
+    });
+    expect(parseCrossoverConfig(dup)).toEqual([{ round: 22, rule: 'invertido', counts: false }]);
+    expect(crossoverRoundsOf(dup)).toEqual(new Set([22]));
+    // Rounds distintos no se tocan entre sí.
+    const ok = JSON.stringify({
+      crossover: [
+        { round: 5, rule: 'espejo', counts: false },
+        { round: 9, rule: 'cruzado', counts: true },
+      ],
+    });
+    expect(parseCrossoverConfig(ok)).toHaveLength(2);
+  });
 });
 
 describe('matchesForStandings', () => {
