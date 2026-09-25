@@ -218,7 +218,13 @@ export function planFixture(input: PlanInput): PlannedFixture {
       ? null
       : input.crossoverRule || input.crossoverCounts !== undefined || input.crossoverRound
         ? {
-            round: Math.max(1, Math.round(input.crossoverRound || 0)) || autoRound,
+            // Fecha elegida (>= 1) o automática: la primera libre tras las
+            // fechas de zona. Cuidado con el cortocircuito: Math.max(1, 0)
+            // da 1 (truthy) y escondería la automática.
+            round:
+              input.crossoverRound != null && Number.isFinite(input.crossoverRound) && input.crossoverRound >= 1
+                ? Math.round(input.crossoverRound)
+                : autoRound,
             rule: input.crossoverRule ?? 'espejo',
             counts: input.crossoverCounts ?? false,
           }
@@ -240,9 +246,21 @@ export function planFixture(input: PlanInput): PlannedFixture {
   for (const p of crossovers) {
     pool.push({ home: p.home, away: p.away, zone: '', kind: 'cruce', counts: p.counts, day: '', venue: '', kickoff: '', fixtureRound: 0 });
   }
+  // Los cruces NO entran a la bolsa mezclada: van anclados a la fecha
+  // declarada (elegida en el formulario, la declarada en la config o la
+  // automática: la primera libre después de las fechas de zona). Esa fecha
+  // reserva sus slots; los partidos de zona llenan el resto del calendario.
+  const crossoverRound =
+    crossoverDate?.round ?? parseCrossoverConfig(input.configJson)[0]?.round ?? autoRound;
+  const crossoverMatches: PlannedMatch[] = [];
+  const zonePool: PlannedMatch[] = [];
+  for (const m of pool) {
+    if (m.kind === 'cruce') crossoverMatches.push(m);
+    else zonePool.push(m);
+  }
 
-  // 3) Mezcla de la bolsa: los cruces quedan esparcidos, no agrupados.
-  const bag = shuffle(pool, rng);
+  // 3) Mezcla: los de zona entre sí (el orden dentro de la fecha no importa).
+  const bag = shuffle(zonePool, rng);
 
   // 4) Distribución día por día.
   const catalog = slotCatalog(input.schedule);
@@ -261,6 +279,27 @@ export function planFixture(input: PlanInput): PlannedFixture {
     usedSlots.set(i, new Set());
   };
 
+  // 4a) Los cruces primero: fijan la fecha anclada y consumen slots de ella.
+  for (const m of crossoverMatches) {
+    const i = Math.max(0, crossoverRound - 1); // índice 0-based del día calendario
+    openDay(i);
+    const used = usedSlots.get(i)!;
+    const free = catalog.find((s) => !used.has(`${s.venue}|${s.kickoff}`));
+    if (!free) {
+      // La fecha elegida no tiene slots libres: el cruce cae al final.
+      throw new Error(`la fecha ${crossoverRound} no tiene slots libres para ${crossoverMatches.length} cruce(s): elegí otra fecha`);
+    }
+    used.add(`${free.venue}|${free.kickoff}`);
+    m.day = days[i]!;
+    m.venue = free.venue;
+    m.kickoff = free.kickoff;
+    perDay[i]!.push(m);
+    teamsOfDay.get(i)!.add(m.home);
+    teamsOfDay.get(i)!.add(m.away);
+  }
+
+  // 4b) Los de zona: mismo algoritmo de siempre, saltando los días ocupados
+  // por sus propios equipos (los cruces ya bloquearon a los emparejados).
   for (const m of bag) {
     let i = 0;
     for (;;) {
@@ -288,26 +327,25 @@ export function planFixture(input: PlanInput): PlannedFixture {
     }
   }
 
-  // 5) Renumerar fechas por día (el orden del empaque define la fecha 1..N).
-  const byDay = new Map<string, PlannedMatch[]>();
-  for (const m of bag) {
-    if (!m.day) continue;
-    const arr = byDay.get(m.day) ?? [];
-    arr.push(m);
-    byDay.set(m.day, arr);
-  }
-  const dayKeys = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
-  dayKeys.forEach((k, idx) => {
-    for (const m of byDay.get(k)!) m.fixtureRound = idx + 1;
+  // 5) Renumerar fechas por posición en el calendario (no se compactan):
+  // el cruce anclado conserva el número elegido aunque deje fechas vacías
+  // en el medio. Los partidos de zona llenan desde la fecha 1 contigua.
+  let lastUsed = 0;
+  days.forEach((day, i) => {
+    const list = perDay[i] ?? [];
+    if (!day || list.length === 0) return;
+    for (const m of list) m.fixtureRound = i + 1;
+    lastUsed = Math.max(lastUsed, i + 1);
   });
+  const dayKeys = days.filter((d, i): d is string => Boolean(d) && (perDay[i] ?? []).length > 0);
 
-  const matches = bag.filter((m) => m.day);
+  const matches = [...crossoverMatches, ...bag].filter((m) => m.day);
   // 6) Verificación dura antes de devolver el plan.
   verifyPlan(matches, input.schedule);
   return {
     matches,
-    rounds: dayKeys.length,
-    maxPerDay: Math.max(0, ...dayKeys.map((k) => byDay.get(k)!.length)),
+    rounds: lastUsed,
+    maxPerDay: Math.max(0, ...dayKeys.map((k) => (matches.filter((m) => m.day === k)).length)),
     crossover: matches.some((m) => m.kind === 'cruce') ? crossoverDate : null,
   };
 }

@@ -100,6 +100,42 @@ describe('planFixture', () => {
     expect(cruces).toHaveLength(4);
   });
 
+  it('la fecha de cruce elegida ancla los cruces en esa fecha exacta', () => {
+    // 2 zonas de 4 → 3 fechas de zona. Pido el cruce en la fecha 5: debe
+    // quedar en la 5 (aunque la 4 quede vacía), no compactado al final.
+    const plan = planFixture({
+      teamIds: [1, 2, 3, 4, 5, 6, 7, 8],
+      configJson: CONFIG_ZONAS,
+      mode: 'single',
+      schedule: S,
+      crossoverRule: 'espejo',
+      crossoverCounts: false,
+      crossoverRound: 5,
+      rng,
+    });
+    const cruces = plan.matches.filter((m) => m.kind === 'cruce');
+    expect(cruces).toHaveLength(4);
+    expect(cruces.every((m) => m.fixtureRound === 5)).toBe(true);
+    // La declaración resuelta coincide con la elegida.
+    expect(plan.crossover).toEqual({ round: 5, rule: 'espejo', counts: false });
+  });
+
+  it('sin fecha elegida, el cruce cae en la primera libre tras las de zona', () => {
+    const plan = planFixture({
+      teamIds: [1, 2, 3, 4, 5, 6, 7, 8],
+      configJson: CONFIG_ZONAS,
+      mode: 'single',
+      schedule: S,
+      crossoverRule: 'espejo',
+      crossoverCounts: false,
+      rng,
+    });
+    const cruces = plan.matches.filter((m) => m.kind === 'cruce');
+    // 2 zonas de 4 → 3 fechas de zona → automática = fecha 4.
+    expect(cruces.every((m) => m.fixtureRound === 4)).toBe(true);
+    expect(plan.crossover?.round).toBe(4);
+  });
+
   it('la regla y el counts elegidos en el formulario pisan la config', () => {
     const config = JSON.stringify({
       ...JSON.parse(CONFIG_ZONAS),

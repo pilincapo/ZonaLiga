@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.33] — 2026-09-25 — El cruce respeta la fecha que elegís
+
+### Arreglo
+
+- Al generar el fixture, la fecha del cruce que escribís en el formulario ahora se respeta: los cruces quedan exactamente en esa fecha. Antes el número se registraba pero los partidos terminaban repartidos al final del calendario.
+- Si dejás la fecha vacía (automática), el cruce cae en la primera fecha libre después de las fechas de zona (antes podía caer en la fecha 1).
+- Las fechas sin partidos que puedan quedar en el medio ya no se renumeran: el cruce conserva el número de fecha que elegiste.
+
 ## [0.2.32] — 2026-09-25 — El cruce se configura solo al generar el fixture
 
 ### Nuevo
