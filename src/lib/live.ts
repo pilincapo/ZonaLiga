@@ -1,7 +1,7 @@
 // Modo "fecha en vivo": lógica pura (sin DB ni HTML) para poder testearla.
 
 import type { Event, Match, Player, Team } from './types.ts';
-import { hash } from './order.ts';
+import { orderMatchesForDisplay } from './order.ts';
 
 /** Zona horaria de la liga: define qué es "hoy" y en qué momento se juega. */
 export const LEAGUE_TZ = 'America/Argentina/Buenos_Aires';
@@ -212,18 +212,15 @@ export function buildLivePayload(opts: {
   const teamMap = new Map(opts.teams.map((t) => [t.id, t]));
   const playerMap = new Map(opts.players.map((p) => [p.id, p.name]));
 
-  // Misma mezcla estable que el fixture: hora primero, azar desempata
-  // (ya no el id, que siempre privilegiaba a la zona generada primero).
+  // Misma mezcla estable que el fixture, SIN ordenar por hora: los
+  // horarios se asignan por zona, así que ordenar por hora reproducía el
+  // orden por zona (la A siempre arriba en la grilla del día).
   const tid = opts.matches[0]?.tournament_id;
   const rnd = opts.matches[0]?.round;
-  const todays = opts.matches
-    .filter((m) => m.played_on === clock.date && m.status !== 'bye')
-    .sort(
-      (a, b) =>
-        (minutesOfDay(a.kickoff_time) ?? 24 * 60) - (minutesOfDay(b.kickoff_time) ?? 24 * 60) ||
-        hash(`${tid}|${rnd}|${a.id}`) - hash(`${tid}|${rnd}|${b.id}`) ||
-        a.id - b.id
-    );
+  const todays = orderMatchesForDisplay(
+    opts.matches.filter((m) => m.played_on === clock.date && m.status !== 'bye'),
+    { tournamentId: tid, round: rnd }
+  );
 
   const views: LiveMatchView[] = todays.map((m) => {
     const phase = matchPhase(m, clock.minutes);

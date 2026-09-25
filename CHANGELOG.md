@@ -15,6 +15,18 @@
 
 ---
 
+## [0.2.39] — 2026-09-25 — En vivo también mezcla la fecha del día
+
+### Arreglo
+
+- La página En vivo ordenaba los partidos del día por hora, y como los horarios se asignan por zona, la grilla mostraba siempre la misma zona arriba. Ahora usa la misma mezcla estable que el fixture.
+
+## [0.2.38] — 2026-09-25 — Los 5 próximos del inicio salen mezclados de toda la fecha
+
+### Arreglo
+
+- El bloque "Próxima fecha" del inicio cortaba los 5 partidos por orden de carga antes de mezclar: mostraba solo los de la zona que se generó primero. Ahora elige la fecha completa, la mezcla con la clave estable del fixture y recién después corta.
+
 ## [0.2.37] — 2026-09-25 — Mezclado en el inicio, el compartir y las fechas del panel
 
 ### Mejora

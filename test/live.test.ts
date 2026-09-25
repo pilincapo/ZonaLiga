@@ -142,7 +142,7 @@ describe('scorersLine', () => {
 describe('payload de la fecha en vivo', () => {
   const NOW = new Date('2026-08-16T14:00:00Z'); // 11:00 en Argentina
 
-  it('solo incluye los partidos de hoy y los ordena por hora', () => {
+  it('solo incluye los partidos de hoy, en mezcla estable (no por hora/zona)', () => {
     const payload = buildLivePayload({
       matches: [
         match({ id: 3, played_on: '2026-08-16', kickoff_time: '17:00' }),
@@ -156,7 +156,11 @@ describe('payload de la fecha en vivo', () => {
       now: NOW,
     });
     expect(payload.date).toBe('2026-08-16');
-    expect(payload.matches.map((m) => m.id)).toEqual([1, 3, 4]);
+    // Los de hoy son 1, 3 y 4, en orden mezclado estable (mismo seed que el
+    // fixture). El 2 es de otra fecha y no entra.
+    const ids = payload.matches.map((m) => m.id);
+    expect([...ids].sort((a, b) => a - b)).toEqual([1, 3, 4]);
+    expect(ids).not.toEqual([1, 3, 4]); // ya no va en orden de id/hora
     expect(payload.round).toBe(7);
   });
 
