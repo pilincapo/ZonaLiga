@@ -30,35 +30,43 @@ function mk(id: number, round: number, zone: string, kickoff = ''): Match {
 }
 
 describe('orderMatchesForDisplay', () => {
-  it('mezcla las zonas: no siempre queda primero el partido de menor id', () => {
+  it('modo crono (default): ordena por hora y cancha, el cronograma del día', () => {
+    const list = [
+      { ...mk(2, 1, 'B', '12:00'), venue: 'Cancha 2' },
+      { ...mk(1, 1, 'A', '12:00'), venue: 'Cancha 1' },
+      { ...mk(4, 1, 'B', '10:00'), venue: 'Cancha 2' },
+      { ...mk(3, 1, 'A', '10:00'), venue: 'Cancha 1' },
+    ];
+    const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1 });
+    expect(out.map((m) => `${m.kickoff_time}@${m.venue}`)).toEqual([
+      '10:00@Cancha 1',
+      '10:00@Cancha 2',
+      '12:00@Cancha 1',
+      '12:00@Cancha 2',
+    ]);
+  });
+
+  it('modo crono: partidos sin hora van al final', () => {
+    const list = [{ ...mk(1, 1, 'A', ''), venue: 'Cancha 1' }, { ...mk(2, 1, 'B', '10:00'), venue: 'Cancha 1' }];
+    const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1 });
+    expect(out.map((m) => m.id)).toEqual([2, 1]);
+  });
+
+  it('modo mix: mezcla las zonas y no queda el orden de inserción', () => {
     const list = [mk(1, 1, 'A'), mk(2, 1, 'A'), mk(3, 1, 'B'), mk(4, 1, 'B')];
-    const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1 });
+    const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1, mode: 'mix' });
     const ids = out.map((m) => m.id);
-    expect(ids).not.toEqual([1, 2, 3, 4]); // ya no es el orden de inserción
-    expect([...ids].sort((a, b) => a - b)).toEqual([1, 2, 3, 4]); // no pierde ninguno
+    expect(ids).not.toEqual([1, 2, 3, 4]);
+    expect([...ids].sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
   });
 
-  it('el orden es estable: la misma fecha siempre se ve igual', () => {
-    const list = [mk(1, 2, 'A'), mk(2, 2, 'B'), mk(3, 2, 'A'), mk(4, 2, 'B')];
-    const a = orderMatchesForDisplay(list, { tournamentId: 7, round: 2 });
-    const b = orderMatchesForDisplay(list, { tournamentId: 7, round: 2 });
-    expect(a.map((m) => m.id)).toEqual(b.map((m) => m.id));
-  });
-
-  it('distintas fechas del mismo torneo mezclan distinto', () => {
+  it('modo mix: el orden es estable y distinto por fecha', () => {
     const mkRound = (round: number) => [mk(1, round, 'A'), mk(2, round, 'B'), mk(3, round, 'A'), mk(4, round, 'B')];
-    const r1 = orderMatchesForDisplay(mkRound(1), { tournamentId: 5, round: 1 }).map((m) => m.id);
-    const r2 = orderMatchesForDisplay(mkRound(2), { tournamentId: 5, round: 2 }).map((m) => m.id);
-    expect(r1).not.toEqual(r2);
-  });
-
-  it('no respeta la hora: partidos con horarios distintos también se mezclan', () => {
-    // El caso real del torneo: zona A a las 12:00, zona B a las 15:00.
-    // Antes (orden por hora) quedaba A arriba y B abajo siempre.
-    const list = [mk(1, 1, 'A', '12:00'), mk(2, 1, 'A', '12:00'), mk(3, 1, 'B', '15:00'), mk(4, 1, 'B', '15:00')];
-    const out = orderMatchesForDisplay(list, { tournamentId: 1, round: 1 });
-    const zonas = out.map((m) => m.zone);
-    expect(zonas).not.toEqual(['A', 'A', 'B', 'B']); // mezclado real
+    const r1a = orderMatchesForDisplay(mkRound(1), { tournamentId: 5, round: 1, mode: 'mix' });
+    const r1b = orderMatchesForDisplay(mkRound(1), { tournamentId: 5, round: 1, mode: 'mix' });
+    expect(r1a.map((m) => m.id)).toEqual(r1b.map((m) => m.id));
+    const r2 = orderMatchesForDisplay(mkRound(2), { tournamentId: 5, round: 2, mode: 'mix' }).map((m) => m.id);
+    expect(r1a.map((m) => m.id)).not.toEqual(r2);
   });
 
   it('lista vacía o de un solo partido: no explota', () => {

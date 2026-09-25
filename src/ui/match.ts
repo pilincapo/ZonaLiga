@@ -67,13 +67,17 @@ export function zoneBadge(zone: string, align: 'left' | 'right' = 'left'): strin
   return `<span class="badge info zone-badge" title="${esc(title)}"${side}>${esc(z)}</span>`;
 }
 
-/** Centro de la fila: hora/fecha, marcador con link a la ficha, o estado. Detalle interno de matchRow. */
-function matchCenter(m: Match): string {
+/**
+ * Centro de la fila: hora/fecha/cancha, marcador con link a la ficha, o
+ * estado. Detalle interno de matchRow. `extra` (cancha) se agrega debajo
+ * de la hora en programados.
+ */
+function matchCenter(m: Match, extra = ''): string {
   if (m.status === 'scheduled') {
-    return `<div class="match-center"><span class="score-time">${esc(m.kickoff_time || '')}</span><span class="score-time">${formatDateShort(m.played_on)}</span></div>`;
+    return `<div class="match-center"><span class="score-time">${esc(m.kickoff_time || '')}</span><span class="score-time">${formatDateShort(m.played_on)}</span>${extra}</div>`;
   }
   if (m.status === 'played' || m.status === 'walkover') {
-    return `<div class="match-center"><a class="score" href="/partido/${m.id}">${m.home_goals} - ${m.away_goals}</a><span class="score-time">${formatDateShort(m.played_on)}</span></div>`;
+    return `<div class="match-center"><a class="score" href="/partido/${m.id}">${m.home_goals} - ${m.away_goals}</a><span class="score-time">${formatDateShort(m.played_on)}</span>${extra}</div>`;
   }
   return `<div class="match-center"><a class="score" style="opacity:.55" href="/partido/${m.id}">- : -</a><span class="score-time">${statusTag(m)}</span></div>`;
 }
@@ -96,9 +100,14 @@ export function matchRow(
   // deriva de la config del torneo vía zoneOfTeam.
   const zonaHome = m.zone || opts.zoneOfTeam?.get(m.home_team_id ?? -1) || '';
   const zonaAway = m.zone || opts.zoneOfTeam?.get(m.away_team_id ?? -1) || '';
+  // Cancha: visible si el partido la tiene asignada (el fixture ordena por
+  // cancha y hora; sin la cancha en la fila el orden no se entiende).
+  const cancha = m.venue
+    ? `<span class="score-time" title="Cancha">${esc(m.venue)}</span>`
+    : '';
   return `<div class="match-row">
   ${teamCell(home, { placeholder: opts.homePlaceholder, align: 'left' })}${zoneBadge(zonaHome, 'left')}
-  ${cruce}${matchCenter(m)}
+  ${cruce}${matchCenter(m, cancha)}
   ${zoneBadge(zonaAway, 'right')}${teamCell(away, { placeholder: opts.awayPlaceholder, align: 'right' })}
 </div>`;
 }

@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.43] — 2026-09-25 — Fixture ordenado por cancha y hora
+
+### Mejora
+
+- El fixture público de cada fecha ya no mezcla los partidos al azar: salen en el orden del cronograma real del día, por hora y cancha (si dos arrancan a la misma hora, ordena por cancha). Para que se entienda el orden, cada fila ahora también muestra la cancha del partido, junto al horario.
+- En la página de inicio y en la página de cada equipo, la próxima fecha sigue el mismo orden cronológico.
+
 ## [0.2.42] — 2026-09-25 — Zonas visibles también en los cruces
 
 ### Nuevo

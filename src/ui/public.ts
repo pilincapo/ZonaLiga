@@ -549,9 +549,14 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
   let defaultIdx = 0;
   for (const key of roundKeys) {
     const rawList = rounds.get(key)!;
-    // Mezcla estable dentro de la fecha: la hora manda, el azar desempata
-    // (si no, siempre encabeza la zona que se generó primero).
-    const list = orderMatchesForDisplay(rawList, { tournamentId: t.id, round: key === 'x' ? null : Number(key) });
+    // Orden cronológico por cancha y hora: la lista se lee como el
+    // cronograma real del día (la cancha y la hora ya se sortearon al
+    // generar, así que el orden no hereda el de las zonas).
+    const list = orderMatchesForDisplay(rawList, {
+      tournamentId: t.id,
+      round: key === 'x' ? null : Number(key),
+      mode: 'crono',
+    });
     const label = key === 'x' ? 'Sin fecha asignada' : roundLabel(Number(key), crossoverRounds);
     const day = list.find((m) => m.played_on)?.played_on ?? '';
     const upcoming = list.some((m) => m.status === 'scheduled');

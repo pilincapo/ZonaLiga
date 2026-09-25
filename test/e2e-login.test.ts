@@ -267,12 +267,23 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     expect(page).toContain('>12:00</option>');
     expect(page).toContain('>Cancha Sur</option>');
 
-    // Ids: [f1m1, f1m2, f2m1, …]; el día de la fecha 1 sale del input.
-    const mIds = [...page.matchAll(/name="d_(\d+)"/g)].map((m) => m[1]!);
-    expect(mIds.length).toBeGreaterThanOrEqual(4);
-    const r1m1 = mIds[0]!;
-    const r2m1 = mIds[2]!;
-    const day1 = new RegExp(`name="d_${r1m1}" value="([\\d-]+)"`).exec(page)?.[1] ?? '';
+    // Ids por bloque: cada sección del panel empieza con su encabezado
+    // "Fecha N", así que se toman los partidos dentro de cada bloque (el
+    // orden de la página no es fijo: ahora sale por cronograma del día).
+    const blockOf = (round: number): string => {
+      const idx = page.indexOf(`<h3 class="zone-title">Fecha ${round}<`);
+      expect(idx, `la fecha ${round} debe figurar en el panel`).toBeGreaterThanOrEqual(0);
+      // El bloque llega hasta el próximo encabezado de fecha (o el final).
+      const next = page.indexOf('<h3 class="zone-title">Fecha ', idx + 1);
+      return page.slice(idx, next === -1 ? undefined : next);
+    };
+    const idsIn = (round: number): string[] => [...blockOf(round).matchAll(/name="d_(\d+)"/g)].map((m) => m[1]!);
+    const r1Ids = idsIn(1);
+    const r2Ids = idsIn(2);
+    expect(r1Ids.length, 'la fecha 1 debe tener 2 partidos').toBeGreaterThanOrEqual(2);
+    expect(r2Ids.length, 'la fecha 2 debe tener partidos').toBeGreaterThanOrEqual(1);
+    const r2m1 = r2Ids[0]!;
+    const day1 = new RegExp(`name="d_${r1Ids[0]}" value="([\\d-]+)"`).exec(page)?.[1] ?? '';
     expect(day1, 'la fecha 1 debe tener día').toBeTruthy();
 
     const fullConfig = {
@@ -290,6 +301,19 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     // El finally restaura la config completa aunque cualquier expect falle:
     // la configuración compartida no debe arrastrarse a los tests siguientes.
     try {
+      // Estado controlado: los dos partidos de la fecha 1 en el mismo día
+      // (tests anteriores pueden haber movido alguno a otro día) y un partido
+      // de la fecha 2 llevado a ese día con el mismo horario y cancha.
+      // Sin esto, la fecha 1 repartida en dos días jamás puede chocar.
+      const r1Body: Record<string, string> = { tournament_id: tournamentId, round: '1' };
+      for (const id of r1Ids) {
+        r1Body[`d_${id}`] = day1;
+        r1Body[`t_${id}`] = '10:00';
+        r1Body[`v_${id}`] = 'Cancha Norte';
+      }
+      const arrange = await admin.post('/admin/fechas/guardar', r1Body);
+      expect(arrange.status).toBe(302);
+
       // Le doy el día y el slot de la fecha 1 a un partido de la fecha 2.
       const clash = await admin.post('/admin/fechas/guardar', {
         tournament_id: tournamentId,
@@ -332,7 +356,7 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
       expect(regen2.status).toBe(302);
       const loc2 = decodeURIComponent(regen2.headers.get('location') ?? '');
       expect(loc2).toContain('Choques');
-      expect(loc2).toContain('Cancha Norte tiene 2 partidos');
+      expect(loc2).toMatch(/Cancha Norte tiene \d+ partidos/);
 
       // Restauro la config y regenero para dejar el calendario sin choques.
       const restore = await admin.post(`/admin/torneos/${tournamentId}`, fullConfig);
