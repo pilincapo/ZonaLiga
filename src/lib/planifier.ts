@@ -1,0 +1,312 @@
+// Planificador de fixture completo: junta en una sola bolsa los partidos de
+// zona (round-robin por zona) o del círculo global, más los de cruce entre
+// zonas si la config los declara, y los distribuye en FECHAS del calendario
+// con capacidad limitada (canchas × horarios por día).
+//
+// Reglas duras (todas verificadas al final del plan):
+// 1. Cada fecha del fixture cae en un único día del calendario.
+// 2. Un equipo nunca juega dos veces el mismo día.
+// 3. Horarios no forzados: si un día no alcanzan los slots, el resto de la
+//    bolsa sigue en el día siguiente (nada queda postergado ni sin día).
+// 4. Los partidos de cruce van en la misma bolsa: pueden caer mezclados con
+//    los de zona en cualquier día.
+//
+// Dominio puro: no toca la base. La vista previa guarda este plan en la
+// tabla fixture_drafts y "Confirmar" lo aplica tal cual.
+
+import type { StandingRow } from './types.ts';
+import { buildCrossoverPairs, parseCrossoverConfig, type CrossoverRule } from './crossover.ts';
+import { generateRoundRobin, generateDoubleRoundRobin } from './fixture.ts';
+import { plannedRoundDate, type TournamentSchedule } from './schedule.ts';
+import { zonesOf } from './zones.ts';
+
+/** Un partido del plan, ya con su fecha (día único) y slot asignados. */
+export interface PlannedMatch {
+  home: number;
+  away: number;
+  zone: string;
+  /** 'zona' | 'cruce' | 'global' (círculo sin zonas). */
+  kind: 'zona' | 'cruce' | 'global';
+  /** Día calendario: único por fecha del fixture. */
+  day: string;
+  venue: string;
+  kickoff: string;
+  /** Fecha del fixture (1..N). */
+  fixtureRound: number;
+}
+
+export interface PlannedFixture {
+  matches: PlannedMatch[];
+  /** Cantidad de fechas (días con partidos). */
+  rounds: number;
+  /** Máximo de partidos en un día. */
+  maxPerDay: number;
+}
+
+export interface PlanInput {
+  teamIds: number[];
+  configJson: string;
+  mode: 'single' | 'double';
+  schedule: TournamentSchedule;
+  /**
+   * Tabla por zona al momento de planear (opcional). Si viene, define el
+   * orden de los cruces con la misma regla del generador manual; si no, el
+   * orden de la zona hace de "tabla" (fixture nuevo = tabla vacía).
+   */
+  standings?: { zone: string; rows: StandingRow[] }[];
+  /** rng inyectable para tests. */
+  rng?: () => number;
+}
+
+/** Mezcla Fisher-Yates con rng inyectable. */
+function shuffle<T>(arr: T[], rng: () => number): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const a = out[i]!;
+    const b = out[j]!;
+    out[i] = a;
+    out[j] = b;
+  }
+  return out;
+}
+
+/** Día calendario de la fecha i (1-based) del calendario. */
+function dayFor(schedule: TournamentSchedule, i: number): string {
+  return plannedRoundDate(schedule, i) || '';
+}
+
+/** Filas "de tabla" para armar los cruces. */
+function rowsForZone(
+  zone: { name: string; teamIds: number[] },
+  standings: PlanInput['standings'],
+  activeIds: Set<number>
+): StandingRow[] {
+  const provided = standings?.find((s) => s.zone === zone.name)?.rows;
+  const ids = provided ? provided.map((r) => r.teamId) : zone.teamIds;
+  return ids
+    .filter((id) => activeIds.has(id))
+    .map((id) => ({ teamId: id, played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, diff: 0, points: 0 }));
+}
+
+/**
+ * Cruces según la config: pares entre las dos primeras zonas con la regla
+ * declarada. Vacío si la config no declara cruces o no hay 2 zonas.
+ */
+export function crossoverPoolFor(input: {
+  configJson: string;
+  standings?: { zone: string; rows: StandingRow[] }[];
+  teamIds: number[];
+  mode: 'single' | 'double';
+}): { home: number; away: number }[] {
+  void input.mode;
+  const dates = parseCrossoverConfig(input.configJson);
+  if (dates.length === 0) return [];
+  const zc = zonesOf(input.configJson);
+  if (!zc.enabled || zc.zones.length < 2) return [];
+  const zoneA = zc.zones[0]!;
+  const zoneB = zc.zones[1]!;
+  const activeIds = new Set(input.teamIds);
+  const rowsA = rowsForZone(zoneA, input.standings, activeIds);
+  const rowsB = rowsForZone(zoneB, input.standings, activeIds);
+  const pool: { home: number; away: number }[] = [];
+  for (const date of dates) {
+    const rule: CrossoverRule = date.rule;
+    const { pairs } = buildCrossoverPairs(rowsA, rowsB, rule);
+    for (const p of pairs) pool.push({ home: p.home, away: p.away });
+  }
+  return pool;
+}
+
+/**
+ * Arma el plan completo. Bolsa única (zona + cruces), mezclada, distribuida
+ * día por día respetando capacidad y un partido por equipo por día.
+ */
+export function planFixture(input: PlanInput): PlannedFixture {
+  const rng = input.rng ?? Math.random;
+
+  // 1) Bolsa de partidos de zona (o círculo global si no hay zonas activas).
+  const zc = zonesOf(input.configJson);
+  const zoned = zc.enabled && zc.zones.length >= 2;
+  const pool: PlannedMatch[] = [];
+
+  if (zoned) {
+    const active = new Set(input.teamIds);
+    const calendars = zc.zones
+      .map((z) => ({ zone: z.name, ids: z.teamIds.filter((id) => active.has(id)) }))
+      .filter((z) => z.ids.length >= 2)
+      .map((z) => ({ zone: z.zone, fixture: generateRoundRobin(z.ids) }));
+    const maxRounds = calendars.reduce((mx, c) => Math.max(mx, c.fixture.rounds.length), 0);
+    for (let i = 0; i < maxRounds; i++) {
+      for (const cal of calendars) {
+        for (const p of cal.fixture.rounds[i] ?? []) {
+          pool.push({
+            home: p.home,
+            away: p.away,
+            zone: cal.zone,
+            kind: 'zona',
+            day: '',
+            venue: '',
+            kickoff: '',
+            fixtureRound: 0,
+          });
+        }
+      }
+    }
+  } else {
+    const fixture =
+      input.mode === 'double' ? generateDoubleRoundRobin(input.teamIds) : generateRoundRobin(input.teamIds);
+    for (const pairs of fixture.rounds) {
+      for (const p of pairs) {
+        pool.push({ home: p.home, away: p.away, zone: '', kind: 'global', day: '', venue: '', kickoff: '', fixtureRound: 0 });
+      }
+    }
+  }
+
+  // 2) Cruces a la misma bolsa (caen mezclados en cualquier día).
+  const crossovers = crossoverPoolFor({
+    configJson: input.configJson,
+    standings: input.standings,
+    teamIds: input.teamIds,
+    mode: input.mode,
+  });
+  for (const p of crossovers) {
+    pool.push({ home: p.home, away: p.away, zone: '', kind: 'cruce', day: '', venue: '', kickoff: '', fixtureRound: 0 });
+  }
+
+  // 3) Mezcla de la bolsa: los cruces quedan esparcidos, no agrupados.
+  const bag = shuffle(pool, rng);
+
+  // 4) Distribución día por día.
+  const catalog = slotCatalog(input.schedule);
+  const capacity = Math.max(1, catalog.length);
+
+  const days: string[] = [];
+  const perDay: PlannedMatch[][] = [];
+  const teamsOfDay = new Map<number, Set<number>>();
+  const usedSlots = new Map<number, Set<string>>();
+
+  const openDay = (i: number): void => {
+    if (days[i] !== undefined) return;
+    days[i] = dayFor(input.schedule, i + 1);
+    perDay[i] = [];
+    teamsOfDay.set(i, new Set());
+    usedSlots.set(i, new Set());
+  };
+
+  for (const m of bag) {
+    let i = 0;
+    for (;;) {
+      openDay(i);
+      const busy = teamsOfDay.get(i)!.has(m.home) || teamsOfDay.get(i)!.has(m.away);
+      const full = perDay[i]!.length >= capacity;
+      if (busy || full) {
+        i += 1;
+        continue;
+      }
+      const used = usedSlots.get(i)!;
+      const free = catalog.find((s) => !used.has(`${s.venue}|${s.kickoff}`));
+      if (!free) {
+        i += 1;
+        continue;
+      }
+      used.add(`${free.venue}|${free.kickoff}`);
+      m.day = days[i]!;
+      m.venue = free.venue;
+      m.kickoff = free.kickoff;
+      perDay[i]!.push(m);
+      teamsOfDay.get(i)!.add(m.home);
+      teamsOfDay.get(i)!.add(m.away);
+      break;
+    }
+  }
+
+  // 5) Renumerar fechas por día (el orden del empaque define la fecha 1..N).
+  const byDay = new Map<string, PlannedMatch[]>();
+  for (const m of bag) {
+    if (!m.day) continue;
+    const arr = byDay.get(m.day) ?? [];
+    arr.push(m);
+    byDay.set(m.day, arr);
+  }
+  const dayKeys = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
+  dayKeys.forEach((k, idx) => {
+    for (const m of byDay.get(k)!) m.fixtureRound = idx + 1;
+  });
+
+  const matches = bag.filter((m) => m.day);
+  // 6) Verificación dura antes de devolver el plan.
+  verifyPlan(matches, input.schedule);
+  return {
+    matches,
+    rounds: dayKeys.length,
+    maxPerDay: Math.max(0, ...dayKeys.map((k) => byDay.get(k)!.length)),
+  };
+}
+
+/** Grilla de slots del torneo (canchas × horarios). */
+export function slotCatalog(schedule: TournamentSchedule): { venue: string; kickoff: string }[] {
+  const venues = schedule.venues.length ? schedule.venues : [''];
+  const kickoffs = schedule.kickoffs.length ? schedule.kickoffs : [''];
+  const catalog: { venue: string; kickoff: string }[] = [];
+  for (const ko of kickoffs) for (const v of venues) catalog.push({ venue: v, kickoff: ko });
+  return catalog;
+}
+
+/** Verificación dura: 1 día = 1 fecha, un partido por equipo por día, slots válidos. */
+export function verifyPlan(matches: PlannedMatch[], schedule: TournamentSchedule): void {
+  const allSlots = new Set(slotCatalog(schedule).map((s) => `${s.venue}|${s.kickoff}`));
+  const capacity = Math.max(1, allSlots.size);
+  const byDay = new Map<string, PlannedMatch[]>();
+  for (const m of matches) {
+    const arr = byDay.get(m.day) ?? [];
+    arr.push(m);
+    byDay.set(m.day, arr);
+  }
+  for (const [day, list] of byDay) {
+    const seen = new Set<number>();
+    for (const m of list) {
+      for (const id of [m.home, m.away]) {
+        if (seen.has(id)) throw new Error(`verificación: un equipo juega 2 veces el día ${day}`);
+        seen.add(id);
+      }
+      const s = `${m.venue}|${m.kickoff}`;
+      if (!allSlots.has(s)) throw new Error(`verificación: slot ${s} inexistente el día ${day}`);
+    }
+  }
+}
+
+/** Agrupa un plan por fecha del fixture para render. */
+export function groupByFixtureRound(matches: PlannedMatch[]): Map<number, PlannedMatch[]> {
+  const map = new Map<number, PlannedMatch[]>();
+  for (const m of matches) {
+    const arr = map.get(m.fixtureRound) ?? [];
+    arr.push(m);
+    map.set(m.fixtureRound, arr);
+  }
+  return map;
+}
+
+/** Resumen para la vista previa (cantidad, fechas, rango de libres, tope diario). */
+export function planSummary(
+  plan: PlannedFixture,
+  teamIds: number[]
+): { total: number; cruces: number; rounds: number; maxPerDay: number; libresMax: number; libresMin: number } {
+  const daysOfTeam = new Map<number, Set<string>>();
+  for (const m of plan.matches) {
+    for (const id of [m.home, m.away]) {
+      const set = daysOfTeam.get(id) ?? new Set<string>();
+      set.add(m.day);
+      daysOfTeam.set(id, set);
+    }
+  }
+  const libres = teamIds.map((id) => plan.rounds - (daysOfTeam.get(id)?.size ?? 0));
+  return {
+    total: plan.matches.length,
+    cruces: plan.matches.filter((m) => m.kind === 'cruce').length,
+    rounds: plan.rounds,
+    maxPerDay: plan.maxPerDay,
+    libresMax: Math.max(0, ...libres),
+    libresMin: libres.length ? Math.min(...libres) : 0,
+  };
+}

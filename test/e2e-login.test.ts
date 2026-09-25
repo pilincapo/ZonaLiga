@@ -95,8 +95,14 @@ beforeAll(async () => {
   expect(teamId, 'el id de Deportivo E2E debe estar en la página').toBeTruthy();
 
   // Fixture doble round robin con 4 equipos = 6 fechas de 2 partidos.
-  const gen = await admin.post('/admin/fixture/generar', { tournament_id: tournamentId, mode: 'double' });
+  // Nuevo flujo: previsualizar (guarda borrador) + confirmar (aplica).
+  const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tournamentId, mode: 'double' });
   expect(gen.status).toBe(302);
+  expect(gen.headers.get('location') ?? '').toContain('vista-previa');
+  const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tournamentId, t: 'copa-e2e' });
+  expect(conf.status).toBe(302);
+  const confLoc = decodeURIComponent(conf.headers.get('location') ?? '');
+  expect(confLoc).toContain('Fixture guardado');
 
   // Delegado habilitado + código (viene en el redirect del form de código).
   await admin.post(`/admin/equipos/${teamId}/delegado`, { delegate_name: 'Diego E2E', delegate_enabled: 'on' });
@@ -489,11 +495,13 @@ describe.skipIf(!has)('e2e: generar fixture no pisa los jugados', () => {
     await admin.loginAdmin(ADMIN_PASSWORD);
 
     // La ruta rechaza: el 3-1 aprobado en el flujo delegado no se borra.
-    const gen = await admin.post('/admin/fixture/generar', { tournament_id: tournamentId, mode: 'double' });
+    // Camino real de dos pasos: previsualizar (crea borrador) y confirmar.
+    const prev = await admin.post('/admin/fixture/previsualizar', { tournament_id: tournamentId, mode: 'double' });
+    expect(prev.status).toBe(302);
+    const gen = await admin.post('/admin/fixture/confirmar', { tournament_id: tournamentId, t: 'copa-e2e' });
     expect(gen.status).toBe(302);
     const loc = decodeURIComponent(gen.headers.get('location') ?? '');
     expect(loc).toContain('partido(s) jugado');
-    expect(loc).toContain('Regenerar cruce');
 
     // La página explica el bloqueo y el botón queda deshabilitado.
     const page = await (await admin.get('/admin/fixture')).text();
@@ -539,9 +547,11 @@ describe.skipIf(!has)('e2e: zonas manuales con canchas compartidas', () => {
     const zonasId = /name="tournament_id" value="(\d+)"/.exec(fxPage)?.[1] ?? '';
     expect(zonasId, 'el torneo de zonas debe existir').toBeTruthy();
 
-    // Generar: con zonas activas no hay cruces entre zonas y la zona queda en el partido.
-    const gen = await admin.post('/admin/fixture/generar', { tournament_id: zonasId, mode: 'single' });
-    const genLoc = decodeURIComponent(gen.headers.get('location') ?? '');
+    // Generar (2 pasos): con zonas activas no hay cruces entre zonas y la zona queda en el partido.
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: zonasId, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: zonasId, t: 'copa-zonas-e2e' });
+    const genLoc = decodeURIComponent(conf.headers.get('location') ?? '');
     expect(genLoc).not.toContain('err=');
     const fixtureHtml = await (await admin.get('/admin/fixture?t=copa-zonas-e2e')).text();
     expect(fixtureHtml).toContain('Zona E2E A');

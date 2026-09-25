@@ -47,6 +47,7 @@ import {
   resolveAdvancements,
 } from '../lib/playoff.ts';
 import { buildMakeUpPlan, postponedMatches, overflowOfRound, pickDeferred, splitOverflowByZone } from '../lib/oversub.ts';
+import { planFixture, planSummary } from '../lib/planifier.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
@@ -382,6 +383,186 @@ adminRoutes.get('/fixture', async (c) => {
   return c.html(await admin.fixtureAdminPage(c.env.DB, c.req.query('t'), c.req.query('msg'), c.req.query('err')));
 });
 
+/**
+ * Paso 1 del nuevo Generar: arma el plan completo (zona + cruces en la misma
+ * bolsa, días únicos, un partido por equipo por día) y lo guarda como
+ * borrador. NO toca el fixture: solo redirige a la vista previa.
+ */
+adminRoutes.post('/fixture/previsualizar', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  const mode = String(f['mode'] ?? 'single') === 'double' ? 'double' : 'single';
+  if (!Number.isFinite(tournamentId)) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const tRow = await c.env.DB
+    .prepare('SELECT slug, config, status FROM tournaments WHERE id = ?1')
+    .bind(tournamentId)
+    .first<{ slug: string; config: string; status: string }>();
+  if (!tRow) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(tRow.slug)}`;
+  if (tRow.status === 'finished') {
+    return c.redirect(dest + '&err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.'));
+  }
+
+  // Config completa del torneo: equipos, zonas, cruces y canchas/horarios.
+  const teams = await c.env.DB
+    .prepare('SELECT id, name FROM teams WHERE active = 1 ORDER BY id')
+    .all<{ id: number; name: string }>();
+  const ids = (teams.results ?? []).map((r) => r.id);
+  if (ids.length < 2) {
+    return c.redirect(dest + '&err=' + encodeURIComponent('Necesitás al menos 2 equipos activos'));
+  }
+  const configJson = tRow.config ?? '{}';
+  const schedule = scheduleOf(configJson);
+
+  let plan;
+  try {
+    plan = planFixture({ teamIds: ids, configJson, mode, schedule });
+  } catch (e) {
+    const text = e instanceof Error ? e.message : 'error desconocido';
+    return c.redirect(dest + '&err=' + encodeURIComponent(`No se pudo armar el plan: ${text}`));
+  }
+  const resumen = planSummary(plan, ids);
+  const crossoverCount = resumen.cruces;
+  const capacity = scheduleCapacity(schedule);
+  const summaryText =
+    `${resumen.total} partido(s) → ${resumen.rounds} fecha(s) · máx ${resumen.maxPerDay}/día (capacidad ${capacity}) · ` +
+    `0 postergados · fechas libres entre ${resumen.libresMin} y ${resumen.libresMax} por equipo` +
+    (crossoverCount > 0 ? ` · ${crossoverCount} de cruce incluidos en la bolsa` : '');
+
+  // Borrador: uno por torneo (reemplaza al anterior).
+  await c.env.DB
+    .prepare(
+      "INSERT INTO fixture_drafts (tournament_id, summary, payload, created_at) VALUES (?1, ?2, ?3, datetime('now')) " +
+        'ON CONFLICT (tournament_id) DO UPDATE SET summary = ?2, payload = ?3, created_at = datetime(\'now\')'
+    )
+    .bind(tournamentId, summaryText, JSON.stringify(plan.matches))
+    .run();
+
+  return c.redirect(`/admin/fixture/vista-previa?t=${encodeURIComponent(tRow.slug)}`);
+});
+
+/** Muestra el borrador guardado. */
+adminRoutes.get('/fixture/vista-previa', async (c) => {
+  const slug = c.req.query('t');
+  const t = await resolveTournament(c.env.DB, slug || undefined);
+  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const draft = await c.env.DB
+    .prepare('SELECT summary, payload, created_at FROM fixture_drafts WHERE tournament_id = ?1')
+    .bind(t.id)
+    .first<{ summary: string; payload: string; created_at: string }>();
+  if (!draft) return c.redirect(`/admin/fixture?t=${encodeURIComponent(t.slug)}&err=` + encodeURIComponent('No hay vista previa: prepará una primero'));
+  return c.html(
+    admin.fixturePreviewPage({
+      tournamentId: t.id,
+      tournamentSlug: t.slug,
+      tournamentName: t.name,
+      summary: draft.summary,
+      payload: draft.payload,
+      createdAt: draft.created_at,
+    })
+  );
+});
+
+/**
+ * Paso 2: aplica el borrador EXACTAMENTE como se vio. Mismas guardias que el
+ * Generar viejo (sin jugados, torneo activo). Borrar el fixture borra sus
+ * events/submissions por cascada; los partidos de cruce viejos también
+ * desaparecen (los cruces nuevos ya vienen en el plan).
+ */
+adminRoutes.post('/fixture/confirmar', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  const slug = typeof f['t'] === 'string' ? f['t'] : '';
+  if (!Number.isFinite(tournamentId)) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const tRow = await c.env.DB
+    .prepare('SELECT slug, status FROM tournaments WHERE id = ?1')
+    .bind(tournamentId)
+    .first<{ slug: string; status: string }>();
+  if (!tRow) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(tRow.slug)}`;
+  if (tRow.status === 'finished') {
+    return c.redirect(dest + '&err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.'));
+  }
+
+  // Guardia crítica primero: con partidos jugados no se confirma nada, haya
+  // borrador o no (es la protección contra pisar resultados).
+  const rows = await c.env.DB.prepare('SELECT status FROM matches WHERE tournament_id = ?1').bind(tournamentId).all<{ status: string }>();
+  const jugados = playedCount(rows.results ?? []);
+  if (jugados > 0) {
+    return c.redirect(
+      dest +
+        '&err=' +
+        encodeURIComponent(
+          `El torneo ya tiene ${jugados} partido(s) jugado(s): confirmar los borraría. Usá “Regenerar cruce” para rearmar solo los pendientes.`
+        )
+    );
+  }
+
+  const draft = await c.env.DB
+    .prepare('SELECT payload FROM fixture_drafts WHERE tournament_id = ?1')
+    .bind(tournamentId)
+    .first<{ payload: string }>();
+  if (!draft) {
+    return c.redirect(dest + '&err=' + encodeURIComponent('No hay vista previa para confirmar: prepará una primero'));
+  }
+  let plan: { home: number; away: number; zone: string; kind: string; day: string; venue: string; kickoff: string; fixtureRound: number }[] = [];
+  try {
+    const parsed: unknown = JSON.parse(draft.payload);
+    if (Array.isArray(parsed)) plan = parsed as typeof plan;
+  } catch {
+    plan = [];
+  }
+  if (plan.length === 0) {
+    return c.redirect(dest + '&err=' + encodeURIComponent('El borrador está vacío: prepará la vista previa de nuevo'));
+  }
+
+  const stmts: D1PreparedStatement[] = [];
+  stmts.push(
+    c.env.DB.prepare('DELETE FROM events WHERE match_id IN (SELECT id FROM matches WHERE tournament_id = ?1)').bind(tournamentId)
+  );
+  stmts.push(c.env.DB.prepare('DELETE FROM matches WHERE tournament_id = ?1').bind(tournamentId));
+  for (const m of plan) {
+    stmts.push(
+      c.env.DB
+        .prepare(
+          'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status, played_on, kickoff_time, venue) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
+        )
+        .bind(
+          tournamentId,
+          m.fixtureRound,
+          m.zone,
+          m.home,
+          m.away,
+          'scheduled',
+          m.day,
+          m.kickoff,
+          m.venue
+        )
+    );
+  }
+  // La config de cruces previa queda: los cruces nuevos ya viven en el plan
+  // como partidos comunes (kind 'cruce') y las fechas registradas siguen
+  // sirviendo para el filtrado de la tabla y el playoff.
+  await c.env.DB.batch(stmts);
+  await c.env.DB.prepare('DELETE FROM fixture_drafts WHERE tournament_id = ?1').bind(tournamentId).run();
+  return c.redirect(dest + '&msg=' + encodeURIComponent(`Fixture guardado: ${plan.length} partido(s) según la vista previa`));
+});
+
+/** Tira el borrador sin tocar nada. */
+adminRoutes.post('/fixture/descartar', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  if (Number.isFinite(tournamentId)) {
+    await c.env.DB.prepare('DELETE FROM fixture_drafts WHERE tournament_id = ?1').bind(tournamentId).run();
+  }
+  const slug = typeof f['t'] === 'string' ? f['t'] : '';
+  return c.redirect(`/admin/fixture${slug ? `?t=${encodeURIComponent(slug)}` : ''}&msg=` + encodeURIComponent('Vista previa descartada: el fixture no cambió'));
+});
+
 adminRoutes.get('/fixture/nuevo', async (c) => {
   return c.html(await admin.matchFormPage(c.env.DB, c.req.query('t')));
 });
@@ -414,153 +595,6 @@ adminRoutes.post('/fixture/nuevo', async (c) => {
   return c.redirect('/admin/fixture?msg=' + encodeURIComponent('Partido creado'));
 });
 
-adminRoutes.post('/fixture/generar', async (c) => {
-  const f = await c.req.parseBody();
-  const tournamentId = Number(f['tournament_id']);
-  const mode = String(f['mode'] ?? 'single');
-
-  // Guardia: no pisar resultados. Generar borra TODO el fixture del torneo.
-  const tRow = await c.env.DB
-    .prepare('SELECT config, status FROM tournaments WHERE id = ?1')
-    .bind(tournamentId)
-    .first<{ config: string; status: string }>();
-  if (!tRow) {
-    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
-  }
-  const rows = await c.env.DB.prepare('SELECT status FROM matches WHERE tournament_id = ?1').bind(tournamentId).all<{ status: string }>();
-  const jugados = playedCount(rows.results ?? []);
-  if (jugados > 0) {
-    return c.redirect(
-      '/admin/fixture?err=' +
-        encodeURIComponent(
-          `El torneo ya tiene ${jugados} partido(s) jugado(s): “Generar” los borraría. Usá “Regenerar cruce” para rearmar solo los pendientes.`
-        )
-    );
-  }
-  if (tRow.status === 'finished') {
-    return c.redirect(
-      '/admin/fixture?err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.')
-    );
-  }
-
-  const teams = await c.env.DB.prepare('SELECT id FROM teams WHERE active = 1 ORDER BY id').all<{ id: number }>();
-  const ids = (teams.results ?? []).map((r) => r.id);
-  if (ids.length < 2) {
-    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Necesitás al menos 2 equipos activos'));
-  }
-  // Canchas y horarios del torneo: cada partido de una jornada toma su slot
-  // (primera hora en todas las canchas, después la siguiente hora, y así).
-  const schedule = scheduleOf(tRow.config ?? '{}');
-  const zones = zonesOf(tRow.config ?? '{}');
-  const activeTeams = await c.env.DB
-    .prepare('SELECT id, name, active FROM teams WHERE active = 1 ORDER BY id')
-    .all<{ id: number; name: string; active: number }>();
-  const activeList = activeTeams.results ?? [];
-
-  // Fixture por zonas o círculo completo. Con zonas, cada zona arma su
-  // calendario interno y las fechas de todas las zonas comparten las canchas
-  // intercaladas en una sola lista.
-  const stmts: D1PreparedStatement[] = [];
-  stmts.push(c.env.DB.prepare("DELETE FROM events WHERE match_id IN (SELECT id FROM matches WHERE tournament_id = ?1)").bind(tournamentId));
-  stmts.push(c.env.DB.prepare('DELETE FROM matches WHERE tournament_id = ?1').bind(tournamentId));
-
-  let totalRounds = 0;
-  let deferredTotal = 0;
-  const capacity = scheduleCapacity(schedule);
-  // Carga acumulada de postergaciones por equipo: el reparto de excedentes
-  // elige siempre a los que menos esperaron (equilibrado, con azar en empates).
-  const postponedLoad = new Map<number, number>();
-  if (zones.enabled && zones.zones.length >= 2) {
-    const problems = validateZones(zones, activeList);
-    const err = problems.find((p) => p.kind === 'error');
-    if (err) return c.redirect('/admin/fixture?err=' + encodeURIComponent(err.text));
-    const zf = buildZonedFixture(zones);
-    totalRounds = zf.rounds;
-    const zoneNames = zones.zones.map((z) => z.name);
-    for (const [ri, rawList] of zf.byRound.entries()) {
-      // Mezclar los partidos de la fecha: buildZonedFixture lista primero toda
-      // la Zona A y después la B, y así los primeros turnos (10:00, 11:00…)
-      // siempre eran de la A. Al azar, las dos zonas se reparten los horarios.
-      const list = shuffled(rawList, Math.random);
-      const day = plannedRoundDate(schedule, ri + 1);
-      // Si los partidos de la fecha superan los slots, los excedentes quedan
-      // POSTERGADOS (sin cancha, sin día) y esos equipos libran la fecha.
-      // Cuántos por zona: mitad y mitad (el extra rota de zona en fechas
-      // impares); quiénes: los equipos que menos veces postergaron, al azar.
-      const overflow = overflowOfRound(list.length, capacity);
-      deferredTotal += overflow;
-      const zoneCounts = zoneNames.map((zn) => list.filter((m) => m.zone === zn).length);
-      const quotas = splitOverflowByZone(zoneCounts, overflow, ri);
-      const deferredIdx = new Set<number>();
-      zoneNames.forEach((zn, zi) => {
-        const inZone = list.map((m, i) => ({ m, i })).filter((x) => x.m.zone === zn);
-        const idxInZone = pickDeferred(
-          inZone.map((x) => ({ home: x.m.home, away: x.m.away })),
-          quotas[zi] ?? 0,
-          postponedLoad
-        );
-        for (const local of idxInZone) deferredIdx.add(inZone[local]!.i);
-      });
-      const withSlots = list.filter((_, i) => !deferredIdx.has(i));
-      const deferred = list.filter((_, i) => deferredIdx.has(i));
-      interleaveSlots(withSlots, schedule);
-      for (const m of withSlots) {
-        stmts.push(
-          c.env.DB.prepare(
-            'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
-          ).bind(tournamentId, m.round, m.zone, m.home, m.away, 'scheduled', m.venue, m.kickoff_time, day)
-        );
-      }
-      for (const m of deferred) {
-        stmts.push(
-          c.env.DB.prepare(
-            'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
-          ).bind(tournamentId, m.round, m.zone, m.home, m.away, 'postponed')
-        );
-      }
-    }
-  } else {
-    const fixture =
-      mode === 'double' ? admin.generateDoubleRoundRobin(ids) : admin.generateRoundRobin(ids);
-    totalRounds = fixture.rounds.length;
-    let round = 1;
-    for (const pairs of fixture.rounds) {
-      const slots = roundSlots(pairs.length, schedule);
-      // Día de la jornada: avanza el calendario desde la fecha de inicio del torneo.
-      const day = plannedRoundDate(schedule, round);
-      // Mismo criterio sin zonas: excedentes postergados, elegidos equilibrado.
-      const overflow = overflowOfRound(pairs.length, capacity);
-      deferredTotal += overflow;
-      const deferredIdx = pickDeferred(
-        pairs.map((p) => ({ home: p.home, away: p.away })),
-        overflow,
-        postponedLoad
-      );
-      for (const [i, p] of pairs.entries()) {
-        const slot = slots[i];
-        const isDeferred = deferredIdx.has(i);
-        stmts.push(
-          c.env.DB.prepare(
-            'INSERT INTO matches (tournament_id, round, home_team_id, away_team_id, status, venue, kickoff_time, played_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
-          ).bind(
-            tournamentId,
-            round,
-            p.home,
-            p.away,
-            isDeferred ? 'postponed' : 'scheduled',
-            isDeferred ? '' : (slot?.venue ?? ''),
-            isDeferred ? '' : (slot?.kickoff ?? ''),
-            isDeferred ? '' : day
-          )
-        );
-      }
-      round += 1;
-    }
-  }
-  await c.env.DB.batch(stmts);
-  const postergado = deferredTotal > 0 ? ` · ${deferredTotal} partido(s) postergado(s) sin cancha (los jugás en una fecha de reposición)` : '';
-  return c.redirect('/admin/fixture?msg=' + encodeURIComponent(`Fixture generado: ${totalRounds} fechas${postergado}`));
-});
 
 /**
  * Regenera los cruces a mitad de torneo (equipo nuevo o participante que

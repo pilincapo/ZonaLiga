@@ -56,6 +56,7 @@ import { waLink } from '../lib/share.ts';
 import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
 import { crest } from './match.ts';
 import { layout, type NavItem } from './components.ts';
+import { planFixture, groupByFixtureRound, planSummary, type PlannedMatch } from '../lib/planifier.ts';
 
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Resumen', match: 'admin' },
@@ -911,7 +912,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
 ${flash('success', msg)}${flash('error', errMsg)}${blockNote}${gapsNote}
 ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, label: '+ Partido suelto' })}
 <section class="block"><div class="card"><div class="card-body">
-  <form method="post" action="/admin/fixture/generar" class="form-row">
+  <form method="post" action="/admin/fixture/previsualizar" class="form-row">
     <input type="hidden" name="tournament_id" value="${t.id}">
     <div class="field grow">
       <label>Generar fixture automático</label>
@@ -922,7 +923,7 @@ ${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, 
     </div>
     <div class="field" style="align-self:flex-end">
       <span style="display:flex;gap:8px">
-        <button class="btn btn-primary" type="submit" ${genBlocked ? 'disabled' : ''} onclick="return confirm('Esto reemplaza TODO el fixture (los partidos jugados se pierden). ¿Continuar?')">Generar</button>
+        <button class="btn btn-primary" type="submit" ${genBlocked ? 'disabled' : ''}>Preparar vista previa</button>
         <button class="btn btn-ghost" type="submit" formaction="/admin/fixture/regenerar" onclick="return confirm('Se rearman SOLO los cruces pendientes: los partidos jugados y sus resultados quedan intactos. ¿Continuar?')">↻ Regenerar cruce</button>
       </span>
     </div>
@@ -1333,6 +1334,77 @@ ${pageHead('Suspensiones')}
   <tbody>${rows.join('') || '<tr><td colspan="5" class="empty-note">Sin suspensiones 🎉</td></tr>'}</tbody>
 </table></div></div></section>`;
   return adminLayout({ title: 'Suspensiones', active: 'suspensiones', body });
+}
+
+/* ============================== VISTA PREVIA DEL FIXTURE ============================== */
+
+const KIND_LABEL: Record<PlannedMatch['kind'], string> = {
+  zona: '',
+  global: '',
+  cruce: 'Cruce',
+};
+
+/**
+ * Página de vista previa: muestra el borrador guardado (día, cancha y hora
+ * por partido) y los botones Confirmar / Descartar. Nada se toca hasta que
+ * el admin confirma.
+ */
+export function fixturePreviewPage(opts: {
+  tournamentId: number;
+  tournamentSlug: string;
+  tournamentName: string;
+  summary: string;
+  payload: string;
+  createdAt: string;
+}): string {
+  let plan: PlannedMatch[] = [];
+  try {
+    const parsed: unknown = JSON.parse(opts.payload);
+    if (Array.isArray(parsed)) plan = parsed as PlannedMatch[];
+  } catch {
+    plan = [];
+  }
+  const porFecha = groupByFixtureRound(plan);
+  const fechas = [...porFecha.keys()].sort((a, b) => a - b);
+  const sections = fechas
+    .map((round) => {
+      const list = porFecha.get(round)!;
+      const day = list[0]?.day ?? '';
+      const rows = list
+        .map(
+          (m) =>
+            `<tr><td>${esc(KIND_LABEL[m.kind] ? KIND_LABEL[m.kind] + ' · ' : '')}${esc(m.zone || '')}</td><td>${esc(String(m.home))} <span class="faint">vs</span> ${esc(String(m.away))}</td><td>${esc(m.venue || '')}</td><td>${esc(m.kickoff || '')}</td></tr>`
+        )
+        .join('');
+      return `<h3 class="zone-title">Fecha ${round}${day ? ` — ${esc(formatDateShort(day))}` : ''} <span class="faint small">(${list.length} partido(s))</span></h3>
+<div class="card"><div class="table-wrap"><table class="data">
+  <thead><tr><th>Tipo</th><th>Equipos</th><th>Cancha</th><th>Hora</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table></div></div>`;
+    })
+    .join('');
+  const cuando = opts.createdAt ? 'generada ' + esc(opts.createdAt) : 'recién';
+  const body = `
+${flash('success', 'Vista previa lista (' + cuando + '). Nada se guardó todavía: revisá y confirmá abajo.')}
+${pageHead(`Vista previa — ${opts.tournamentName}`, { href: `/admin/fixture?t=${escUrl(opts.tournamentSlug)}`, label: '← Volver al fixture' })}
+<section class="block"><div class="card"><div class="card-body">
+  <strong>${esc(opts.summary)}</strong>
+  <p class="hint">Revisá las fechas de abajo. Al confirmar se reemplaza TODO el fixture actual (solo se puede si no hay partidos jugados). Al descartar no cambia nada.</p>
+  <span style="display:flex;gap:8px">
+    <form method="post" action="/admin/fixture/confirmar" style="display:inline">
+      <input type="hidden" name="tournament_id" value="${opts.tournamentId}">
+      <input type="hidden" name="t" value="${escUrl(opts.tournamentSlug)}">
+      <button class="btn btn-primary" type="submit" onclick="return confirm('Se reemplaza TODO el fixture actual por la vista previa. ¿Continuar?')">✓ Confirmar y guardar fixture</button>
+    </form>
+    <form method="post" action="/admin/fixture/descartar" style="display:inline">
+      <input type="hidden" name="tournament_id" value="${opts.tournamentId}">
+      <input type="hidden" name="t" value="${escUrl(opts.tournamentSlug)}">
+      <button class="btn btn-ghost" type="submit">✕ Descartar</button>
+    </form>
+  </span>
+</div></div></section>
+${sections || '<section class="block"><div class="card"><div class="card-body">El borrador está vacío o ilegible: volvé a preparar la vista previa.</div></div></section>'}`;
+  return adminLayout({ title: 'Vista previa del fixture', active: 'fixture', body });
 }
 
 /* Exportados para handlers */

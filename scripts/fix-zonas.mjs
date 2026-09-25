@@ -136,10 +136,16 @@ if (upd.status !== 302) throw new Error('guardar zonas: ' + upd.status);
 console.log(`✓ zonas reasignadas: ${perZone} en A y ${active.length - perZone} en B`);
 
 // ── fixture por zonas ───────────────────────────────────────────────────────
-const gen = await req('/admin/fixture/generar', { method: 'POST', body: form({ tournament_id: chosen.id, mode: 'single' }) });
-const loc = decodeURIComponent(gen.headers.get('location') ?? '');
+const gen = await req('/admin/fixture/previsualizar', { method: 'POST', body: form({ tournament_id: chosen.id, mode: 'single' }) });
+const prevLoc = decodeURIComponent(gen.headers.get('location') ?? '');
+if (!prevLoc.includes('vista-previa')) {
+  console.error('✗ el panel rechazó la vista previa:', prevLoc.split('err=')[1] ?? prevLoc);
+  process.exit(1);
+}
+const conf = await req('/admin/fixture/confirmar', { method: 'POST', body: form({ tournament_id: chosen.id }) });
+const loc = decodeURIComponent(conf.headers.get('location') ?? '');
 if (loc.includes('err=')) {
-  console.error('✗ el panel rechazó la generación:', loc.split('err=')[1]);
+  console.error('✗ el panel rechazó la confirmación:', loc.split('err=')[1]);
   process.exit(1);
 }
 console.log('✓ fixture:', loc.includes('msg=') ? loc.split('msg=')[1] : loc);

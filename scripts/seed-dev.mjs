@@ -147,12 +147,22 @@ ourTeams.forEach((id, i) => body.set(`zone_of_${id}`, String(zoneOrder[i])));
 const upd = await req(`/admin/torneos/${tournamentId}`, { method: 'POST', body });
 if (upd.status !== 302) throw new Error('zonas: ' + upd.status);
 
-const gen = await req('/admin/fixture/generar', {
+// Nuevo flujo: previsualizar (borrador) + confirmar (aplica).
+const gen = await req('/admin/fixture/previsualizar', {
   method: 'POST',
   body: form({ tournament_id: tournamentId, mode: 'single' }),
 });
 const genLoc = decodeURIComponent(gen.headers.get('location') ?? '');
-console.log('✓ fixture:', genLoc.split('msg=')[1] ?? genLoc);
+if (!genLoc.includes('vista-previa')) {
+  console.error('✗ la vista previa falló:', genLoc.split('err=')[1] ?? genLoc);
+  process.exit(1);
+}
+const conf = await req('/admin/fixture/confirmar', {
+  method: 'POST',
+  body: form({ tournament_id: tournamentId }),
+});
+const confLoc = decodeURIComponent(conf.headers.get('location') ?? '');
+console.log('✓ fixture:', confLoc.split('msg=')[1] ?? confLoc);
 
 console.log('\n── RESUMEN ──');
 console.log(`Torneo: ${TOURNAMENT_NAME} (id ${tournamentId})`);

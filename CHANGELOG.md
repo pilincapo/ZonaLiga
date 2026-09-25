@@ -15,6 +15,19 @@
 
 ---
 
+## [0.2.28] — 2026-09-25 — Fixture con vista previa y confirmación (generador nuevo)
+
+### Nuevo
+- Generar fixture pasa a dos pasos: **Preparar vista previa** arma TODO el plan (no guarda nada) y muestra fecha por fecha con día, cancha y hora; recién con **Confirmar** se reemplaza el fixture. **Descartar** no toca nada.
+- El planificador lee toda la configuración del torneo: zonas, canchas × horarios, fecha de inicio y fechas de cruce. Si hay cruces configurados, sus partidos entran a la misma bolsa que los de zona y caen mezclados en cualquier fecha.
+- Cero postergados por falta de canchas: si un día no alcanzan los horarios/canchas, el resto de la bolsa sigue en el día siguiente (el torneo suma las fechas que necesite).
+- Reglas duras, verificadas antes de mostrar y de guardar: cada fecha del fixture es un único día, un equipo nunca juega dos veces el mismo día y los horarios no se fuerzan (pueden quedar huecos para balancear).
+
+### Mejora
+- La vista previa muestra un resumen (partidos, fechas, tope por día, rango de fechas libres y cuántos cruces entraron) y guarda el borrador en la base: lo que ves es exactamente lo que se confirma.
+
+---
+
 ## [0.2.27] — 2026-09-25 — Compartir posiciones y reposición con destino elegido
 
 ### Nuevo
