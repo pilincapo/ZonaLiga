@@ -53,8 +53,12 @@ describe('tema claro/oscuro', () => {
     for (const token of ['--bg:', '--surface:', '--border:', '--text:', '--accent:']) {
       expect(dark).toContain(token);
     }
-    // La paleta oscura original.
-    expect(dark).toContain('#0a0f14');
-    expect(dark).toContain('#e8eef4');
+    // La paleta oscura del dashboard: fondo casi negro, texto claro.
+    expect(dark).toContain('#0a0d12');
+    expect(dark).toContain('#eaf0f6');
+    // Acentos de estadística definidos en ambos temas.
+    for (const token of ['--st-green:', '--st-blue:', '--st-violet:', '--st-amber:']) {
+      expect(css).toContain(token);
+    }
   });
 });

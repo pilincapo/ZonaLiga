@@ -15,6 +15,15 @@
 
 ---
 
+## [0.2.47] — 2026-09-25 — Nuevo look claro y oscuro estilo dashboard
+
+### Mejora
+
+- Rediseño visual completo del sitio (público y panel) inspirado en un dashboard deportivo: tarjetas flotantes con esquinas más redondeadas y sombra suave en el tema claro, y superficies más profundas con verde más vivo en el oscuro.
+- Las tablas de posiciones estrenan chips de posición: 1° verde, 2° azul, 3° violeta, resto gris.
+- Nuevos colores de acento para estadísticas (verde, azul, violeta y naranja) listos para números y gráficos.
+- El héroe de la portada suma una franja diagonal verde decorativa, y las tarjetas de torneo tienen un fondo con degradado verde.
+
 ## [0.2.46] — 2026-09-25 — Nueva portada: lo del sábado primero
 
 ### Mejora

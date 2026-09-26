@@ -1,33 +1,45 @@
 /* ============================================================
-   ZonaLiga — Design system (claro deportivo, mobile-first)
-   Barra navy + acento verde + tarjetas blancas con sombra suave.
+   ZonaLiga — Design system (dashboard deportivo, mobile-first)
+   Verde protagonista + tarjetas flotantes con sombra suave y 4
+   acentos de estadística (verde/azul/violeta/naranja). Tema claro
+   y oscuro comparten exactamente los mismos nombres de token.
    ============================================================ */
 
 :root {
   /* Superficies */
-  --bg: #f3f6f9;
-  --bg-band: #f7fafc;
+  --bg: #eef2f7;
+  --bg-band: #f6f8fb;
   --surface: #ffffff;
-  --surface-2: #f7f9fc;
-  --surface-3: #eef3f7;
+  --surface-2: #f6f8fb;
+  --surface-3: #e9eef5;
 
-  /* Bordes */
-  --border: #e4eaf1;
-  --border-strong: #cfdae5;
+  /* Bordes (más tenues: las cards se separan por sombra, no por línea) */
+  --border: #e8edf4;
+  --border-strong: #d7dfe9;
 
   /* Texto */
-  --text: #0e1f30;
-  --muted: #5b6b7d;
-  --faint: #8494a6;
+  --text: #0f1d2d;
+  --muted: #5a6b7e;
+  --faint: #8797a8;
 
   /* Marca */
   --navy: #0d1b2a;
   --navy-2: #16293d;
-  --accent: #21c063;
+  --accent: #22c55e;
   --accent-strong: #16a34a;
   --accent-dark: #0f7a37;
-  --accent-soft: #e8f8ef;
-  --accent-ring: rgba(33, 192, 99, 0.25);
+  --accent-soft: #e7f8ef;
+  --accent-ring: rgba(34, 197, 94, 0.22);
+
+  /* Acentos de estadística (tarjetas de números, gráficos, chips) */
+  --st-green: #22c55e;
+  --st-green-soft: #e7f8ef;
+  --st-blue: #3b82f6;
+  --st-blue-soft: #eaf2fe;
+  --st-violet: #8b5cf6;
+  --st-violet-soft: #f1eafe;
+  --st-amber: #f59e0b;
+  --st-amber-soft: #fdf3e0;
 
   /* Estados */
   --danger: #e5484d;
@@ -40,13 +52,13 @@
   --info-soft: #eaf1fe;
   --info-text: #1d4ed8;
 
-  /* Formas */
-  --radius: 10px;
-  --radius-sm: 8px;
-  --radius-xs: 7px;
-  --shadow: none;
-  --shadow-sm: none;
-  --shadow-lg: 0 8px 24px -12px rgba(14, 31, 48, 0.28);
+  /* Formas: radio mayor y sombra flotante, como el dashboard */
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
+  --shadow: 0 1px 2px rgba(15, 29, 45, 0.05), 0 8px 24px -18px rgba(15, 29, 45, 0.25);
+  --shadow-sm: 0 1px 2px rgba(15, 29, 45, 0.06);
+  --shadow-lg: 0 12px 32px -14px rgba(15, 29, 45, 0.3);
 
   --font-head: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-body: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -165,7 +177,36 @@ img { max-width: 100%; }
   border-bottom: 1px solid var(--border);
   margin: -28px -16px 0;
   padding: 20px 0 22px;
+  position: relative;
+  overflow: hidden;
 }
+/* Franja diagonal verde decorativa (tipo banner de cancha): pura CSS,
+   sin imágenes. Se apaga en modo imprimir o si prefiere menos movimiento. */
+.hero-band::before {
+  content: '';
+  position: absolute;
+  top: -60%;
+  right: -8%;
+  width: 46%;
+  height: 220%;
+  background: linear-gradient(115deg, transparent 0%, var(--accent-soft) 38%, var(--accent) 100%);
+  opacity: 0.16;
+  transform: skewX(-18deg);
+  pointer-events: none;
+}
+.hero-band::after {
+  content: '';
+  position: absolute;
+  top: -60%;
+  right: 4%;
+  width: 10%;
+  height: 220%;
+  background: var(--accent);
+  opacity: 0.2;
+  transform: skewX(-18deg);
+  pointer-events: none;
+}
+.hero-band .hero-main { position: relative; }
 .hero-grid { max-width: 1040px; margin: 0 auto; padding: 0 16px; display: grid; gap: 20px; }
 .hero-main { min-width: 0; }
 .hero-main h1 { font-size: clamp(1.7rem, 5.8vw, 2.5rem); margin: 4px 0 6px; }
@@ -257,7 +298,7 @@ section.block > .card-head h2 a:hover { color: var(--accent-strong); }
   position: relative;
   aspect-ratio: 21 / 9;
   display: grid; place-items: center;
-  background: #123b2e;
+  background: linear-gradient(135deg, #0d2e23 0%, #16a34a 130%);
   overflow: hidden;
 }
 .tcard-img .tcard-crest {
@@ -384,7 +425,20 @@ td.r { text-align: right; white-space: nowrap; }
 .standings .pos-num { font-size: 0.72rem; width: 24px; }
 
 .pos-num { color: var(--faint); font-weight: 800; font-size: 0.8rem; width: 28px; }
-table.data tbody tr:nth-child(1) .pos-num { color: var(--accent-strong); }
+
+/* Chips de posición estilo dashboard: 1° verde, 2° azul, 3° violeta,
+   resto en gris. Solo aplica a las tablas de posiciones. */
+.standings .pos-num {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.standings tbody tr:nth-child(1) .pos-num { background: var(--st-green-soft); color: var(--st-green); }
+.standings tbody tr:nth-child(2) .pos-num { background: var(--st-blue-soft); color: var(--st-blue); }
+.standings tbody tr:nth-child(3) .pos-num { background: var(--st-violet-soft); color: var(--st-violet); }
 
 .team-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .team-cell .tname { overflow: hidden; text-overflow: ellipsis; }
@@ -502,7 +556,7 @@ a.score:hover { color: var(--accent-strong); text-decoration: none; }
   text-transform: uppercase;
 }
 
-.badge.green { background: var(--accent-soft); color: var(--accent-strong); border: 1px solid #cdeedb; }
+.badge.green { background: var(--accent-soft); color: var(--accent-strong); border: 1px solid rgba(34, 197, 94, 0.28); }
 .badge.red { background: var(--danger-soft); color: var(--danger-text); border: 1px solid #f7cfd0; }
 .badge.amber { background: var(--warning-soft); color: var(--warning-text); border: 1px solid #f6e0b8; }
 .badge.ghost { background: var(--surface-3); color: var(--muted); border: 1px solid var(--border); }
@@ -577,7 +631,7 @@ select {
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   font-weight: 700;
   font-size: 0.9rem;
@@ -590,8 +644,8 @@ select {
 
 .btn:active { transform: translateY(1px); }
 
-.btn-primary { background: var(--accent-strong); color: #fff !important; }
-.btn-primary:hover { filter: brightness(0.9); text-decoration: none; }
+.btn-primary { background: var(--accent-strong); color: #fff !important; box-shadow: var(--shadow-sm); }
+.btn-primary:hover { filter: brightness(0.92); text-decoration: none; }
 
 .btn-ghost { background: var(--surface); border-color: var(--border-strong); color: var(--text) !important; }
 .btn-ghost:hover { background: var(--surface-2); text-decoration: none; }
@@ -977,20 +1031,20 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
 html[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #0a0f14;
-  --bg-band: #0e141b;
-  --surface: #10161d;
-  --surface-2: #161f29;
-  --surface-3: #1b2531;
+  --bg: #0a0d12;
+  --bg-band: #0d1117;
+  --surface: #131a22;
+  --surface-2: #1a2330;
+  --surface-3: #202b3a;
 
-  --border: #223041;
-  --border-strong: #31465e;
+  --border: #243244;
+  --border-strong: #3a4f68;
 
-  --text: #e8eef4;
-  --muted: #8fa3b8;
-  --faint: #5c7189;
+  --text: #eaf0f6;
+  --muted: #93a7bc;
+  --faint: #63788f;
 
-  --navy: #0d1b2a;
+  --navy: #0d1520;
   --navy-2: #14202c;
 
   --accent: #22c55e;
@@ -998,6 +1052,16 @@ html[data-theme='dark'] {
   --accent-dark: #16a34a;
   --accent-soft: rgba(34, 197, 94, 0.14);
   --accent-ring: rgba(34, 197, 94, 0.28);
+
+  /* Acentos de estadística: más vivos sobre fondo oscuro */
+  --st-green: #2ee07a;
+  --st-green-soft: rgba(46, 224, 122, 0.13);
+  --st-blue: #60a5fa;
+  --st-blue-soft: rgba(96, 165, 250, 0.14);
+  --st-violet: #a78bfa;
+  --st-violet-soft: rgba(167, 139, 250, 0.14);
+  --st-amber: #fbbf24;
+  --st-amber-soft: rgba(251, 191, 36, 0.14);
 
   --danger: #ef4444;
   --danger-soft: rgba(239, 68, 68, 0.14);
@@ -1009,9 +1073,9 @@ html[data-theme='dark'] {
   --info-soft: rgba(59, 130, 246, 0.16);
   --info-text: #93c5fd;
 
-  --shadow: none;
-  --shadow-sm: none;
-  --shadow-lg: 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 28px -20px rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 14px 36px -16px rgba(0, 0, 0, 0.65);
 }
 
 html[data-theme='dark'] .site-header {
@@ -1347,7 +1411,15 @@ table.data tr.tap-selected .drag-handle { color: var(--accent); }
   border-bottom: 1px solid var(--border); font-size: 0.9rem;
 }
 .zone-mini li:last-child { border-bottom: none; }
-.zone-mini .pos-num { flex: none; width: 22px; text-align: center; }
+.zone-mini .pos-num {
+  flex: none; width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; font-size: 0.72rem;
+  background: var(--surface-3); color: var(--muted);
+}
+.zone-mini li:nth-child(1) .pos-num { background: var(--st-green-soft); color: var(--st-green); }
+.zone-mini li:nth-child(2) .pos-num { background: var(--st-blue-soft); color: var(--st-blue); }
+.zone-mini li:nth-child(3) .pos-num { background: var(--st-violet-soft); color: var(--st-violet); }
 .zone-mini li a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zone-mini .pts { margin-left: auto; font-weight: 800; }
 
