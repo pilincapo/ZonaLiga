@@ -377,6 +377,85 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
       });
     }
   });
+
+  it('panel de fechas: manijas de arrastre y un intercambio guardado persiste', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const page = await (await admin.get('/admin/fechas')).text();
+
+    // Toda fila de partido trae su manija de arrastre (⋮⋮).
+    const rows = [...page.matchAll(/<tr draggable="true" data-match="(\d+)">/g)];
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(page.match(/class="drag-handle"/g)?.length).toBe(rows.length);
+
+    // Valores de día/hora/cancha de una fila, venga select o input libre.
+    const parseRow = (html: string, id: string): { d: string; t: string; v: string } => {
+      const d = new RegExp(`name="d_${id}" value="([^"]*)"`).exec(html)?.[1] ?? '';
+      const t =
+        new RegExp(`<select name="t_${id}"[\\s\\S]*?<option value="([^"]*)" selected>`).exec(html)?.[1] ??
+        new RegExp(`name="t_${id}" value="([^"]*)"`).exec(html)?.[1] ??
+        '';
+      const v =
+        new RegExp(`<select name="v_${id}"[\\s\\S]*?<option value="([^"]*)" selected>`).exec(html)?.[1] ??
+        new RegExp(`name="v_${id}" value="([^"]*)"`).exec(html)?.[1] ??
+        '';
+      return { d, t, v };
+    };
+
+    // Busca una fecha con dos partidos de horario/cancha distintos (si fueran
+    // iguales, el intercambio no se podría verificar).
+    let round = 0;
+    let target: { id: string; d: string; t: string; v: string }[] = [];
+    for (let n = 1; n <= 6 && round === 0; n++) {
+      const start = page.indexOf(`<h3 class="zone-title">Fecha ${n}<`);
+      if (start === -1) continue;
+      const next = page.indexOf(`<h3 class="zone-title">Fecha ${n + 1}<`, start);
+      const block = page.slice(start, next === -1 ? undefined : next);
+      const parsed = [...block.matchAll(/<tr draggable="true" data-match="(\d+)">([\s\S]*?)<\/tr>/g)].map((m) => ({
+        id: m[1]!,
+        ...parseRow(page, m[1]!),
+      }));
+      if (parsed.length >= 2 && (parsed[0]!.t !== parsed[1]!.t || parsed[0]!.v !== parsed[1]!.v)) {
+        round = n;
+        target = parsed;
+      }
+    }
+    expect(round, 'debe haber una fecha con dos partidos distinguibles').toBeGreaterThan(0);
+    const ra = target[0]!;
+    const rb = target[1]!;
+
+    // El guardado es el mismo endpoint que alimenta el arrastre: se envían
+    // TODOS los partidos de la fecha (la ruta pisa con vacío lo que falte).
+    const body = (pairs: { id: string; d: string; t: string; v: string }[]): Record<string, string> => {
+      const out: Record<string, string> = { tournament_id: tournamentId, round: String(round) };
+      for (const p of pairs) {
+        out[`d_${p.id}`] = p.d;
+        out[`t_${p.id}`] = p.t;
+        out[`v_${p.id}`] = p.v;
+      }
+      return out;
+    };
+
+    // Intercambio: cada uno toma el horario y la cancha del otro.
+    const swapped = target.map((p) =>
+      p.id === ra.id ? { ...p, t: rb.t, v: rb.v } : p.id === rb.id ? { ...p, t: ra.t, v: ra.v } : p
+    );
+    expect((await admin.post('/admin/fechas/guardar', body(swapped))).status).toBe(302);
+
+    const after = await (await admin.get('/admin/fechas')).text();
+    expect(parseRow(after, ra.id).t).toBe(rb.t);
+    expect(parseRow(after, ra.id).v).toBe(rb.v);
+    expect(parseRow(after, rb.id).t).toBe(ra.t);
+    expect(parseRow(after, rb.id).v).toBe(ra.v);
+
+    // Restaurar el estado original: el intercambio es reversible y los otros
+    // tests no deben arrastrar este cambio.
+    expect((await admin.post('/admin/fechas/guardar', body(target))).status).toBe(302);
+    const restored = await (await admin.get('/admin/fechas')).text();
+    expect(parseRow(restored, ra.id).t).toBe(ra.t);
+    expect(parseRow(restored, rb.id).v).toBe(rb.v);
+  });
 });
 
 describe.skipIf(!has)('e2e: sesión delegado end-to-end', () => {

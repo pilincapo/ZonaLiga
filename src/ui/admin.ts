@@ -1239,7 +1239,7 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
       const rows = orderMatchesForDisplay(byRound.get(r) ?? [], { tournamentId: t.id, round: r })
         .map(
           (m) => `<tr draggable="true" data-match="${m.id}">
-      <td class="drag-cell"><span class="drag-handle" title="Arrastrar hasta otra fila de esta fecha para intercambiar horario y cancha">⋮⋮</span></td>
+      <td class="drag-cell"><span class="drag-handle" title="Arrastrá hasta otra fila de esta fecha para intercambiar horario y cancha (o tocá dos filas)">⋮⋮</span></td>
       <td>${esc(teamMap.get(m.home_team_id ?? -1)?.name ?? '—')} <span class="faint">vs</span> ${esc(teamMap.get(m.away_team_id ?? -1)?.name ?? '—')}</td>
       <td><input type="date" name="d_${m.id}" value="${esc(m.played_on || plannedRoundDate(schedule, r))}"></td>
       <td>${kickoffCell(m, schedule.kickoffs)}</td>
@@ -1265,10 +1265,13 @@ ${flash('success', msg)}${flash('error', errMsg)}
 ${pageHead('Días, horas y canchas')}
 ${tournaments.length > 1 ? `<form method="get" action="/admin/fechas"><select name="t" onchange="this.form.submit()">${tournaments.map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></form>` : ''}
 ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></div>'}
-<p class="hint">Arrastrá una fila (⋮⋮) y soltala sobre otra de la <strong>misma fecha</strong> para intercambiarles horario y cancha. Nada se guarda hasta apretar “Guardar fecha”. Si un equipo pidió otro horario, alcanza con arrastrar su partido sobre el que hoy ocupa ese horario.</p>
+<p class="hint">Arrastrá una fila (⋮⋮) y soltala sobre otra de la <strong>misma fecha</strong> —o tocá una fila y después otra— para intercambiarles horario y cancha. Funciona igual en la computadora y en el celular. Nada se guarda hasta apretar “Guardar fecha”. Si un equipo pidió otro horario, alcanza con arrastrar (o tocar) su partido sobre el que hoy ocupa ese horario.</p>
 <script>
   (function () {
-    var dragged = null;
+    var dragged = null;      // fila en arrastre (mouse o dedo)
+    var selected = null;     // fila elegida con el primer toque (fallback)
+    var lastDragEnd = 0;     // instante del fin de un arrastre táctil: anula el click sintético
+
     function field(row, prefix) {
       return row.querySelector('[name="' + prefix + row.getAttribute('data-match') + '"]');
     }
@@ -1284,13 +1287,47 @@ ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></d
         row.classList.add('swap-flash');
         setTimeout(function () { row.classList.remove('swap-flash'); }, 900);
       });
+      try { if (navigator.vibrate) navigator.vibrate(30); } catch (err) {}
     }
+    function sameForm(a, b) { return a.parentElement === b.parentElement; }
+
+    // ---------- Fallback por toques: tocar una fila y después otra ----------
+    function clearSelection() {
+      if (selected) selected.classList.remove('tap-selected');
+      selected = null;
+    }
+
+    // ---------- Arrastre táctil desde la manija ----------
+    function touchGhost(x, y) {
+      var g = document.getElementById('drag-ghost');
+      if (!g) {
+        g = document.createElement('div');
+        g.id = 'drag-ghost';
+        g.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;background:var(--surface,#fff);color:var(--text,#111);border:1px solid var(--border,#ccc);border-radius:8px;padding:4px 10px;font-size:0.8rem;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,0.25);opacity:0.9;';
+        document.body.appendChild(g);
+      }
+      g.textContent = '↕ intercambiando…';
+      g.style.left = x + 14 + 'px';
+      g.style.top = y + 14 + 'px';
+      g.style.display = 'block';
+    }
+    function ghostOff() {
+      var g = document.getElementById('drag-ghost');
+      if (g) g.style.display = 'none';
+    }
+    function rowUnder(x, y, except) {
+      var el = document.elementFromPoint(x, y);
+      var row = el ? el.closest('tr[data-match]') : null;
+      return row && row !== except ? row : null;
+    }
+
     var forms = document.querySelectorAll('form[action="/admin/fechas/guardar"]');
     for (var i = 0; i < forms.length; i++) {
       (function (form) {
         var rows = form.querySelectorAll('tbody tr[data-match]');
         for (var j = 0; j < rows.length; j++) {
           (function (row) {
+            // ----- Arrastre con mouse (igual que antes) -----
             row.addEventListener('dragstart', function (e) {
               dragged = row;
               row.classList.add('dragging');
@@ -1304,7 +1341,7 @@ ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></d
             });
             row.addEventListener('dragover', function (e) {
               // Solo filas de la misma tabla (misma fecha) aceptan el drop.
-              if (!dragged || dragged === row || dragged.parentElement !== row.parentElement) return;
+              if (!dragged || dragged === row || !sameForm(dragged, row)) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = 'move';
               row.classList.add('drop-target');
@@ -1313,7 +1350,80 @@ ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></d
             row.addEventListener('drop', function (e) {
               e.preventDefault();
               row.classList.remove('drop-target');
-              if (dragged && dragged !== row && dragged.parentElement === row.parentElement) applySwap(dragged, row);
+              if (dragged && dragged !== row && sameForm(dragged, row)) applySwap(dragged, row);
+            });
+
+            // ----- Arrastre con el dedo: solo arrancando desde la manija -----
+            // El resto de la fila queda libre para hacer scroll.
+            var handle = row.querySelector('.drag-handle');
+            if (handle) {
+              var t = null; // toque activo
+              handle.addEventListener('touchstart', function (e) {
+                t = e.changedTouches[0];
+                touched = false;
+              }, { passive: true });
+              handle.addEventListener('touchmove', function (e) {
+                if (!t) return;
+                var cur = e.changedTouches[0];
+                if (!dragged) {
+                  var dx = cur.clientX - t.clientX, dy = cur.clientY - t.clientY;
+                  if (dx * dx + dy * dy < 144) return; // umbral anti-toque accidental
+                  dragged = row;
+                  row.classList.add('dragging');
+                  clearSelection();
+                }
+                e.preventDefault(); // sin esto, la página scrollea en vez de arrastrar
+                touchGhost(cur.clientX, cur.clientY);
+                var over = rowUnder(cur.clientX, cur.clientY, row);
+                for (var k = 0; k < rows.length; k++) {
+                  rows[k].classList.toggle('drop-target', rows[k] === over);
+                }
+              }, { passive: false });
+              handle.addEventListener('touchend', function (e) {
+                var cur = e.changedTouches[0];
+                if (dragged === row) {
+                  var over = rowUnder(cur.clientX, cur.clientY, row);
+                  if (over && sameForm(row, over)) applySwap(row, over);
+                  row.classList.remove('dragging');
+                  for (var k = 0; k < rows.length; k++) rows[k].classList.remove('drop-target');
+                  ghostOff();
+                  dragged = null;
+                  t = null;
+                  lastDragEnd = Date.now(); // el click sintético posterior no debe seleccionar
+                }
+              });
+              handle.addEventListener('touchcancel', function () {
+                if (dragged === row) {
+                  row.classList.remove('dragging');
+                  for (var k = 0; k < rows.length; k++) rows[k].classList.remove('drop-target');
+                  ghostOff();
+                  dragged = null;
+                  t = null;
+                }
+              });
+            }
+
+            // ----- Selección por toques: primera fila marca, segunda intercambia -----
+            row.addEventListener('click', function (e) {
+              // Los clics que salen de controles reales no seleccionan.
+              if (e.target.closest('input, select, button, a')) return;
+              if (dragged) return; // arrastre en curso: no es un toque de selección
+              if (Date.now() - lastDragEnd < 600) return; // recién terminó un arrastre táctil
+              if (!selected) {
+                selected = row;
+                row.classList.add('tap-selected');
+                return;
+              }
+              if (selected === row) { clearSelection(); return; } // segundo toque en la misma: desmarca
+              if (!sameForm(selected, row)) { // otra fecha: cambia la selección
+                clearSelection();
+                selected = row;
+                row.classList.add('tap-selected');
+                return;
+              }
+              var a = selected;
+              clearSelection();
+              applySwap(a, row);
             });
           })(rows[j]);
         }

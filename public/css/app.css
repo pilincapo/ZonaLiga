@@ -1292,6 +1292,7 @@ html[data-theme='dark'] .theme-toggle .ico-moon { display: none; }
   letter-spacing: -1px;
   user-select: none;
   padding: 2px 4px;
+  touch-action: none; /* el dedo arranca el arrastre sin scrollear la página */
 }
 .drag-handle:hover { color: var(--text, inherit); }
 table.data tr[draggable="true"] td:first-child { cursor: grab; }
@@ -1304,3 +1305,13 @@ table.data tr.swap-flash td {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   transition: background 0.5s;
 }
+/* Selección por dos toques (fallback táctil): borde perimetral porque el
+   fondo de la fila queda tapado por los inputs */
+table.data tr.tap-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+table.data tr.tap-selected td {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+table.data tr.tap-selected .drag-handle { color: var(--accent); }

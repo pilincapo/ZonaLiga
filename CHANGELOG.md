@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.45] — 2026-09-25 — El intercambio por arrastre ahora funciona en el celular
+
+### Mejora
+
+- En el panel “Días, horas y canchas”, el arrastre de partidos ya funciona con el dedo: se agarra la fila desde la manija (⋮⋮) y se suelta sobre otra de la misma fecha, igual que con el mouse.
+- Además hay un camino alternativo sin arrastrar: tocar un partido y después otro los intercambia (tocar de nuevo el mismo lo desmarca). Sirve también en la computadora.
+
 ## [0.2.44] — 2026-09-25 — Intercambiar horario y cancha arrastrando (panel)
 
 ### Nuevo
