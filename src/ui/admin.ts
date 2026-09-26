@@ -1233,9 +1233,13 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
       // Misma mezcla estable que el fixture público: el orden no delata la
       // zona que se generó primero. El guardado usa los ids en el name, así
       // que el orden visual no afecta nada.
+      // Manija de arrastre: al soltar una fila sobre otra de la misma fecha
+      // se intercambian hora y cancha (el script de abajo hace el cambio en
+      // el formulario; nada se guarda hasta apretar "Guardar fecha").
       const rows = orderMatchesForDisplay(byRound.get(r) ?? [], { tournamentId: t.id, round: r })
         .map(
-          (m) => `<tr>
+          (m) => `<tr draggable="true" data-match="${m.id}">
+      <td class="drag-cell"><span class="drag-handle" title="Arrastrar hasta otra fila de esta fecha para intercambiar horario y cancha">⋮⋮</span></td>
       <td>${esc(teamMap.get(m.home_team_id ?? -1)?.name ?? '—')} <span class="faint">vs</span> ${esc(teamMap.get(m.away_team_id ?? -1)?.name ?? '—')}</td>
       <td><input type="date" name="d_${m.id}" value="${esc(m.played_on || plannedRoundDate(schedule, r))}"></td>
       <td>${kickoffCell(m, schedule.kickoffs)}</td>
@@ -1244,7 +1248,7 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
         )
         .join('');
       return `<form method="post" action="/admin/fechas/guardar"><input type="hidden" name="tournament_id" value="${t.id}"><input type="hidden" name="round" value="${r}"><h3 class="zone-title">Fecha ${r}</h3><div class="card"><div class="table-wrap"><table class="data">
-    <thead><tr><th>Partido</th><th>Día</th><th>Hora</th><th>Cancha</th></tr></thead>
+    <thead><tr><th></th><th>Partido</th><th>Día</th><th>Hora</th><th>Cancha</th></tr></thead>
     <tbody>${rows}</tbody>
     </table></div></div><div class="row-between mt-2">
       <button class="btn btn-primary btn-sm" type="submit">Guardar fecha ${r}</button>
@@ -1260,7 +1264,63 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
 ${flash('success', msg)}${flash('error', errMsg)}
 ${pageHead('Días, horas y canchas')}
 ${tournaments.length > 1 ? `<form method="get" action="/admin/fechas"><select name="t" onchange="this.form.submit()">${tournaments.map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></form>` : ''}
-${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></div>'}`;
+${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></div>'}
+<p class="hint">Arrastrá una fila (⋮⋮) y soltala sobre otra de la <strong>misma fecha</strong> para intercambiarles horario y cancha. Nada se guarda hasta apretar “Guardar fecha”. Si un equipo pidió otro horario, alcanza con arrastrar su partido sobre el que hoy ocupa ese horario.</p>
+<script>
+  (function () {
+    var dragged = null;
+    function field(row, prefix) {
+      return row.querySelector('[name="' + prefix + row.getAttribute('data-match') + '"]');
+    }
+    function applySwap(a, b) {
+      ['t_', 'v_'].forEach(function (prefix) {
+        var ea = field(a, prefix), eb = field(b, prefix);
+        if (!ea || !eb) return;
+        var tmp = ea.value;
+        ea.value = eb.value;
+        eb.value = tmp;
+      });
+      [a, b].forEach(function (row) {
+        row.classList.add('swap-flash');
+        setTimeout(function () { row.classList.remove('swap-flash'); }, 900);
+      });
+    }
+    var forms = document.querySelectorAll('form[action="/admin/fechas/guardar"]');
+    for (var i = 0; i < forms.length; i++) {
+      (function (form) {
+        var rows = form.querySelectorAll('tbody tr[data-match]');
+        for (var j = 0; j < rows.length; j++) {
+          (function (row) {
+            row.addEventListener('dragstart', function (e) {
+              dragged = row;
+              row.classList.add('dragging');
+              e.dataTransfer.effectAllowed = 'move';
+              try { e.dataTransfer.setData('text/plain', row.getAttribute('data-match')); } catch (err) {}
+            });
+            row.addEventListener('dragend', function () {
+              row.classList.remove('dragging');
+              for (var k = 0; k < rows.length; k++) rows[k].classList.remove('drop-target');
+              dragged = null;
+            });
+            row.addEventListener('dragover', function (e) {
+              // Solo filas de la misma tabla (misma fecha) aceptan el drop.
+              if (!dragged || dragged === row || dragged.parentElement !== row.parentElement) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              row.classList.add('drop-target');
+            });
+            row.addEventListener('dragleave', function () { row.classList.remove('drop-target'); });
+            row.addEventListener('drop', function (e) {
+              e.preventDefault();
+              row.classList.remove('drop-target');
+              if (dragged && dragged !== row && dragged.parentElement === row.parentElement) applySwap(dragged, row);
+            });
+          })(rows[j]);
+        }
+      })(forms[i]);
+    }
+  })();
+</script>`;
   return adminLayout({ title: 'Fechas', active: 'fixture', body });
 }
 

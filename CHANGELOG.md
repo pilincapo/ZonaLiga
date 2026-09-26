@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.44] — 2026-09-25 — Intercambiar horario y cancha arrastrando (panel)
+
+### Nuevo
+
+- En el panel “Días, horas y canchas” de cada fecha, los partidos se pueden reordenar arrastrando la fila (⋮⋮) y soltándola sobre otra de la misma fecha: los dos intercambian horario y cancha, y el día queda como está. Sirve para el pedido típico de un equipo que pide jugar en otro horario: se arrastra su partido sobre el que hoy ocupa ese horario. Nada se guarda hasta apretar “Guardar fecha”.
+
 ## [0.2.43] — 2026-09-25 — Fixture ordenado por cancha y hora
 
 ### Mejora

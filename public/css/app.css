@@ -1282,3 +1282,25 @@ html[data-theme='dark'] .theme-toggle .ico-moon { display: none; }
 .zones-table select { min-width: 9rem; }
 .zones-table td { vertical-align: middle; }
 #zones-config .table-wrap { margin-top: 10px; }
+
+/* Reordenar partidos por arrastre (panel Fechas del admin) */
+.drag-cell { width: 30px; text-align: center; padding-right: 0 !important; }
+.drag-handle {
+  cursor: grab;
+  color: var(--faint);
+  font-weight: 800;
+  letter-spacing: -1px;
+  user-select: none;
+  padding: 2px 4px;
+}
+.drag-handle:hover { color: var(--text, inherit); }
+table.data tr[draggable="true"] td:first-child { cursor: grab; }
+table.data tr.dragging { opacity: 0.45; }
+table.data tr.drop-target td {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+table.data tr.swap-flash td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  transition: background 0.5s;
+}
