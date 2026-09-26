@@ -1315,3 +1315,44 @@ table.data tr.tap-selected td {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 table.data tr.tap-selected .drag-handle { color: var(--accent); }
+
+/* Portada: fila de partido vertical (el nombre nunca se corta) */
+.home-match { padding: 12px 4px; border-bottom: 1px solid var(--border); }
+.home-match:last-of-type { border-bottom: none; }
+.hm-teams { display: flex; flex-direction: column; gap: 6px; }
+.hm-team { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 700; }
+.hm-team a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-team .zone-badge { flex: none; }
+.hm-vs { font-size: 0.7rem; color: var(--faint); text-transform: uppercase; letter-spacing: 1px; margin-left: 34px; }
+.hm-team + .hm-vs { margin-top: -4px; }
+.hm-when {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+  margin-top: 8px; margin-left: 34px; font-size: 0.82rem; color: var(--faint); font-weight: 600;
+}
+.hm-when .ic { vertical-align: -2px; margin-right: 2px; }
+@media (min-width: 720px) {
+  .hm-teams { flex-direction: row; align-items: center; gap: 12px; }
+  .hm-team { flex: 1; }
+  .hm-team:last-child { justify-content: flex-end; }
+  .hm-vs { margin: 0; }
+}
+
+/* Portada: mini-tablas de posiciones por zona */
+.zone-minis { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 640px) { .zone-minis { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
+.zone-mini h3 { margin: 0 0 8px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.8px; color: var(--faint); }
+.zone-mini ol { list-style: none; margin: 0; padding: 0; }
+.zone-mini li {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: 0.9rem;
+}
+.zone-mini li:last-child { border-bottom: none; }
+.zone-mini .pos-num { flex: none; width: 22px; text-align: center; }
+.zone-mini li a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zone-mini .pts { margin-left: auto; font-weight: 800; }
+
+/* Portada: cierre compacto para administradores */
+.howto-mini {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between;
+  border: 1px dashed var(--border); border-radius: 12px; padding: 14px 16px;
+}

@@ -37,7 +37,7 @@ import {
 import { searchPlayers, searchTeams, searchTournaments } from '../lib/search.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { adjustmentsForTournament } from '../lib/adjustments.ts';
-import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow } from './match.ts';
+import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow, zoneBadge } from './match.ts';
 import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
@@ -94,35 +94,21 @@ ${howToBlock()}`;
   return layout({ title: 'ZonaLiga — Inicio', active: 'home', nav: PUBLIC_NAV, body: inner });
 }
 
-/** Banda del hero con buscador y lista de beneficios. */
+/** Banda del hero con buscador (sin tarjetitas: lo que ofrece ZonaLiga ya lo cuenta el bloque final). */
 function heroBand(t: Tournament | null): string {
   const sub = t
     ? `Seguí en vivo <strong>${esc(t.name)}</strong>${t.season ? ` (temporada ${esc(t.season)})` : ''}:${' '}fixture, resultados, tabla de posiciones y goleadores, siempre al día.`
     : 'Organizá, gestioná y seguí tu liga de fútbol amateur de forma simple y rápida: resultados, fixture, tablas y mucho más.';
-  const feats = [
-    { ic: 'whistle', t: 'Liga, zonas y copa', d: 'Round-robin, zonas con playoffs o eliminación directa.' },
-    { ic: 'bolt', t: 'Actualización al instante', d: 'Cargás la fecha y la tabla se recalcula sola.' },
-    { ic: 'phone', t: '100% celular', d: 'Desde cualquier dispositivo, sin instalar nada.' },
-    { ic: 'users', t: 'Delegados por equipo', d: 'Cada equipo propone su resultado: vos lo aprobás.' },
-  ]
-    .map(
-      (f) =>
-        `<div class="feat"><span class="feat-ico">${icon(f.ic as never, 20)}</span><div><div class="feat-t">${esc(f.t)}</div><div class="feat-d">${esc(f.d)}</div></div></div>`
-    )
-    .join('');
   return `<section class="hero-band">
-  <div class="hero-grid">
-    <div class="hero-main">
-      <div class="hero-kicker">Fútbol amateur</div>
-      <h1>Tu liga, <span class="hl">en un solo lugar</span></h1>
-      <p class="hero-sub">${sub}</p>
-      <form class="search-bar" action="/buscar" method="get" role="search">
-        <span class="search-icon">${icon('search', 20)}</span>
-        <input type="search" name="q" placeholder="Buscar equipo, jugador o torneo…" aria-label="Buscar" required>
-        <button class="btn btn-primary" type="submit">Buscar</button>
-      </form>
-    </div>
-    <div class="feats">${feats}</div>
+  <div class="hero-main">
+    <div class="hero-kicker">Fútbol amateur</div>
+    <h1>Tu liga, <span class="hl">en un solo lugar</span></h1>
+    <p class="hero-sub">${sub}</p>
+    <form class="search-bar" action="/buscar" method="get" role="search">
+      <span class="search-icon">${icon('search', 20)}</span>
+      <input type="search" name="q" placeholder="Buscar equipo, jugador o torneo…" aria-label="Buscar" required>
+      <button class="btn btn-primary" type="submit">Buscar</button>
+    </form>
   </div>
 </section>`;
 }
@@ -182,32 +168,18 @@ function tournamentCards(
 <div class="tcards">${cards}</div>`;
 }
 
-/** Bloque "¿Cómo funciona?" con los pasos y el acceso al panel. */
+/**
+ * Cierre de portada: una línea para quien administra una liga. El detalle
+ * de funciones vive en el README y en el panel; la portada no compite con
+ * el fixture del hincha.
+ */
 function howToBlock(): string {
-  const steps = [
-    { ic: 'trophy', t: 'Torneos', d: 'Creá el torneo y configurá las reglas: puntos, walkover y suspensiones.' },
-    { ic: 'calendar', t: 'Fixture y fechas', d: 'Generá los cruces automáticamente y asigná día, hora y cancha.' },
-    { ic: 'list', t: 'Planilla', d: 'Cargá goles y tarjetas: la tabla se recalcula al instante.' },
-    { ic: 'users', t: 'Equipos', d: 'Plantillas con dorsales y posiciones, con cresta por color.' },
-    { ic: 'phone', t: 'Delegados', d: 'Cada equipo propone su resultado desde el celular y vos lo aprobás.' },
-    { ic: 'shield', t: 'Suspensiones', d: 'Rojas y acumulación de amarillas calculadas según el reglamento.' },
-  ]
-    .map(
-      (s) =>
-        `<div class="step"><span class="step-ico">${icon(s.ic as never, 20)}</span><div class="step-t">${esc(s.t)}</div><div class="step-d">${esc(s.d)}</div></div>`
-    )
-    .join('');
-  return `<section class="block howto">
-  <div class="howto-lead">
-    <div class="hero-kicker">¿Cómo funciona?</div>
-    <h2>Todo lo que necesitás para tu torneo</h2>
-    <p>ZonaLiga te permite crear y administrar torneos de fútbol amateur de forma simple e intuitiva, desde cualquier dispositivo.</p>
-    <div class="flex flex-wrap">
-      <a class="btn btn-primary" href="/fixture">Ver el fixture →</a>
-      <a class="btn btn-outline" href="/admin">Panel de administración</a>
-    </div>
+  return `<section class="block howto-mini">
+  <div>
+    <strong>¿Administrás una liga?</strong>
+    <span class="muted"> ZonaLiga arma el fixture, la tabla y los goleadores por vos.</span>
   </div>
-  <div class="steps-grid">${steps}</div>
+  <a class="btn btn-outline btn-sm" href="/admin">Probá el panel →</a>
 </section>`;
 }
 
@@ -293,12 +265,12 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
         { tournamentId: t.id, round: nextRound }
       )
         .concat(upcoming.filter((m) => m.round !== nextRound))
-        .map((m) => matchRow(m, teamMap, { zoneOfTeam: zoneOfTeamHome }))
+        .map((m) => homeMatchRow(m, teamMap, zoneOfTeamHome))
         .join('')
-    : emptyNote('No hay partidos programados');
+    : '';
   const playedHtml = played.length
     ? played.map((m) => matchRow(m, teamMap, { zoneOfTeam: zoneOfTeamHome })).join('')
-    : emptyNote('Todavía no se jugaron partidos');
+    : '';
 
   const scorersHtml = scorers.length
     ? scorers
@@ -311,38 +283,48 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
 </div>`
         )
         .join('')
-    : emptyNote('Sin goles registrados');
+    : '';
 
-  const tableHtml = topRows.length
-    ? `<div class="table-wrap"><table class="data">
-  <thead><tr><th></th><th>Equipo</th><th class="num">PJ</th><th class="num">G</th><th class="num">E</th><th class="num">P</th><th class="num">DIF</th><th class="num">PTS</th></tr></thead>
-  <tbody>${topRows
-    .map(
-      (r) => `<tr>
-    <td class="pos-num">${teamMap.get(r.teamId) ? String(standings.indexOf(r) + 1) : ''}</td>
-    <td>${teamCell(teamMap.get(r.teamId))}</td>
-    <td class="num">${r.played}</td><td class="num">${r.won}</td><td class="num">${r.drawn}</td><td class="num">${r.lost}</td>
-    <td class="num">${r.diff > 0 ? '+' + r.diff : r.diff}</td>
-    <td class="num"><strong>${r.points}</strong></td>
-  </tr>`
-    )
-    .join('')}</tbody></table></div>`
-    : emptyNote('Sin partidos jugados todavía');
+  // Mini-tabla de posiciones: con zonas, los primeros 3 de CADA una (es lo
+  // que le interesa al hincha de un vistazo); sin zonas, los primeros 5.
+  const zoneOfStandings = new Map<number, string>();
+  for (const m of matches) {
+    if (m.zone) {
+      if (m.home_team_id != null) zoneOfStandings.set(m.home_team_id, m.zone);
+      if (m.away_team_id != null) zoneOfStandings.set(m.away_team_id, m.zone);
+    }
+  }
+  if (zoneOfStandings.size === 0) {
+    for (const [id, z] of zoneOfTeamHome) zoneOfStandings.set(id, z);
+  }
+  const byZone = groupBy(
+    standings.map((r) => ({ row: r, zone: zoneOfStandings.get(r.teamId) ?? '' })),
+    (x) => x.zone
+  );
+  const zoneChips = [...byZone.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([zone, rows]) => {
+      const top = rows.slice(0, 3);
+      if (top.length === 0) return '';
+      const items = top
+        .map(
+          ({ row: r }, i) => `<li><span class="pos-num">${i + 1}</span><a href="/equipos/${escUrl(teamMap.get(r.teamId)?.slug ?? '')}">${esc(teamMap.get(r.teamId)?.name ?? '—')}</a><span class="pts">${r.points}</span></li>`
+        )
+        .join('');
+      const title = zone ? `Zona ${zone}` : byZone.size > 1 ? 'General' : 'Posiciones';
+      return `<div class="zone-mini"><h3>${esc(title)}</h3><ol>${items}</ol></div>`;
+    })
+    .filter(Boolean)
+    .join('');
+  const tableHtml = zoneChips
+    ? `<div class="zone-minis">${zoneChips}</div>`
+    : '';
 
   const playedAll = matches.filter((m) => m.status === 'played' || m.status === 'walkover');
   const goalsAll = playedAll.reduce((acc, m) => acc + m.home_goals + m.away_goals, 0);
   const avg = playedAll.length > 0 ? (goalsAll / playedAll.length).toFixed(1) : '0.0';
-  const numbers = [
-    { n: new Set(matches.flatMap((m) => [m.home_team_id, m.away_team_id]).filter((x): x is number => x != null)).size, l: 'Equipos' },
-    { n: playedAll.length, l: 'Partidos jugados' },
-    { n: goalsAll, l: 'Goles' },
-    { n: avg, l: 'Goles por partido' },
-  ]
-    .map(
-      (s) =>
-        `<div class="step" style="text-align:center"><div class="step-t" style="font-size:1.6rem">${esc(String(s.n))}</div><div class="step-d">${esc(s.l)}</div></div>`
-    )
-    .join('');
+  const teamsInFixture = new Set(matches.flatMap((m) => [m.home_team_id, m.away_team_id]).filter((x): x is number => x != null)).size;
+  const numbersLine = `${teamsInFixture} equipo${teamsInFixture === 1 ? '' : 's'} · ${playedAll.length} partido${playedAll.length === 1 ? '' : 's'} jugado${playedAll.length === 1 ? '' : 's'} · ${goalsAll} gol${goalsAll === 1 ? '' : 'es'}${playedAll.length > 0 ? ` · ${avg} por partido` : ''}`;
 
   // Aviso destacado cuando hoy hay partidos: lleva al modo en vivo.
   const todayIso = leagueNow().date;
@@ -358,29 +340,68 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
   </a></section>`
       : '';
 
-  return `
-${todayBanner}
-<section class="block home-duo">
-  ${torneosInner ? `<div class="duo-torneos">${torneosInner}</div>` : ''}
-  <div class="duo-proxima">
-    <div class="section-head">
-      <div>
-        <h2>Próxima fecha</h2>
-        <div class="sub">${nextRound != null ? `Fecha ${nextRound}` : 'Partidos programados'} de ${esc(t.name)}</div>
-      </div>
-      <a class="more" href="/fixture">Ver fixture →</a>
+  // Portada limpia: las secciones sin datos todavía no se muestran (los
+  // enlaces siguen en el menú). Los números del torneo van en una línea.
+  const blocks: string[] = [];
+  if (todayBanner) blocks.push(todayBanner);
+  if (upcomingHtml) {
+    blocks.push(`<section class="block">
+  <div class="section-head">
+    <div>
+      <h2>Próxima fecha</h2>
+      <div class="sub">${nextRound != null ? `Fecha ${nextRound}` : 'Partidos programados'} · ${esc(t.name)}</div>
     </div>
-    <div class="card">${upcomingHtml}${shareBar([{ label: '📲 Compartir por WhatsApp', href: shareHref }])}</div>
+    <a class="more" href="/fixture">Ver fixture →</a>
   </div>
-</section>
-<section class="block grid-2">
-  <div class="card">${sectionHead('Últimos resultados', '/fixture', 'Ver todos')}${playedHtml}</div>
-  <div class="card">${sectionHead('Posiciones', '/posiciones', 'Tabla completa')}${tableHtml}</div>
-</section>
-<section class="block grid-2">
-  <div class="card">${sectionHead('Goleadores', '/goleadores', 'Tabla completa')}${scorersHtml}</div>
-  <div class="card">${sectionHead('Números del torneo')}<div class="card-body"><div class="steps-grid" style="grid-template-columns:repeat(2,1fr)">${numbers}</div></div></div>
-</section>`;
+  <div class="card">${upcomingHtml}${shareBar([{ label: '📲 Compartir por WhatsApp', href: shareHref }])}</div>
+</section>`);
+  }
+  if (tableHtml) {
+    blocks.push(`<section class="block">
+  <div class="section-head">
+    <div><h2>Posiciones</h2><div class="sub">Los primeros de cada zona.</div></div>
+    <a class="more" href="/posiciones">Tabla completa →</a>
+  </div>
+  <div class="card"><div class="card-body">${tableHtml}</div></div>
+</section>`);
+  }
+  if (playedHtml) {
+    blocks.push(`<section class="block"><div class="card">${sectionHead('Últimos resultados', '/fixture', 'Ver todos')}${playedHtml}</div></section>`);
+  }
+  if (scorersHtml) {
+    blocks.push(`<section class="block"><div class="card">${sectionHead('Goleadores', '/goleadores', 'Tabla completa')}${scorersHtml}</div></section>`);
+  }
+  blocks.push(`<section class="block"><div class="card"><div class="card-body"><p class="muted" style="margin:0;text-align:center">${esc(numbersLine)}</p></div></div></section>`);
+  if (torneosInner) blocks.push(`<section class="block">${torneosInner}</section>`);
+  return blocks.join('\n');
+}
+
+/**
+ * Fila de partido para la portada: vertical, pensada para que el nombre del
+ * equipo nunca se corte. Encima los dos equipos con su badge de zona, abajo
+ * la hora y la cancha en línea propia.
+ */
+function homeMatchRow(m: Match, teamMap: Map<number, Team>, zoneOfTeam: Map<number, string>): string {
+  const home = m.home_team_id != null ? teamMap.get(m.home_team_id) : undefined;
+  const away = m.away_team_id != null ? teamMap.get(m.away_team_id) : undefined;
+  const zonaHome = m.zone || zoneOfTeam.get(m.home_team_id ?? -1) || '';
+  const zonaAway = m.zone || zoneOfTeam.get(m.away_team_id ?? -1) || '';
+  const cruce = isCrossoverMatch(m) ? crossoverBadge() : '';
+  const when = [
+    m.kickoff_time ? `<span>${icon('clock', 14)} ${esc(m.kickoff_time)}</span>` : '',
+    m.played_on ? `<span>${icon('calendar', 14)} ${esc(formatDateShort(m.played_on))}</span>` : '',
+    m.venue ? `<span>${icon('pin', 14)} ${esc(m.venue)}</span>` : '',
+  ]
+    .filter(Boolean)
+    .join('');
+  return `<div class="home-match">
+  <div class="hm-teams">
+    <span class="hm-team">${crest(home)}<a href="/equipos/${escUrl(home?.slug ?? '')}">${esc(home?.name ?? 'Por definir')}</a>${zoneBadge(zonaHome, 'left')}</span>
+    <span class="hm-vs">vs</span>
+    <span class="hm-team">${crest(away)}<a href="/equipos/${escUrl(away?.slug ?? '')}">${esc(away?.name ?? 'Por definir')}</a>${zoneBadge(zonaAway, 'left')}</span>
+  </div>
+  <div class="hm-when">${cruce}${when}</div>
+</div>`;
 }
 
 /* ============================== POSICIONES ============================== */

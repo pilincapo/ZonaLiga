@@ -15,6 +15,15 @@
 
 ---
 
+## [0.2.46] — 2026-09-25 — Nueva portada: lo del sábado primero
+
+### Mejora
+
+- La portada arranca directo por lo que le interesa al hincha: la próxima fecha con los partidos en filas más legibles (nombre completo de cada equipo, y hora, día y cancha en línea propia con íconos).
+- Las posiciones de portada ahora se muestran por zona: los primeros 3 de cada una; la tabla completa sigue a un clic.
+- Mientras no haya resultados ni goles cargados, esas secciones no ocupan pantalla con carteles de vacío: aparecen solas cuando hay datos.
+- Los números del torneo pasaron a una sola línea y el bloque de “cómo funciona” se resumió a una franja corta al final de la página.
+
 ## [0.2.45] — 2026-09-25 — El intercambio por arrastre ahora funciona en el celular
 
 ### Mejora
