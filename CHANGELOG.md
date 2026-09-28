@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.57] — 2026-09-28 — La portada recuerda el torneo elegido
+
+### Mejora
+
+- Si entrás a la portada con un torneo en particular (/?t=...), los enlaces "Ver fixture →", "Tabla completa →" y "Ver todos" llevan a ese mismo torneo, no al activo.
+
 ## [0.2.56] — 2026-09-28 — Nueva navegación del sitio público
 
 ### Mejora

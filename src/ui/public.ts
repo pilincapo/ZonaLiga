@@ -95,15 +95,18 @@ export async function homePage(db: D1Database, origin: string, slugParam?: strin
     loadTournamentView(db, { slug: slugParam, scorers: 5 }),
   ]);
   const t = view?.tournament ?? null;
+  // El torneo se propaga solo si el hincha lo eligió (?t=slug). Si la portada
+  // muestra el torneo activo por defecto, los enlaces quedan como siempre.
+  const tSlug = slugParam && view ? view.tournament.slug : undefined;
   const torneosInner = tournamentCards(tournaments, stats, t?.slug);
   const body = view
-    ? await tournamentHomeBody(view, origin, torneosInner)
+    ? await tournamentHomeBody(view, origin, torneosInner, tSlug)
     : `<section class="block">${torneosInner}</section>\n${await emptyHomeBody(db)}`;
   const inner = `
 ${heroBand(t)}
 ${body}
 ${howToBlock()}`;
-  return layout({ title: 'ZonaLiga — Inicio', active: 'home', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: t?.slug, body: inner });
+  return layout({ title: 'ZonaLiga — Inicio', active: 'home', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug, body: inner });
 }
 
 /** Banda del hero con buscador (sin tarjetitas: lo que ofrece ZonaLiga ya lo cuenta el bloque final). */
@@ -214,7 +217,16 @@ async function emptyHomeBody(db: D1Database): Promise<string> {
 </section>`;
 }
 
-async function tournamentHomeBody(view: TournamentView, origin: string, torneosInner = ''): Promise<string> {
+/**
+ * URL con el torneo de la portada propagado: si el hincha entró con /?t=slug,
+ * los enlaces contextuales de las secciones conservan ese torneo. Sin ?t=,
+ * el enlace queda como siempre.
+ */
+function tLink(slug: string | undefined, path: string): string {
+  return slug ? `${path}?t=${escUrl(slug)}` : path;
+}
+
+async function tournamentHomeBody(view: TournamentView, origin: string, torneosInner = '', tSlug?: string): Promise<string> {
   const t = view.tournament;
   const matches = view.matches;
   const teams = view.teams;
@@ -379,7 +391,7 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
       <h2>Próxima fecha</h2>
       <div class="sub">${nextRound != null ? `Fecha ${nextRound}` : 'Partidos programados'} · ${esc(t.name)}</div>
     </div>
-    <a class="more" href="/fixture">Ver fixture →</a>
+    <a class="more" href="${escUrl(tLink(tSlug, '/fixture'))}">Ver fixture →</a>
   </div>
   <div class="card">${upcomingHtml}${shareBar([{ label: '📲 Compartir por WhatsApp', href: shareHref }])}</div>
 </section>`);
@@ -388,16 +400,16 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
     blocks.push(`<section class="block">
   <div class="section-head">
     <div><h2>Posiciones</h2><div class="sub">Los primeros de cada zona.</div></div>
-    <a class="more" href="/posiciones">Tabla completa →</a>
+    <a class="more" href="${escUrl(tLink(tSlug, '/posiciones'))}">Tabla completa →</a>
   </div>
   <div class="card"><div class="card-body">${tableHtml}</div></div>
 </section>`);
   }
   if (playedHtml) {
-    blocks.push(`<section class="block"><div class="card">${sectionHead('Últimos resultados', '/fixture', 'Ver todos')}${playedHtml}</div></section>`);
+    blocks.push(`<section class="block"><div class="card">${sectionHead('Últimos resultados', tLink(tSlug, '/fixture'), 'Ver todos')}${playedHtml}</div></section>`);
   }
   if (scorersHtml) {
-    blocks.push(`<section class="block"><div class="card">${sectionHead('Goleadores', '/goleadores', 'Tabla completa')}${scorersHtml}</div></section>`);
+    blocks.push(`<section class="block"><div class="card">${sectionHead('Goleadores', tLink(tSlug, '/goleadores'), 'Tabla completa')}${scorersHtml}</div></section>`);
   }
   blocks.push(`<section class="block"><div class="card"><div class="card-body"><div class="stats-grid">${statCards}</div></div></div></section>`);
   if (torneosInner) blocks.push(`<section class="block">${torneosInner}</section>`);
