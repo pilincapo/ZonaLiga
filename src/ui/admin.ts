@@ -49,14 +49,23 @@ import {
   playoffFormatLabel,
 } from '../lib/playoff.ts';
 import { buildMakeUpPlan, postponedMatches, suggestMakeUpRound } from '../lib/oversub.ts';
-import { computeStandings } from '../lib/standings.ts';
+import { computeStandings, groupBy } from '../lib/standings.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import type { SubmissionEventRow } from '../lib/delegates.ts';
 import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
 import { waLink } from '../lib/share.ts';
 import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
 import { crest, crossoverBadge } from './match.ts';
-import { layout, type NavItem, type NavGroup, type TournamentPickerData } from './components.ts';
+import {
+  layout,
+  dashboardShell,
+  icon,
+  type NavItem,
+  type NavGroup,
+  type TournamentPickerData,
+  type DashQuickAction,
+  type DashActivityItem,
+} from './components.ts';
 import { planFixture, groupByFixtureRound, planSummary, type PlannedMatch } from '../lib/planifier.ts';
 import { orderMatchesForDisplay } from '../lib/order.ts';
 import { isCrossoverMatch } from '../lib/crossover.ts';
@@ -200,23 +209,33 @@ export async function loginPage(error?: string, next?: string): Promise<string> 
 
 /* ============================== DASHBOARD ============================== */
 
+/**
+ * Inicio del panel con el diseño de referencia: métricas, tablas y rail
+ * de accesos. Mismos datos y rutas que el resumen anterior; el shell con
+ * sidebar solo se usa acá (el resto del panel mantiene el layout clásico).
+ */
 export async function dashboardPage(db: D1Database, msg?: string, errMsg?: string): Promise<string> {
-  const [tournaments, teams, pending] = await Promise.all([
+  const [tournaments, teams, pending, playersTotal, activeView, latestSubs] = await Promise.all([
     listTournaments(db),
     listTeams(db),
     countPendingSubmissions(db),
+    db.prepare('SELECT COUNT(*) AS n FROM players WHERE active = 1').first<{ n: number }>(),
+    loadTournamentView(db, { includeInactiveTeams: true, scorers: 5 }),
+    pendingSubmissions(db, 5),
   ]);
-  const activeView = await loadTournamentView(db);
   const active = activeView?.tournament ?? null;
+  const matches = activeView?.matches ?? [];
+  const scorers = activeView?.scorers ?? [];
+
   let matchStats = { total: 0, played: 0, upcoming: 0 };
   if (activeView) {
-    const matches = activeView.matches;
     matchStats = {
       total: matches.filter((m) => m.status !== 'bye').length,
       played: matches.filter((m) => m.status === 'played' || m.status === 'walkover').length,
       upcoming: matches.filter((m) => m.status === 'scheduled').length,
     };
   }
+  const teamMap = new Map((activeView?.teams ?? []).map((tm) => [tm.id, tm]));
 
   const stat = (label: string, value: string | number, href?: string) => `
   <a class="card" style="padding:16px;color:var(--text)" ${href ? `href="${escUrl(href)}"` : ''}>
@@ -224,14 +243,14 @@ export async function dashboardPage(db: D1Database, msg?: string, errMsg?: strin
     <div style="font-family:var(--font-head);font-size:1.6rem">${esc(String(value))}</div>
   </a>`;
 
-  const body = `
+  // Sin torneo activo: mantengo el resumen clásico para no inventar datos.
+  if (!active) {
+    const body = `
 ${flash('success', msg)}${flash('error', errMsg)}
 ${pageHead('Resumen', { href: '/admin/torneos/nuevo', label: '+ Nuevo torneo' })}
 <section class="block grid-2">
   ${stat('Torneos', tournaments.length, '/admin/torneos')}
   ${stat('Equipos', teams.length, '/admin/equipos')}
-  ${stat('Torneo activo', active?.name ?? '—', active ? '/admin/fixture' : undefined)}
-  ${stat('Partidos jugados', matchStats.played, '/admin/planilla')}
   ${stat('Entregas pendientes', pending, '/admin/entregas')}
 </section>
 <section class="block"><div class="card"><div class="card-body">
@@ -241,7 +260,214 @@ ${pageHead('Resumen', { href: '/admin/torneos/nuevo', label: '+ Nuevo torneo' })
   <a href="/admin/fixture">generar fixture</a> ·
   <a href="/admin/jugadores">cargar plantilla</a>
 </div></div></section>`;
-  return await adminLayout(db, { title: 'Panel', active: 'admin', body });
+    return await adminLayout(db, { title: 'Panel', active: 'admin', body });
+  }
+
+  /* ----- Datos de las secciones (mismas consultas que las otras páginas) ----- */
+  const standings = computeStandings(
+    matchesForStandings(matches, active.config),
+    (activeView?.teams ?? []).filter((tm) => tm.active).map((tm) => ({ id: tm.id, name: tm.name })),
+    rulesOf(active)
+  );
+  const zonesCfg = zonesOf(active.config);
+  const zoneOfTeam = new Map<number, string>();
+  if (zonesCfg.enabled) {
+    for (const z of zonesCfg.zones) for (const id of z.teamIds) zoneOfTeam.set(id, z.name);
+  } else {
+    for (const m of matches) {
+      if (m.zone) {
+        if (m.home_team_id != null) zoneOfTeam.set(m.home_team_id, m.zone);
+        if (m.away_team_id != null) zoneOfTeam.set(m.away_team_id, m.zone);
+      }
+    }
+  }
+  const zoneOfStandings = (id: number) => zoneOfTeam.get(id) ?? '';
+  const byZone = groupBy(
+    standings.map((r) => ({ row: r, zone: zoneOfStandings(r.teamId) })),
+    (x) => x.zone
+  );
+  const top = [...byZone.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .flatMap(([, rows]) => rows.slice(0, 6))
+    .slice(0, 8);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const upcomingAll = matches
+    .filter((m) => m.status === 'scheduled' && m.home_team_id != null && m.away_team_id != null)
+    .sort((a, b) => (a.played_on || '9999').localeCompare(b.played_on || '9999') || a.id - b.id);
+  const upcoming = upcomingAll.slice(0, 4);
+  const recent = matches
+    .filter((m) => (m.status === 'played' || m.status === 'walkover') && m.home_team_id != null && m.away_team_id != null)
+    .sort((a, b) => (b.played_on || '').localeCompare(a.played_on || '') || b.id - a.id)
+    .slice(0, 5);
+  const roundsPlayed = new Set(matches.filter((m) => m.status === 'played' || m.status === 'walkover').map((m) => m.round)).size;
+  const roundsTotal = new Set(matches.filter((m) => m.status !== 'bye' && m.round != null).map((m) => m.round)).size;
+  const goalsAll = matches
+    .filter((m) => m.status === 'played' || m.status === 'walkover')
+    .reduce((acc, m) => acc + m.home_goals + m.away_goals, 0);
+
+  /* ----- Renders de secciones ----- */
+  const metrics = [
+    { ic: 'users', tone: 'green', label: 'Equipos', num: String(teams.length), sub: `de ${teams.filter((t) => t.active).length} activos`, href: '/admin/equipos', pct: teams.length ? Math.round((teams.filter((t) => t.active).length / teams.length) * 100) : 0 },
+    { ic: 'shield', tone: 'blue', label: 'Jugadores', num: String(playersTotal?.n ?? 0), sub: 'registrados', href: '/admin/jugadores', pct: 100 },
+    { ic: 'calendar', tone: 'violet', label: 'Partidos', num: String(matchStats.total), sub: `${matchStats.played} jugados`, href: '/admin/fixture', pct: matchStats.total ? Math.round((matchStats.played / matchStats.total) * 100) : 0 },
+    { ic: 'trophy', tone: 'amber', label: 'Jornadas', num: String(roundsPlayed), sub: roundsTotal ? `de ${roundsTotal}` : 'sin fixture', href: '/admin/fixture', pct: roundsTotal ? Math.round((roundsPlayed / roundsTotal) * 100) : 0 },
+  ]
+    .map(
+      (s) => `<a class="dash-metric m-${s.tone}" href="${escUrl(s.href)}">
+  <span class="dash-metric-ico">${icon(s.ic as 'users', 18)}</span>
+  <span class="dash-metric-tx"><span class="dash-metric-lbl">${s.label}</span><span class="dash-metric-num">${s.num}</span><span class="dash-metric-sub">${esc(s.sub)}</span></span>
+  <span class="dash-metric-bar"><span style="width:${Math.min(100, Math.max(2, s.pct))}%"></span></span>
+</a>`
+    )
+    .join('');
+
+  const standingsRows = top.length
+    ? top
+        .map(
+          ({ row: r }) => `<tr>
+  <td><span class="pos-num">${standings.findIndex((x) => x.teamId === r.teamId) + 1}</span></td>
+  <td><span class="team-cell">${crest(teamMap.get(r.teamId))}<span class="tname">${esc(teamMap.get(r.teamId)?.name ?? '—')}</span></span></td>
+  <td class="num">${r.played}</td><td class="num">${r.won}</td><td class="num">${r.drawn}</td><td class="num">${r.lost}</td>
+  <td class="num">${r.goalsFor}</td><td class="num">${r.goalsAgainst}</td>
+  <td class="num"><strong>${r.points}</strong></td>
+</tr>`
+        )
+        .join('')
+    : `<tr><td colspan="9" class="empty-note">Todavía no hay partidos.</td></tr>`;
+
+  const upcomingRows = upcoming.length
+    ? upcoming
+        .map(
+          (m) => `<a class="dash-next-row" href="/admin/planilla/${m.id}">
+  <span class="dash-next-when">${esc(formatDateShort(m.played_on)) || 'A definir'}${m.kickoff_time ? ` · ${esc(m.kickoff_time)}` : ''}</span>
+  <span class="dash-next-vs"><span class="team-cell sm">${crest(teamMap.get(m.home_team_id ?? -1), 'sm')}<span class="tname">${esc(teamMap.get(m.home_team_id ?? -1)?.name ?? '—')}</span></span><span class="vs">vs</span><span class="team-cell sm away">${crest(teamMap.get(m.away_team_id ?? -1), 'sm')}<span class="tname">${esc(teamMap.get(m.away_team_id ?? -1)?.name ?? '—')}</span></span></span>
+  ${m.venue ? `<span class="dash-next-venue">${esc(m.venue)}</span>` : ''}
+</a>`
+        )
+        .join('')
+    : `<div class="empty-note">No hay partidos programados.</div>`;
+
+  const recentRows = recent.length
+    ? recent
+        .map(
+          (m) => `<a class="dash-result" href="/admin/planilla/${m.id}">
+  <span class="dash-res-date">${esc(formatDateShort(m.played_on)) || '—'}</span>
+  <span class="team-cell sm">${crest(teamMap.get(m.home_team_id ?? -1), 'sm')}<span class="tname">${esc(teamMap.get(m.home_team_id ?? -1)?.name ?? '—')}</span></span>
+  <span class="dash-res-score">${m.home_goals} - ${m.away_goals}</span>
+  <span class="team-cell sm away">${crest(teamMap.get(m.away_team_id ?? -1), 'sm')}<span class="tname">${esc(teamMap.get(m.away_team_id ?? -1)?.name ?? '—')}</span></span>
+</a>`
+        )
+        .join('')
+    : `<div class="empty-note">Sin resultados todavía.</div>`;
+
+  const scorersRows = scorers.length
+    ? scorers
+        .map(
+          (s, i) => `<div class="dash-scorer"><span class="pos-num pod${i < 3 ? String(i + 1) : ''}">${i + 1}</span><span class="tname">${esc(s.player_name)}</span><span class="muted small">${esc(s.team_name)}</span><span class="strong">${s.goals}</span></div>`
+        )
+        .join('')
+    : `<div class="empty-note">Sin goles todavía.</div>`;
+
+  const activity: DashActivityItem[] = latestSubs.map((s) => ({
+    icon: 'list',
+    tone: 'blue' as const,
+    when: formatDateShort(s.played_on) || '—',
+    title: `Entrega de ${s.team_name}`,
+    detail: `${s.home_goals} - ${s.away_goals} vs ${teamMap.get(s.home_team_id ?? -1)?.name ?? '?'} / ${teamMap.get(s.away_team_id ?? -1)?.name ?? '?'}`,
+  }));
+
+  const quickActions: DashQuickAction[] = [
+    { href: '/admin/torneos/nuevo', label: 'Nuevo torneo', icon: 'trophy', tone: 'green' },
+    { href: '/admin/equipos/nuevo', label: 'Agregar equipo', icon: 'users', tone: 'blue' },
+    { href: '/admin/planilla', label: 'Cargar resultado', icon: 'list', tone: 'violet' },
+    { href: '/admin/fixture', label: 'Fixture', icon: 'calendar', tone: 'green' },
+    { href: '/admin/suspensiones', label: 'Suspensiones', icon: 'card', tone: 'danger' },
+    { href: '/admin/estadisticas', label: 'Estadísticas', icon: 'chart', tone: 'amber' },
+  ];
+  const quick = quickActions
+    .map(
+      (a) => `<a class="dash-quick" href="${escUrl(a.href)}"><span class="dash-quick-ico q-${a.tone}">${icon(a.icon as 'users', 16)}</span><span>${esc(a.label)}</span></a>`
+    )
+    .join('');
+  const torneoCard = `<a class="dash-torneo" href="/admin/fixture?t=${escUrl(active.slug)}">
+  <span class="dash-torneo-ico">${icon('trophy', 20)}</span>
+  <span class="dash-torneo-tx"><strong>${esc(active.name)}</strong><span class="dash-torneo-status"><span class="dot"></span>${active.status === 'active' ? 'En curso' : active.status === 'draft' ? 'Borrador' : 'Finalizado'}</span></span>
+  <span class="chev">›</span>
+</a>`;
+  const statusCard =
+    pending > 0
+      ? `<div class="dash-status st-warn">${icon('bell', 15)}<span><strong>${pending} entrega${pending === 1 ? '' : 's'} por revisar</strong><em>Los delegados cargaron resultados que esperan tu aprobación.</em></span></div>`
+      : `<div class="dash-status st-ok">${icon('shield', 15)}<span><strong>Todo en orden</strong><em>No hay entregas pendientes de revisión.</em></span></div>`;
+
+  const dashBody = `
+${flash('success', msg)}${flash('error', errMsg)}
+<section class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">DASHBOARD ADMINISTRADOR</span>
+    <h1>Hola, <span class="hl">Administrador</span></h1>
+    <p>Resumen general de la liga y actividad reciente.</p>
+  </div>
+  ${active.status === 'active' ? `<span class="dash-pill">${icon('clock', 13)} En curso</span>` : ''}
+</section>
+<section class="dash-metrics">${metrics}</section>
+<div class="dash-grid">
+  <div class="dash-col-main">
+    <section class="dash-card dash-card-table">
+      <div class="dash-card-head"><h2>${icon('trophy', 16)} Tabla de posiciones</h2><a href="/admin/fixture">Ver completa →</a></div>
+      <div class="table-wrap"><table class="data standings">
+        <thead><tr><th>#</th><th>Equipo</th><th class="num">PJ</th><th class="num">PG</th><th class="num">PE</th><th class="num">PP</th><th class="num">GF</th><th class="num">GC</th><th class="num">Pts</th></tr></thead>
+        <tbody>${standingsRows}</tbody>
+      </table></div>
+    </section>
+    <section class="dash-card">
+      <div class="dash-card-head"><h2>${icon('list', 16)} Resultados recientes</h2><a href="/admin/planilla">Ver todos →</a></div>
+      ${recentRows}
+    </section>
+  </div>
+  <div class="dash-col-mid">
+    <section class="dash-card">
+      <div class="dash-card-head"><h2>${icon('calendar', 16)} Próximos partidos</h2><a href="/admin/fechas">Ver todos →</a></div>
+      ${upcomingRows}
+    </section>
+    <section class="dash-card">
+      <div class="dash-card-head"><h2>${icon('ball', 16)} Goles por torneo</h2><span class="muted small">${goalsAll} en el torneo</span></div>
+      ${scorersRows}
+    </section>
+  </div>
+  <div class="dash-col-side">
+    ${torneoCard}
+    <section class="dash-card">
+      <div class="dash-card-head"><h2>${icon('bolt', 16)} Accesos rápidos</h2></div>
+      <div class="dash-quick-grid">${quick}</div>
+    </section>
+    <section class="dash-card">
+      <div class="dash-card-head"><h2>${icon('bell', 16)} Actividad reciente</h2><a href="/admin/entregas">Ver todo →</a></div>
+      ${activity || `<div class="empty-note">Sin entregas pendientes.</div>`}
+    </section>
+    ${statusCard}
+  </div>
+</div>`;
+
+  return dashboardShell({
+    title: 'Panel — ZonaLiga',
+    active: 'admin',
+    groups: adminGroupsNav({ pending: pending || undefined }),
+    picker: {
+      tournaments: tournaments.map((t) => ({ slug: t.slug, name: t.name, status: t.status })),
+      currentSlug: active.slug,
+    },
+    torneo: { name: active.name, season: active.season, status: active.status, slug: active.slug },
+    search: { action: '/buscar', placeholder: 'Buscar equipos, jugadores, partidos…' },
+    pending: pending || undefined,
+    quickActions,
+    activity,
+    status:
+      pending > 0
+        ? { tone: 'warn', title: `${pending} entrega${pending === 1 ? '' : 's'} por revisar`, detail: 'Los delegados cargaron resultados que esperan tu aprobación.' }
+        : { tone: 'ok', title: 'Todo en orden', detail: 'No hay entregas pendientes de revisión.' },
+    body: dashBody,
+  });
 }
 
 /* ============================== ENTREGAS DE DELEGADOS ============================== */

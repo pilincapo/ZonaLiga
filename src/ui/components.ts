@@ -5,6 +5,8 @@ import { esc, escUrl } from '../lib/html.ts';
 import { APP_VERSION } from '../changelog.ts';
 import { icon } from './icons.ts';
 
+export { icon };
+
 export interface NavItem {
   href: string;
   label: string;
@@ -79,7 +81,7 @@ const BRAND_SVG = `<svg viewBox="0 0 40 44" fill="none" aria-hidden="true">
 </svg>`;
 
 /** Subir al cambiar CSS/íconos: versiona la URL y saltea cachés viejas. */
-const ASSET_VERSION = '40';
+const ASSET_VERSION = '41';
 
 const SUN_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.7 1.7M16.9 16.9l1.7 1.7M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7"/></svg>`;
 const MOON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2z"/></svg>`;
@@ -332,6 +334,148 @@ ${siteFooter(opts.nav, opts.mas)}
   var share = document.getElementById('footShare');
   if (share) share.href = 'https://wa.me/?text=' + encodeURIComponent('⚽ ZonaLiga — ' + document.title + ' ' + location.href);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
+</script>
+</body>
+</html>`;
+}
+
+/* ===================== Dashboard admin (solo /admin) =====================
+   Shell con sidebar + topbar, según el diseño de referencia. Solo lo usa
+   el inicio del panel; el resto de /admin/* sigue con el layout clásico.
+   Reutiliza adminNav (grupos), tournamentPicker y themeMenu de este módulo. */
+
+export interface DashQuickAction {
+  href: string;
+  label: string;
+  icon: string; // nombre de IconName
+  tone: 'green' | 'blue' | 'violet' | 'amber' | 'danger';
+}
+
+export interface DashActivityItem {
+  icon: string;
+  tone: 'green' | 'blue' | 'violet' | 'amber' | 'danger';
+  when: string;
+  title: string;
+  detail: string;
+}
+
+export interface DashboardShellOpts {
+  title: string;
+  active: string;
+  groups: NavGroup[];
+  picker?: TournamentPickerData;
+  torneo?: { name: string; season: string; status: string; slug: string } | null;
+  /** Buscador global: action + placeholder (funcionalidad existente). */
+  search?: { action: string; placeholder: string };
+  pending?: number;
+  quickActions?: DashQuickAction[];
+  activity?: DashActivityItem[];
+  /** Aviso de estado general: títulos + detalle; sin datos, no se muestra. */
+  status?: { tone: 'ok' | 'warn'; title: string; detail: string } | null;
+  body: string;
+}
+
+function dashSideNav(groups: NavGroup[], active: string): string {
+  const item = (n: NavItem) => {
+    const badge = n.badge ? `<span class="badge amber">${esc(String(n.badge))}</span>` : '';
+    return `<a href="${escUrl(n.href)}" class="${active === n.match ? 'active' : ''}">${esc(n.label)}${badge}</a>`;
+  };
+  return groups
+    .map((g) => {
+      if (g.items.length === 0 && g.href) {
+        return `<nav class="dash-sec">${item({ href: g.href, label: g.label, match: g.match ?? '' })}</nav>`;
+      }
+      return `<div class="dash-sec"><div class="dash-sec-t">${esc(g.label)}</div>${g.items.map(item).join('')}</div>`;
+    })
+    .join('');
+}
+
+export function dashboardShell(o: DashboardShellOpts): string {
+  const side = dashSideNav(o.groups, o.active);
+  const quick = (o.quickActions ?? [])
+    .map(
+      (a) => `<a class="dash-quick" href="${escUrl(a.href)}"><span class="dash-quick-ico q-${a.tone}">${icon(a.icon as 'home', 16)}</span><span>${esc(a.label)}</span></a>`
+    )
+    .join('');
+  const activity = (o.activity ?? [])
+    .map(
+      (a) => `<div class="dash-act"><span class="dash-act-ico q-${a.tone}">${icon(a.icon as 'home', 13)}</span><span class="dash-act-body"><span class="dash-act-when">${esc(a.when)}</span><strong>${esc(a.title)}</strong><span>${esc(a.detail)}</span></span></div>`
+    )
+    .join('');
+  const torneo = o.torneo
+    ? `<a class="dash-torneo" href="/admin/fixture?t=${escUrl(o.torneo.slug)}">
+  <span class="dash-torneo-ico">${icon('trophy', 20)}</span>
+  <span class="dash-torneo-tx"><strong>${esc(o.torneo.name)}</strong><span class="dash-torneo-status"><span class="dot"></span>${o.torneo.status === 'active' ? 'En curso' : o.torneo.status === 'draft' ? 'Borrador' : 'Finalizado'}</span></span>
+  <span class="chev">›</span>
+</a>`
+    : '';
+  const status = o.status
+    ? `<div class="dash-status ${o.status.tone === 'ok' ? 'st-ok' : 'st-warn'}">${icon(o.status.tone === 'ok' ? 'shield' : 'bell', 15)}<span><strong>${esc(o.status.title)}</strong><em>${esc(o.status.detail)}</em></span></div>`
+    : '';
+  const pendingBadge = o.pending ? `<span class="dash-bell-badge">${o.pending}</span>` : '';
+  const picker = o.picker ? tournamentPicker(o.picker) : '';
+  return `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(o.title)}</title>
+<meta name="theme-color" content="#0d1b2a">
+<meta name="description" content="Panel de administración de la liga amateur">
+${THEME_BOOTSTRAP}
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/img/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="/css/app.css?v=${ASSET_VERSION}">
+</head>
+<body class="dash-body">
+<div class="dash-shell">
+  <aside class="dash-side" id="dashSide">
+    <a class="dash-brand" href="/admin">
+      <span class="dash-brand-logo">${BRAND_SVG}</span>
+      <span class="dash-brand-tx"><span class="brand-word">Zona<b>Liga</b></span><small>Ligas de fútbol amateur</small></span>
+    </a>
+    <div class="dash-nav">${side}</div>
+    <div class="dash-side-foot">
+      <div class="dash-side-promo">
+        <span class="dash-promo-ico">${icon('ball', 22)}</span>
+        <strong>Tu liga, en un solo lugar</strong>
+        <p>Organizá, gestioná y hacé crecer tu torneo de forma simple y eficiente.</p>
+      </div>
+      <div class="dash-side-user"><span class="dash-avatar">AD</span><span class="dash-user-tx"><strong>Administrador</strong><small>Panel</small></span></div>
+    </div>
+  </aside>
+  <div class="dash-main">
+    <header class="dash-top">
+      <button type="button" class="dash-burger" id="dashBurger" aria-label="Abrir menú" aria-expanded="false" aria-controls="dashSide">☰</button>
+      ${picker ? `<div class="dash-top-pick">${picker}</div>` : ''}
+      ${o.search ? `<form class="dash-search" action="${escUrl(o.search.action)}" method="get" role="search"><span class="ic-wrap">${icon('search', 15)}</span><input type="search" name="q" placeholder="${esc(o.search.placeholder)}" aria-label="Buscar"></form>` : ''}
+      <div class="dash-top-actions">
+        <a class="dash-bell" href="/admin/entregas" title="Entregas pendientes" aria-label="Entregas pendientes">${icon('bell', 17)}${pendingBadge}</a>
+        ${themeMenu()}
+      </div>
+    </header>
+    <main class="dash-content">
+${o.body}
+    </main>
+  </div>
+</div>
+<div class="dash-overlay" id="dashOverlay" hidden></div>
+<script>
+  var burger = document.getElementById('dashBurger');
+  var side = document.getElementById('dashSide');
+  var overlay = document.getElementById('dashOverlay');
+  function closeSide() { side.classList.remove('open'); overlay.setAttribute('hidden', ''); burger.setAttribute('aria-expanded', 'false'); }
+  if (burger) burger.addEventListener('click', function () {
+    var open = side.classList.toggle('open');
+    if (open) overlay.removeAttribute('hidden'); else closeSide();
+    burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  if (overlay) overlay.addEventListener('click', closeSide);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSide(); });
 </script>
 </body>
 </html>`;

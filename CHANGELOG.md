@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.62] — 2026-09-28 — Nuevo diseño del inicio del panel de administración
+
+### Mejora
+
+- El inicio del panel (`/admin`) estrena diseño tipo dashboard: menú lateral fijo con navegación agrupada, buscador, campana de entregas pendientes y selector de tema; saludo de bienvenida, métricas con barra de progreso (equipos, jugadores, partidos y jornadas), tabla de posiciones, resultados recientes, próximos partidos, goleadores y accesos rápidos.
+- En pantallas chicas el menú lateral se convierte en cajón con botón ☰. El resto de las pantallas del panel sigue como estaba.
+
 ## [0.2.61] — 2026-09-28 — La portada ya no queda tapada ni pegada a los bordes
 
 ### Arreglo
