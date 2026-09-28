@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.48] — 2026-09-28 — Los números del torneo a todo color
+
+### Mejora
+
+- La línea gris de números de la portada ahora es un bloque de tarjetas de estadística: Equipos (verde), Partidos jugados (azul), Goles (violeta) y Goles por partido (naranja), con ícono, número grande y los 4 acentos nuevos, en tema claro y oscuro.
+
 ## [0.2.47] — 2026-09-25 — Nuevo look claro y oscuro estilo dashboard
 
 ### Mejora

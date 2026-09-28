@@ -324,7 +324,23 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
   const goalsAll = playedAll.reduce((acc, m) => acc + m.home_goals + m.away_goals, 0);
   const avg = playedAll.length > 0 ? (goalsAll / playedAll.length).toFixed(1) : '0.0';
   const teamsInFixture = new Set(matches.flatMap((m) => [m.home_team_id, m.away_team_id]).filter((x): x is number => x != null)).size;
-  const numbersLine = `${teamsInFixture} equipo${teamsInFixture === 1 ? '' : 's'} · ${playedAll.length} partido${playedAll.length === 1 ? '' : 's'} jugado${playedAll.length === 1 ? '' : 's'} · ${goalsAll} gol${goalsAll === 1 ? '' : 'es'}${playedAll.length > 0 ? ` · ${avg} por partido` : ''}`;
+  // Tarjetas de estadística de la portada: una por número clave, cada una
+  // con su acento (verde/azul/violeta/naranja). La de promedio solo tiene
+  // sentido si ya hay partidos jugados.
+  const statCards = [
+    { cls: 'green', ic: 'users' as const, num: String(teamsInFixture), lbl: `Equipo${teamsInFixture === 1 ? '' : 's'}` },
+    { cls: 'blue', ic: 'calendar' as const, num: String(playedAll.length), lbl: `Partido${playedAll.length === 1 ? '' : 's'} jugado${playedAll.length === 1 ? '' : 's'}` },
+    { cls: 'violet', ic: 'ball' as const, num: String(goalsAll), lbl: `Gol${goalsAll === 1 ? '' : 'es'}` },
+    ...(playedAll.length > 0 ? [{ cls: 'amber', ic: 'whistle' as const, num: avg, lbl: 'Goles por partido' }] : []),
+  ]
+    .map(
+      (s) => `<div class="stat-card st-${s.cls}">
+  <span class="stat-ico">${icon(s.ic, 17)}</span>
+  <span class="stat-num">${s.num}</span>
+  <span class="stat-lbl">${s.lbl}</span>
+</div>`
+    )
+    .join('');
 
   // Aviso destacado cuando hoy hay partidos: lleva al modo en vivo.
   const todayIso = leagueNow().date;
@@ -341,7 +357,7 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
       : '';
 
   // Portada limpia: las secciones sin datos todavía no se muestran (los
-  // enlaces siguen en el menú). Los números del torneo van en una línea.
+  // enlaces siguen en el menú). Los números del torneo van en tarjetas.
   const blocks: string[] = [];
   if (todayBanner) blocks.push(todayBanner);
   if (upcomingHtml) {
@@ -371,7 +387,7 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
   if (scorersHtml) {
     blocks.push(`<section class="block"><div class="card">${sectionHead('Goleadores', '/goleadores', 'Tabla completa')}${scorersHtml}</div></section>`);
   }
-  blocks.push(`<section class="block"><div class="card"><div class="card-body"><p class="muted" style="margin:0;text-align:center">${esc(numbersLine)}</p></div></div></section>`);
+  blocks.push(`<section class="block"><div class="card"><div class="card-body"><div class="stats-grid">${statCards}</div></div></div></section>`);
   if (torneosInner) blocks.push(`<section class="block">${torneosInner}</section>`);
   return blocks.join('\n');
 }

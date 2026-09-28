@@ -12,7 +12,8 @@ export type IconName =
   | 'list'
   | 'whistle'
   | 'monitor'
-  | 'clock';
+  | 'clock'
+  | 'ball';
 
 const ICON_PATHS: Record<IconName, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
@@ -27,6 +28,7 @@ const ICON_PATHS: Record<IconName, string> = {
   whistle: '<path d="M14 8.5h6.5v3a5.5 5.5 0 1 1-5.5-5.5H16"/><path d="M13.5 9.5h1"/>',
   monitor: '<rect x="2.5" y="4" width="19" height="13" rx="2.5"/><path d="M9 20.5h6M12 17v3.5"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  ball: '<circle cx="12" cy="12" r="9"/><path d="M12 5.5l3.2 2.3-1.2 3.8h-4l-1.2-3.8L12 5.5z"/><path d="M5.5 9.6l3 1.2M18.5 9.6l-3 1.2M8.6 16.8l2-2.7M15.4 16.8l-2-2.7"/>',
 };
 
 export function icon(name: IconName, size = 18): string {

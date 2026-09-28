@@ -1423,6 +1423,42 @@ table.data tr.tap-selected .drag-handle { color: var(--accent); }
 .zone-mini li a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zone-mini .pts { margin-left: auto; font-weight: 800; }
 
+/* Portada: tarjetas de estadística con los 4 acentos (números del torneo).
+   Ícono en cuadrado de color suave + número grande en el acento. */
+.stats-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 640px) { .stats-grid { grid-template-columns: repeat(4, 1fr); } }
+.stat-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  text-align: center; padding: 14px 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.stat-ico {
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: 9px;
+  margin-bottom: 2px;
+}
+.stat-num {
+  font-family: var(--font-head);
+  font-weight: 800; font-size: 1.45rem; line-height: 1;
+  letter-spacing: -0.5px;
+}
+.stat-lbl {
+  font-size: 0.64rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--muted);
+}
+.stat-card.st-green .stat-ico { background: var(--st-green-soft); color: var(--st-green); }
+.stat-card.st-green .stat-num { color: var(--st-green); }
+.stat-card.st-blue .stat-ico { background: var(--st-blue-soft); color: var(--st-blue); }
+.stat-card.st-blue .stat-num { color: var(--st-blue); }
+.stat-card.st-violet .stat-ico { background: var(--st-violet-soft); color: var(--st-violet); }
+.stat-card.st-violet .stat-num { color: var(--st-violet); }
+.stat-card.st-amber .stat-ico { background: var(--st-amber-soft); color: var(--st-amber); }
+.stat-card.st-amber .stat-num { color: var(--st-amber); }
+
 /* Portada: cierre compacto para administradores */
 .howto-mini {
   display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between;
