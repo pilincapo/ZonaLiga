@@ -287,7 +287,7 @@ html[data-theme='dark'] .tpick { border-color: rgba(255, 255, 255, 0.16); }
 .hero-band {
   background: var(--bg-band);
   border-bottom: 1px solid var(--border);
-  margin: -28px -16px 0;
+  margin: 0 -16px 0;
   padding: 20px 0 22px;
   position: relative;
   overflow: hidden;
@@ -321,6 +321,18 @@ html[data-theme='dark'] .tpick { border-color: rgba(255, 255, 255, 0.16); }
 .hero-band .hero-main { position: relative; }
 .hero-grid { max-width: 1040px; margin: 0 auto; padding: 0 16px; display: grid; gap: 20px; }
 .hero-main { min-width: 0; }
+
+/* Rango intermedio: el container (max-width 1040px) queda casi full-bleed
+   entre ~861 y 1040px; se agrega aire lateral creciendo el padding.
+   La banda del hero conserva su sangrado completo (mismo margen negativo)
+   y el texto del hero toma el mismo padding para quedar alineado con las
+   tarjetas del resto de la página. */
+@media (min-width: 861px) and (max-width: 1120px) {
+  .container { padding-left: 40px; padding-right: 40px; }
+  .site-header .container { padding-left: 16px; padding-right: 16px; }
+  .hero-band { margin-left: -40px; margin-right: -40px; }
+  .hero-main { padding-left: 40px; padding-right: 40px; }
+}
 .hero-main h1 { font-size: clamp(1.7rem, 5.8vw, 2.5rem); margin: 4px 0 6px; }
 .hero-main .hero-sub { font-size: 1.05rem; max-width: 520px; }
 
@@ -1135,7 +1147,7 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
   .nav.open { display: flex; }
   .nav a { padding: 10px 8px; }
   .nav a.active::after { left: 0; right: auto; width: 3px; height: 18px; bottom: 12px; }
-  .hero-band { margin-top: -28px; padding: 16px 0 18px; }
+  .hero-band { margin-top: 0; padding: 16px 0 18px; }
   .hero-grid { padding: 0 16px; }
   .feats { border-left: none; padding-left: 0; }
 }

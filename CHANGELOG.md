@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.61] — 2026-09-28 — La portada ya no queda tapada ni pegada a los bordes
+
+### Arreglo
+
+- En la portada, el cartel de bienvenida quedaba parcialmente tapado por el menú superior: ahora arranca debajo, en todas las pantallas.
+- Entre 861 y 1120px de ancho (por ejemplo, notebooks en ventana chica) el contenido quedaba pegado a los bordes: ahora tiene aire lateral, sin cambiar cómo se ve en celular ni en pantalla grande.
+
 ## [0.2.60] — 2026-09-28 — Menú activo en Buscar y Novedades; En vivo respeta tu elección de torneo
 
 ### Arreglo
