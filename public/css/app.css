@@ -461,6 +461,26 @@ table.scorers tbody tr:nth-child(3) .pos-num { background: var(--st-violet-soft)
 .pos-num.pod2 { background: var(--st-blue-soft); color: var(--st-blue); }
 .pos-num.pod3 { background: var(--st-violet-soft); color: var(--st-violet); }
 
+/* Historial: totales del torneo con acentos y banda del campeón en naranja
+   (el dorado del trofeo, coherente en claro y oscuro vía tokens st-*). */
+.hist-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  align-items: center;
+  font-size: 0.8rem; font-weight: 600; color: var(--muted);
+}
+.hist-meta .ic { vertical-align: -2px; margin-right: 3px; }
+.hist-meta .st-green { color: var(--st-green); font-weight: 800; }
+.hist-meta .st-blue { color: var(--st-blue); font-weight: 800; }
+.champ-band {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  background: var(--st-amber-soft);
+  border-radius: var(--radius-xs);
+  font-size: 0.92rem;
+}
+.champ-band .ic { color: var(--st-amber); flex: none; }
+.champ-band strong { color: var(--st-amber); }
+
 .team-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .team-cell .tname { overflow: hidden; text-overflow: ellipsis; }
 .team-cell a { color: var(--text); font-weight: 600; }

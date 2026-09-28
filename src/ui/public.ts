@@ -819,13 +819,33 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
 
   // Partidos del equipo en cada torneo
   const sections: string[] = [];
-  for (const { tournament: t, matches: all } of views) {
+  let statsHtml = '';
+  for (const { tournament: t, matches: all, teams: viewTeams } of views) {
     const mine = all.filter((m) => m.home_team_id === team.id || m.away_team_id === team.id);
     if (mine.length === 0) continue;
     // Mapa zona por equipo del torneo (para los cruces entre zonas).
     const zc = zonesOf(t.config);
     const zoneOfTeam = new Map<number, string>();
     if (zc.enabled) for (const z of zc.zones) for (const id of z.teamIds) zoneOfTeam.set(id, z.name);
+    // Tira de estadísticas del equipo en su torneo (una sola vez, el más
+    // reciente): posición verde, partidos azul, goles violeta, valla naranja.
+    if (!statsHtml) {
+      const standingsEquipo = computeStandings(
+        matchesForStandings(all, t.config),
+        viewTeams.map((tm) => ({ id: tm.id, name: tm.name })),
+        rulesOf(t)
+      );
+      const pos = standingsEquipo.findIndex((r) => r.teamId === team.id) + 1;
+      const playedMine = mine.filter((m) => m.status === 'played' || m.status === 'walkover');
+      const gf = playedMine.reduce((acc, m) => acc + (m.home_team_id === team.id ? m.home_goals : m.away_goals), 0);
+      const ga = playedMine.reduce((acc, m) => acc + (m.home_team_id === team.id ? m.away_goals : m.home_goals), 0);
+      statsHtml = `<div class="card"><div class="card-body"><div class="stats-grid">` +
+        `<div class="stat-card st-green"><span class="stat-ico">${icon('trophy', 17)}</span><span class="stat-num">${pos > 0 ? `${pos}°` : '—'}</span><span class="stat-lbl">Posición</span></div>` +
+        `<div class="stat-card st-blue"><span class="stat-ico">${icon('calendar', 17)}</span><span class="stat-num">${playedMine.length}</span><span class="stat-lbl">Partidos jugados</span></div>` +
+        `<div class="stat-card st-violet"><span class="stat-ico">${icon('ball', 17)}</span><span class="stat-num">${gf}</span><span class="stat-lbl">Goles a favor</span></div>` +
+        `<div class="stat-card st-amber" title="Goles en contra de la valla"><span class="stat-ico">${icon('shield', 17)}</span><span class="stat-num">${ga}</span><span class="stat-lbl">Valla</span></div>` +
+        `</div></div></div>`;
+    }
     sections.push(`<h3 class="zone-title">${esc(t.name)}</h3>
   <div class="card">${mine.map((m) => matchRow(m, teamMap, { zoneOfTeam })).join('')}</div>`);
   }
@@ -855,6 +875,7 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
     </div>
   </div>
 </section>
+${statsHtml ? `<section class="block">${statsHtml}</section>` : ''}
 <section class="block grid-2">
   <div class="card">${sectionHead('Plantilla')}${roster}</div>
   <div class="card">${sectionHead('Partidos')}${sections.join('') || emptyNote('Sin partidos en torneos')}</div>
@@ -992,6 +1013,8 @@ export async function historyPage(db: D1Database): Promise<string> {
     const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
     const played = matches.filter((m) => m.status === 'played' || m.status === 'walkover').length;
     const total = matches.filter((m) => m.status !== 'bye').length;
+    // Equipos que realmente figuran en el fixture del torneo (no el total de la liga).
+    const teamsCount = new Set(matches.flatMap((m) => [m.home_team_id, m.away_team_id]).filter((x): x is number => x != null)).size;
 
     let champion = '';
     if (t.status === 'finished') {
@@ -1006,9 +1029,9 @@ export async function historyPage(db: D1Database): Promise<string> {
       const finalMatch = matches.find((m) => m.bracket_round === 'F');
       const finalWinner = finalMatch ? matchWinnerLoser(finalMatch) : null;
       const championId = finalWinner?.winner ?? standings[0]?.teamId;
-      champion = championId != null ? `<div class="mt-2">🏆 <strong>Campeón:</strong> ${esc(teamMap.get(championId)?.name ?? '')}</div>` : '';
+      champion = championId != null ? `<div class="champ-band mt-2">${icon('trophy', 15)}<span><strong>Campeón:</strong> ${esc(teamMap.get(championId)?.name ?? '')}</span></div>` : '';
       if (adj !== 0) {
-        champion += `<div class="muted small">Incluye ${adj > 0 ? '+' : ''}${adj} pt(s) de ajustes manuales</div>`;
+        champion += `<div class="small" style="color:var(--st-amber);opacity:.8;margin-top:4px">Incluye ${adj > 0 ? '+' : ''}${adj} pt(s) de ajustes manuales</div>`;
       }
     }
 
@@ -1017,7 +1040,7 @@ export async function historyPage(db: D1Database): Promise<string> {
     <span class="badge ${t.status === 'finished' ? 'ghost' : t.status === 'active' ? 'green' : 'amber'}">${t.status === 'finished' ? 'Finalizado' : t.status === 'active' ? 'En curso' : 'Borrador'}</span>
   </div>
   <div class="card-body">
-    <div class="muted small">${esc(t.format === 'round_robin' ? 'Todos contra todos' : t.format === 'zonas_playoffs' ? 'Zonas + playoffs' : 'Copa')} · ${played}/${total} partidos</div>
+    <div class="hist-meta"><span>${icon('whistle', 14)}${esc(t.format === 'round_robin' ? 'Todos contra todos' : t.format === 'zonas_playoffs' ? 'Zonas + playoffs' : 'Copa')}</span><span class="st-green">${icon('users', 14)}${teamsCount} equipo${teamsCount === 1 ? '' : 's'}</span><span class="st-blue">${icon('calendar', 14)}${played}/${total} partido${total === 1 ? '' : 's'}</span></div>
     ${champion}
   </div>
 </div>`);

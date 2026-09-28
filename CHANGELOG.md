@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.50] — 2026-09-28 — Color en el historial y en cada equipo
+
+### Mejora
+
+- En el historial, cada torneo muestra sus totales con ícono y color (equipos en verde, partidos en azul) y el campeón estrena una banda naranja con el trofeo.
+- La página de cada equipo suma una tira de estadísticas con los 4 acentos: posición (verde), partidos jugados (azul), goles a favor (violeta) y valla (naranja).
+
 ## [0.2.49] — 2026-09-28 — Goleadores a todo color
 
 ### Mejora
