@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.60] — 2026-09-28 — Menú activo en Buscar y Novedades; En vivo respeta tu elección de torneo
+
+### Arreglo
+
+- Al navegar a Buscar o Novedades, el menú ahora marca bien el ítem correspondiente dentro del grupo "Más".
+- En la página En vivo, si entrás sin elegir torneo (`?t=`), el menú ya no agrega el torneo activo por su cuenta: los enlaces quedan como en la portada. Si entrás con `?t=torneo-2026`, sí se conserva tu elección.
+
 ## [0.2.59] — 2026-09-28 — Posición del equipo dentro de su zona
 
 ### Arreglo

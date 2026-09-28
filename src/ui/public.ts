@@ -1117,7 +1117,7 @@ export async function searchPage(db: D1Database, q?: string): Promise<string> {
 </section>`;
 
   if (!query) {
-    return layout({ title: 'Buscar', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: head });
+    return layout({ title: 'Buscar', active: 'buscar', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: head });
   }
 
   const [teams, players, tournaments] = await Promise.all([
@@ -1177,7 +1177,7 @@ export async function searchPage(db: D1Database, q?: string): Promise<string> {
   )}<div style="text-align:center"><a class="btn btn-ghost btn-sm" href="/equipos">Ver todos los equipos</a></div></div></div></section>`;
 
   const body = `${head}${total === 0 ? nothing : tournamentsHtml + teamsHtml + playersHtml}`;
-  return layout({ title: `Buscar: ${query}`, nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
+  return layout({ title: `Buscar: ${query}`, active: 'buscar', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== CHANGELOG ============================== */
@@ -1211,7 +1211,7 @@ export function changelogPage(): string {
   <p class="hero-sub">Acá contamos, con palabras simples, todo lo que vamos agregando y mejorando del sitio.</p>
 </section>
 <section class="block">${entries}</section>`;
-  return layout({ title: 'Novedades — ZonaLiga', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
+  return layout({ title: 'Novedades — ZonaLiga', active: 'changelog', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== 404 ============================== */

@@ -343,5 +343,5 @@ ${payload.matches.length > 0
 })();
 </script>`;
 
-  return layout({ title: `En vivo — ${tournament.name}`, active: 'envivo', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: tournament.slug, body });
+  return layout({ title: `En vivo — ${tournament.name}`, active: 'envivo', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: slug ? tournament.slug : undefined, body });
 }
