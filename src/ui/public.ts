@@ -874,12 +874,18 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
         viewTeams.map((tm) => ({ id: tm.id, name: tm.name })),
         rulesOf(t)
       );
-      const pos = standingsEquipo.findIndex((r) => r.teamId === team.id) + 1;
+      // La posición se cuenta DENTRO de su zona/grupo (no en la tabla global):
+      // es lo que le importa al hincha. Sin zonas, la tabla es el grupo entero.
+      const zonaDelEquipo = zoneOfTeam.get(team.id);
+      const tablaDelGrupo = zonaDelEquipo
+        ? standingsEquipo.filter((r) => zoneOfTeam.get(r.teamId) === zonaDelEquipo)
+        : standingsEquipo;
+      const pos = tablaDelGrupo.findIndex((r) => r.teamId === team.id) + 1;
       const playedMine = mine.filter((m) => m.status === 'played' || m.status === 'walkover');
       const gf = playedMine.reduce((acc, m) => acc + (m.home_team_id === team.id ? m.home_goals : m.away_goals), 0);
       const ga = playedMine.reduce((acc, m) => acc + (m.home_team_id === team.id ? m.away_goals : m.home_goals), 0);
       statsHtml = `<div class="card"><div class="card-body"><div class="stats-grid">` +
-        `<div class="stat-card st-green"><span class="stat-ico">${icon('trophy', 17)}</span><span class="stat-num">${pos > 0 ? `${pos}°` : '—'}</span><span class="stat-lbl">Posición</span></div>` +
+        `<div class="stat-card st-green"><span class="stat-ico">${icon('trophy', 17)}</span><span class="stat-num">${pos > 0 ? `${pos}°` : '—'}</span><span class="stat-lbl">${zonaDelEquipo ? `Posición · Zona ${esc(zonaDelEquipo)}` : 'Posición'}</span></div>` +
         `<div class="stat-card st-blue"><span class="stat-ico">${icon('calendar', 17)}</span><span class="stat-num">${playedMine.length}</span><span class="stat-lbl">Partidos jugados</span></div>` +
         `<div class="stat-card st-violet"><span class="stat-ico">${icon('ball', 17)}</span><span class="stat-num">${gf}</span><span class="stat-lbl">Goles a favor</span></div>` +
         `<div class="stat-card st-amber" title="Goles en contra de la valla"><span class="stat-ico">${icon('shield', 17)}</span><span class="stat-num">${ga}</span><span class="stat-lbl">Valla</span></div>` +

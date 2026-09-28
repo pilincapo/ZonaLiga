@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.59] — 2026-09-28 — Posición del equipo dentro de su zona
+
+### Arreglo
+
+- La posición de la ficha de equipo se cuenta dentro de su zona/grupo (con la zona en la etiqueta), no sobre la tabla global de la liga.
+
 ## [0.2.58] — 2026-09-28 — La ficha del equipo muestra su zona
 
 ### Mejora
