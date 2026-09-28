@@ -844,9 +844,24 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
   // Partidos del equipo en cada torneo
   const sections: string[] = [];
   let statsHtml = '';
+  let zonaHero = '';
   for (const { tournament: t, matches: all, teams: viewTeams } of views) {
     const mine = all.filter((m) => m.home_team_id === team.id || m.away_team_id === team.id);
     if (mine.length === 0) continue;
+    // Zona del equipo en este torneo: la del primer torneo con partidos es la
+    // que se muestra en el héroe (la ficha corresponde al torneo en curso).
+    if (!zonaHero) {
+      if (mine.some((m) => m.zone)) {
+        const conZona = mine.find((m) => m.zone);
+        zonaHero = conZona!.zone;
+      } else {
+        const zc = zonesOf(t.config);
+        if (zc.enabled) {
+          const z = zc.zones.find((zz) => zz.teamIds.includes(team.id));
+          if (z) zonaHero = z.name;
+        }
+      }
+    }
     // Mapa zona por equipo del torneo (para los cruces entre zonas).
     const zc = zonesOf(t.config);
     const zoneOfTeam = new Map<number, string>();
@@ -895,7 +910,7 @@ export async function teamPage(db: D1Database, slug: string): Promise<string> {
     <div>
       <div class="hero-kicker">Equipo</div>
       <h1>${esc(team.name)}</h1>
-      <p class="hero-sub">${esc(team.short_name)}</p>
+      <p class="hero-sub">${esc(team.short_name)}${zonaHero ? ` · Zona ${esc(zonaHero)}` : ''}</p>
     </div>
   </div>
 </section>

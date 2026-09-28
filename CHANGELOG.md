@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.58] — 2026-09-28 — La ficha del equipo muestra su zona
+
+### Mejora
+
+- La página de cada club indica a qué zona pertenece (por ejemplo "SPO · Zona Primera") junto a su nombre corto.
+
 ## [0.2.57] — 2026-09-28 — La portada recuerda el torneo elegido
 
 ### Mejora
