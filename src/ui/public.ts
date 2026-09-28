@@ -42,18 +42,30 @@ import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
 import type { Match, Team, Tournament } from '../lib/types.ts';
-import { layout, shareBar, emptyNote, type NavItem } from './components.ts';
+import { layout, shareBar, emptyNote, type NavItem, type NavGroup } from './components.ts';
 
 export const PUBLIC_NAV: NavItem[] = [
   { href: '/', label: 'Inicio', match: 'home' },
   { href: '/en-vivo', label: 'En vivo', match: 'envivo' },
-  { href: '/posiciones', label: 'Posiciones', match: 'posiciones' },
   { href: '/fixture', label: 'Fixture', match: 'fixture' },
-  { href: '/goleadores', label: 'Goleadores', match: 'goleadores' },
+  { href: '/posiciones', label: 'Posiciones', match: 'posiciones' },
   { href: '/equipos', label: 'Equipos', match: 'equipos' },
-  { href: '/historial', label: 'Historial', match: 'historial' },
-  { href: '/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
+  { href: '/goleadores', label: 'Estadísticas', match: 'goleadores' },
 ];
+
+/**
+ * Grupo "Más" del menú público: páginas de consulta secundaria. Se renderiza
+ * como dropdown en desktop y submenú simple en móvil (mismo mecanismo).
+ */
+export const PUBLIC_NAV_MAS: NavGroup = {
+  label: 'Más',
+  items: [
+    { href: '/historial', label: 'Historial', match: 'historial' },
+    { href: '/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
+    { href: '/buscar', label: 'Buscar', match: 'buscar' },
+    { href: '/changelog', label: 'Novedades', match: 'changelog' },
+  ],
+};
 
 const FORMAT_LABELS: Record<string, string> = {
   round_robin: 'Todos contra todos',
@@ -91,7 +103,7 @@ export async function homePage(db: D1Database, origin: string, slugParam?: strin
 ${heroBand(t)}
 ${body}
 ${howToBlock()}`;
-  return layout({ title: 'ZonaLiga — Inicio', active: 'home', nav: PUBLIC_NAV, body: inner });
+  return layout({ title: 'ZonaLiga — Inicio', active: 'home', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: t?.slug, body: inner });
 }
 
 /** Banda del hero con buscador (sin tarjetitas: lo que ofrece ZonaLiga ya lo cuenta el bloque final). */
@@ -424,7 +436,7 @@ function homeMatchRow(m: Match, teamMap: Map<number, Team>, zoneOfTeam: Map<numb
 
 export async function standingsPage(db: D1Database, slugParam?: string, origin = ''): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam });
-  if (!view) return layout({ title: 'Posiciones', active: 'posiciones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  if (!view) return layout({ title: 'Posiciones', active: 'posiciones', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: emptyNote('No hay torneo activo') });
   const t = view.tournament;
   const matches = view.matches;
   const teams = view.teams;
@@ -540,7 +552,7 @@ ${tables || emptyNote('Sin datos todavía')}
 ${standingsShare}
 ${leaders}
 ${adjustmentsNote}`;
-  return layout({ title: `Posiciones — ${t.name}`, active: 'posiciones', nav: PUBLIC_NAV, body });
+  return layout({ title: `Posiciones — ${t.name}`, active: 'posiciones', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: t.slug, body });
 }
 
 /* ============================== FIXTURE ============================== */
@@ -564,7 +576,7 @@ export function fxPageIndexFromUrl(raw: string | undefined, roundKeys: readonly 
 
 export async function fixturePage(db: D1Database, slugParam?: string, roundParam?: string, origin = ''): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam });
-  if (!view) return layout({ title: 'Fixture', active: 'fixture', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  if (!view) return layout({ title: 'Fixture', active: 'fixture', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: emptyNote('No hay torneo activo') });
   const t = view.tournament;
   const matches = view.matches;
   const teams = view.teams;
@@ -739,14 +751,14 @@ ${fxPages.length > 0 ? fxNav : ''}
 ${fxPagesHtml || emptyNote('Fixture sin generar todavía')}
 ${bracketHtml}
 ${fxScript}`;
-  return layout({ title: `Fixture — ${t.name}`, active: 'fixture', nav: PUBLIC_NAV, body });
+  return layout({ title: `Fixture — ${t.name}`, active: 'fixture', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: t.slug, body });
 }
 
 /* ============================== GOLEADORES ============================== */
 
 export async function scorersPage(db: D1Database, origin: string, slugParam?: string): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam, scorers: 50 });
-  if (!view) return layout({ title: 'Goleadores', active: 'goleadores', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  if (!view) return layout({ title: 'Goleadores', active: 'goleadores', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: emptyNote('No hay torneo activo') });
   const t = view.tournament;
 
   const [scorers, cards] = await Promise.all([Promise.resolve(view.scorers), topCards(db, t.id, 50)]);
@@ -788,7 +800,7 @@ export async function scorersPage(db: D1Database, origin: string, slugParam?: st
   <div class="card">${sectionHead('Tabla de goleadores')}${scorersHtml}</div>
   <div class="card">${sectionHead('Tarjetas')}${cardsHtml}</div>
 </section>`;
-  return layout({ title: `Goleadores — ${t.name}`, active: 'goleadores', nav: PUBLIC_NAV, body });
+  return layout({ title: `Estadísticas — ${t.name}`, active: 'goleadores', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: t.slug, body });
 }
 
 /* ============================== EQUIPOS ============================== */
@@ -806,7 +818,7 @@ export async function teamsPage(db: D1Database): Promise<string> {
   const body = `
 <section class="hero"><div class="hero-kicker">ZonaLiga</div><h1>Equipos</h1></section>
 <section class="block"><div class="grid-cards">${cards}</div></section>`;
-  return layout({ title: 'Equipos', active: 'equipos', nav: PUBLIC_NAV, body });
+  return layout({ title: 'Equipos', active: 'equipos', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 export async function teamPage(db: D1Database, slug: string): Promise<string> {
@@ -880,7 +892,7 @@ ${statsHtml ? `<section class="block">${statsHtml}</section>` : ''}
   <div class="card">${sectionHead('Plantilla')}${roster}</div>
   <div class="card">${sectionHead('Partidos')}${sections.join('') || emptyNote('Sin partidos en torneos')}</div>
 </section>`;
-  return layout({ title: team.name, active: 'equipos', nav: PUBLIC_NAV, body });
+  return layout({ title: team.name, active: 'equipos', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== JUGADOR ============================== */
@@ -916,7 +928,7 @@ export async function playerPage(db: D1Database, id: number): Promise<string> {
 <section class="block grid-2">
   <div class="card">${sectionHead('Por torneo')}${perTournament.join('') || emptyNote('Sin estadísticas todavía')}</div>
 </section>`;
-  return layout({ title: player.name, active: 'equipos', nav: PUBLIC_NAV, body });
+  return layout({ title: player.name, active: 'equipos', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 function initials(name: string): string {
@@ -997,7 +1009,7 @@ ${
 </section>`
     : ''
 }`;
-  return layout({ title: `Partido ${m.id}`, active: 'fixture', nav: PUBLIC_NAV, body });
+  return layout({ title: `Partido ${m.id}`, active: 'fixture', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== HISTORIAL ============================== */
@@ -1005,7 +1017,7 @@ ${
 export async function historyPage(db: D1Database): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
-    return layout({ title: 'Historial', active: 'historial', nav: PUBLIC_NAV, body: emptyNote('Todavía no hay torneos') });
+    return layout({ title: 'Historial', active: 'historial', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: emptyNote('Todavía no hay torneos') });
   }
 
   const cards: string[] = [];
@@ -1049,7 +1061,7 @@ export async function historyPage(db: D1Database): Promise<string> {
   const body = `
 <section class="hero"><div class="hero-kicker">ZonaLiga</div><h1>Historial de torneos</h1></section>
 <section class="block grid-2">${cards.join('')}</section>`;
-  return layout({ title: 'Historial', active: 'historial', nav: PUBLIC_NAV, body });
+  return layout({ title: 'Historial', active: 'historial', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== BUSCAR ============================== */
@@ -1072,7 +1084,7 @@ export async function searchPage(db: D1Database, q?: string): Promise<string> {
 </section>`;
 
   if (!query) {
-    return layout({ title: 'Buscar', nav: PUBLIC_NAV, body: head });
+    return layout({ title: 'Buscar', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: head });
   }
 
   const [teams, players, tournaments] = await Promise.all([
@@ -1132,7 +1144,7 @@ export async function searchPage(db: D1Database, q?: string): Promise<string> {
   )}<div style="text-align:center"><a class="btn btn-ghost btn-sm" href="/equipos">Ver todos los equipos</a></div></div></div></section>`;
 
   const body = `${head}${total === 0 ? nothing : tournamentsHtml + teamsHtml + playersHtml}`;
-  return layout({ title: `Buscar: ${query}`, nav: PUBLIC_NAV, body });
+  return layout({ title: `Buscar: ${query}`, nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== CHANGELOG ============================== */
@@ -1166,21 +1178,21 @@ export function changelogPage(): string {
   <p class="hero-sub">Acá contamos, con palabras simples, todo lo que vamos agregando y mejorando del sitio.</p>
 </section>
 <section class="block">${entries}</section>`;
-  return layout({ title: 'Novedades — ZonaLiga', nav: PUBLIC_NAV, body });
+  return layout({ title: 'Novedades — ZonaLiga', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== 404 ============================== */
 
 export function notFoundPage(): string {
   const body = `<section class="hero"><h1>404</h1><p class="hero-sub">No encontramos esta página.</p><a class="btn btn-primary mt-3" href="/">Volver al inicio</a></section>`;
-  return layout({ title: 'No encontrado', nav: PUBLIC_NAV, body });
+  return layout({ title: 'No encontrado', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body });
 }
 
 /* ============================== Suspensiones (público) ============================== */
 
 export async function suspensionsPage(db: D1Database, slugParam?: string): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam, events: true });
-  if (!view) return layout({ title: 'Suspensiones', active: 'suspensiones', nav: PUBLIC_NAV, body: emptyNote('No hay torneo activo') });
+  if (!view) return layout({ title: 'Suspensiones', active: 'suspensiones', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: emptyNote('No hay torneo activo') });
   const t = view.tournament;
   const matches = view.matches;
   const teams = view.teams;
@@ -1211,7 +1223,7 @@ export async function suspensionsPage(db: D1Database, slugParam?: string): Promi
   const body = `
 <section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Suspensiones</h1></section>
 <section class="block"><div class="card">${table}</div></section>`;
-  return layout({ title: `Suspensiones — ${t.name}`, active: 'suspensiones', nav: PUBLIC_NAV, body });
+  return layout({ title: `Suspensiones — ${t.name}`, active: 'suspensiones', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: t.slug, body });
 }
 
 /* Re-export helpers usados por rutas */

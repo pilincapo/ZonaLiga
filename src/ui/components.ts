@@ -79,7 +79,7 @@ const BRAND_SVG = `<svg viewBox="0 0 40 44" fill="none" aria-hidden="true">
 </svg>`;
 
 /** Subir al cambiar CSS/íconos: versiona la URL y saltea cachés viejas. */
-const ASSET_VERSION = '38';
+const ASSET_VERSION = '39';
 
 const SUN_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.7 1.7M16.9 16.9l1.7 1.7M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7"/></svg>`;
 const MOON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2z"/></svg>`;
@@ -138,7 +138,9 @@ function brandMark(href: string): string {
     </a>`;
 }
 
-function siteFooter(): string {
+function siteFooter(nav: NavItem[], mas?: NavGroup): string {
+  const principal = nav.map((n) => `<li><a href="${escUrl(n.href)}">${esc(n.label)}</a></li>`).join('');
+  const masItems = mas ? mas.items.map((n) => `<li><a href="${escUrl(n.href)}">${esc(n.label)}</a></li>`).join('') : '';
   return `<footer class="site-footer">
   <div class="container">
     <div class="foot-grid">
@@ -148,24 +150,13 @@ function siteFooter(): string {
       </div>
       <div class="foot-col">
         <h3>Navegación</h3>
-        <ul>
-          <li><a href="/">Inicio</a></li>
-          <li><a href="/en-vivo">En vivo</a></li>
-          <li><a href="/posiciones">Posiciones</a></li>
-          <li><a href="/fixture">Fixture</a></li>
-          <li><a href="/goleadores">Goleadores</a></li>
-          <li><a href="/equipos">Equipos</a></li>
-          <li><a href="/historial">Historial</a></li>
-          <li><a href="/suspensiones">Suspensiones</a></li>
-        </ul>
+        <ul>${principal}${masItems}</ul>
       </div>
       <div class="foot-col">
         <h3>Accesos</h3>
         <ul>
           <li><a href="/admin">Panel de administración</a></li>
           <li><a href="/delegado">Carga de resultados (delegados)</a></li>
-          <li><a href="/buscar">Buscar equipo o jugador</a></li>
-          <li><a href="/historial">Archivo de torneos</a></li>
         </ul>
       </div>
       <div class="foot-col foot-news">
@@ -200,17 +191,43 @@ export function layout(opts: {
   adminGroups?: NavGroup[];
   /** Torneos para el selector global del header del panel. */
   tournaments?: TournamentPickerData;
+  /** Grupo desplegable del sitio público ("Más"). */
+  mas?: NavGroup;
+  /** Slug del torneo actual (?t=) para propagarlo en los enlaces del menú público. */
+  tSlug?: string;
   brandHref?: string;
   actions?: string;
 }): string {
+  const withT = (href: string): string => {
+    // Propaga el torneo actual en los links del menú público (solo rutas que
+    // aceptan ?t=). Sin ?t= en la página, el link queda como siempre.
+    if (!opts.tSlug || opts.isAdmin) return href;
+    if (href === '/' ) return `/?t=${escUrl(opts.tSlug)}`;
+    if (['/en-vivo', '/fixture', '/posiciones', '/goleadores', '/suspensiones'].includes(href)) {
+      return `${href}?t=${escUrl(opts.tSlug)}`;
+    }
+    return href;
+  };
+  const masHtml = opts.mas
+    ? (() => {
+        const items = opts.mas.items
+          .map((n) => `<a href="${escUrl(n.href)}" class="${opts.active === n.match ? 'active' : ''}">${esc(n.label)}</a>`)
+          .join('');
+        const groupActive = opts.mas.items.some((i) => i.match === opts.active);
+        return `<div class="nav-group${groupActive ? ' active' : ''}">
+      <button type="button" class="nav-drop${groupActive ? ' active' : ''}" aria-expanded="false" aria-haspopup="true">${esc(opts.mas.label)}<span class="caret" aria-hidden="true">▾</span></button>
+      <div class="nav-pop">${items}</div>
+    </div>`;
+      })()
+    : '';
   const nav = opts.adminGroups
     ? adminNav(opts.adminGroups, opts.active ?? '')
     : opts.nav
         .map((n) => {
       const badge = n.badge ? ` <span class="badge amber">${esc(String(n.badge))}</span>` : '';
-      return `<a href="${escUrl(n.href)}" class="${opts.active === n.match ? 'active' : ''}">${esc(n.label)}${badge}</a>`;
+      return `<a href="${escUrl(withT(n.href))}" class="${opts.active === n.match ? 'active' : ''}">${esc(n.label)}${badge}</a>`;
     })
-    .join('');
+        .join('') + masHtml;
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -240,7 +257,7 @@ ${THEME_BOOTSTRAP}
 <main class="container">
 ${opts.body}
 </main>
-${siteFooter()}
+${siteFooter(opts.nav, opts.mas)}
 <script>
   var t = document.getElementById('navToggle');
   if (t) t.addEventListener('click', function () {

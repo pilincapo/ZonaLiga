@@ -200,7 +200,8 @@ img { max-width: 100%; }
    Los ítems entran sin scroll en todos los anchos desktop (v0.2.54), y en
    móvil (≤860px) el pop es static y no depende de esto. */
 @media (min-width: 861px) {
-  .admin-header .nav { overflow: visible; }
+  .admin-header .nav,
+  .site-header:not(.admin-header) .nav { overflow: visible; }
 }
 
 /* Selector global de torneo (header del panel) */

@@ -15,7 +15,7 @@ import { loadTournamentView, type TournamentView } from '../lib/tournamentView.t
 import type { Tournament } from '../lib/types.ts';
 import { crest } from './match.ts';
 import { emptyNote, layout } from './components.ts';
-import { PUBLIC_NAV } from './public.ts';
+import { PUBLIC_NAV, PUBLIC_NAV_MAS } from './public.ts';
 
 /** Cada cuántos segundos se refresca la vista. */
 const POLL_SECONDS = 20;
@@ -142,7 +142,7 @@ export async function livePage(db: D1Database, slug?: string): Promise<string> {
     return layout({
       title: 'En vivo',
       active: 'envivo',
-      nav: PUBLIC_NAV,
+      nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS,
       body: emptyNote('No hay torneo activo'),
     });
   }
@@ -343,5 +343,5 @@ ${payload.matches.length > 0
 })();
 </script>`;
 
-  return layout({ title: `En vivo — ${tournament.name}`, active: 'envivo', nav: PUBLIC_NAV, body });
+  return layout({ title: `En vivo — ${tournament.name}`, active: 'envivo', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: tournament.slug, body });
 }

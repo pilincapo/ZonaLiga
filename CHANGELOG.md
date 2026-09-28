@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.56] — 2026-09-28 — Nueva navegación del sitio público
+
+### Mejora
+
+- El menú principal se reordena según cómo se usa la liga: Inicio, En vivo, Fixture, Posiciones, Equipos y Estadísticas (la tabla de goleadores y tarjetas, con su nuevo nombre).
+- Un menú "Más" agrupa Historial, Suspensiones, Buscar y Novedades; el pie de página refleja la misma estructura sin duplicados.
+- Cuando estás viendo un torneo en particular, los enlaces del menú conservan ese torneo al navegar entre secciones.
+
 ## [0.2.55] — 2026-09-28 — Menús desplegables del panel visibles
 
 ### Arreglo
