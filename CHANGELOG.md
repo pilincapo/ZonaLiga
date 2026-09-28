@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.49] — 2026-09-28 — Goleadores a todo color
+
+### Mejora
+
+- En la tabla de goleadores, el podio se pinta con los acentos nuevos (1° verde, 2° azul, 3° violeta, igual que en posiciones) y los goles de los tres primeros llevan el mismo color, un poco más grandes.
+- El bloque de goleadores de la portada usa los mismos chips de color para el podio.
+
 ## [0.2.48] — 2026-09-28 — Los números del torneo a todo color
 
 ### Mejora

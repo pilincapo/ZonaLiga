@@ -276,7 +276,7 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
     ? scorers
         .map(
           (s, i) => `<div class="match-row">
-  <span class="pos-num">${i + 1}</span>
+  <span class="pos-num pod${i < 3 ? String(i + 1) : ''}">${i + 1}</span>
   <span class="team-cell"><a href="/jugador/${s.player_id}">${esc(s.player_name)}</a></span>
   <span class="muted small">${esc(s.team_name)}</span>
   <span class="strong" style="margin-left:auto">${s.goals}</span>
@@ -753,7 +753,7 @@ export async function scorersPage(db: D1Database, origin: string, slugParam?: st
   const shareLines = scorers.slice(0, 10).map((s, i) => `${i + 1}. ${s.player_name} (${s.team_name}) — ${s.goals} goles`);
 
   const scorersHtml = scorers.length
-    ? `<div class="table-wrap"><table class="data">
+    ? `<div class="table-wrap"><table class="data scorers">
   <thead><tr><th></th><th>Jugador</th><th>Equipo</th><th class="num">Goles</th></tr></thead>
   <tbody>${scorers
     .map(
@@ -761,7 +761,7 @@ export async function scorersPage(db: D1Database, origin: string, slugParam?: st
     <td class="pos-num">${i + 1}</td>
     <td><a href="/jugador/${s.player_id}">${esc(s.player_name)}</a>${s.number != null ? ` <span class="faint small">#${s.number}</span>` : ''}</td>
     <td>${esc(s.team_name)}</td>
-    <td class="num"><strong>${s.goals}</strong></td>
+    <td class="num"><strong class="goal-n goal-n${i + 1 <= 3 ? String(i + 1) : ''}">${s.goals}</strong></td>
   </tr>`
     )
     .join('')}</tbody></table></div>${shareBar([{ label: '📲 Compartir tabla', href: waLink(shareTextScorers(t.name, shareLines, absoluteUrl('/goleadores', origin))) }])}`

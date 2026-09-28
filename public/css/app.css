@@ -440,6 +440,27 @@ td.r { text-align: right; white-space: nowrap; }
 .standings tbody tr:nth-child(2) .pos-num { background: var(--st-blue-soft); color: var(--st-blue); }
 .standings tbody tr:nth-child(3) .pos-num { background: var(--st-violet-soft); color: var(--st-violet); }
 
+/* Goleadores: el podio comparte los chips de posiciones (1° verde, 2° azul,
+   3° violeta) y los goles del top 3 se pintan con el mismo acento. */
+table.scorers tbody tr:nth-child(1) .pos-num { background: var(--st-green-soft); color: var(--st-green); }
+table.scorers tbody tr:nth-child(2) .pos-num { background: var(--st-blue-soft); color: var(--st-blue); }
+table.scorers tbody tr:nth-child(3) .pos-num { background: var(--st-violet-soft); color: var(--st-violet); }
+.goal-n { font-family: var(--font-head); font-size: 1.02rem; }
+.goal-n1 { color: var(--st-green); }
+.goal-n2 { color: var(--st-blue); }
+.goal-n3 { color: var(--st-violet); }
+
+/* Podio en cualquier lista de números (bloque de goleadores de la portada):
+   chips chicos con el mismo acento que las tablas. */
+.pos-num.pod1, .pos-num.pod2, .pos-num.pod3 {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; font-size: 0.72rem;
+}
+.pos-num.pod1 { background: var(--st-green-soft); color: var(--st-green); }
+.pos-num.pod2 { background: var(--st-blue-soft); color: var(--st-blue); }
+.pos-num.pod3 { background: var(--st-violet-soft); color: var(--st-violet); }
+
 .team-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .team-cell .tname { overflow: hidden; text-overflow: ellipsis; }
 .team-cell a { color: var(--text); font-weight: 600; }
