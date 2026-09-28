@@ -56,6 +56,7 @@ import { getMatch, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
 import { deleteAdjustment, insertAdjustment, parseAdjustment } from '../lib/adjustments.ts';
 import { adjustmentsAdminPage } from '../ui/adminAjustes.ts';
+import { delegadosAdminPage, estadisticasAdminPage } from '../ui/adminStats.ts';
 import * as admin from '../ui/admin.ts';
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -107,6 +108,18 @@ adminRoutes.get('/logout', (c) => {
 });
 
 adminRoutes.get('/', (c) => admin.dashboardPage(c.env.DB, c.req.query('msg') ?? undefined, c.req.query('err') ?? undefined).then((html) => c.html(html)));
+
+/* ---------- Delegados (vista consolidada) ---------- */
+
+adminRoutes.get('/delegados', async (c) =>
+  c.html(await delegadosAdminPage(c.env.DB, c.req.query('msg'), c.req.query('err')))
+);
+
+/* ---------- Estadísticas del torneo ---------- */
+
+adminRoutes.get('/estadisticas', async (c) =>
+  c.html(await estadisticasAdminPage(c.env.DB, c.req.query('t'), c.req.query('tab')))
+);
 
 /* ---------- Torneos ---------- */
 

@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.52] — 2026-09-28 — Nuevas páginas: Delegados y Estadísticas
+
+### Nuevo
+
+- La sección Delegados muestra todos los clubes juntos: quién tiene delegado, su código, entregas pendientes y accesos para habilitar, regenerar o revocar.
+- La sección Estadísticas reúne en pestañas la tabla por zona, goleadores y tarjetas, fair play y valla menos vencida del torneo.
+
 ## [0.2.51] — 2026-09-28 — Panel reorganizado: nuevo menú con secciones
 
 ### Mejora
