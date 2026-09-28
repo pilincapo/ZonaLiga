@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.55] — 2026-09-28 — Menús desplegables del panel visibles
+
+### Arreglo
+
+- Los menús Competencia, Operación, Equipos y Administración se despliegan completos encima del contenido: antes quedaban recortados por el scroll interno de la barra de navegación.
+
 ## [0.2.54] — 2026-09-28 — Ajustes de pantalla angosta en el panel
 
 ### Arreglo

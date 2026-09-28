@@ -195,6 +195,14 @@ img { max-width: 100%; }
 .nav-pop a.active { background: var(--accent-soft); color: var(--accent-strong) !important; }
 .nav-pop .badge { margin-left: auto; }
 
+/* Desktop: sin scroll horizontal en el nav del panel, para que los dropdowns
+   (.nav-pop, position:absolute) no queden recortados por el scroll container.
+   Los ítems entran sin scroll en todos los anchos desktop (v0.2.54), y en
+   móvil (≤860px) el pop es static y no depende de esto. */
+@media (min-width: 861px) {
+  .admin-header .nav { overflow: visible; }
+}
+
 /* Selector global de torneo (header del panel) */
 .tpick {
   display: inline-flex; align-items: center; gap: 6px;
