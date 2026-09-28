@@ -6,8 +6,8 @@ import { esc, escUrl } from '../lib/html.ts';
 import { formatDateShort } from '../lib/format.ts';
 import { adjustmentsForTournament, type AdjustmentRow } from '../lib/adjustments.ts';
 import { listTeams, listTournaments } from '../lib/queries.ts';
-import { ADMIN_NAV } from './admin.ts';
-import { emptyNote, layout } from './components.ts';
+import { adminLayout } from './admin.ts';
+import { emptyNote } from './components.ts';
 
 function flash(kind: 'error' | 'success', message: string | undefined): string {
   if (!message) return '';
@@ -42,11 +42,9 @@ export async function adjustmentsAdminPage(
 ): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
-    return layout({
-      title: 'Puntos',
+    return await adminLayout(db, {
+      title: 'Ajustes de puntos',
       active: 'ajustes',
-      nav: ADMIN_NAV,
-      isAdmin: true,
       body: `<section class="hero" style="padding-bottom:12px">${pageHeadInner()}</section><div class="card"><div class="card-body">Primero creá un torneo.</div></div>`,
     });
   }
@@ -110,7 +108,7 @@ ${flashMsg ? flash(flashMsg.kind, flashMsg.text) : ''}
   <div class="card-head"><h2 style="font-size:1rem">Historial de ajustes</h2><span class="badge ghost">${rows.length}</span></div>
   <div class="card-body">${history}</div>
 </div></section>`;
-  return layout({ title: 'Puntos', active: 'ajustes', nav: ADMIN_NAV, isAdmin: true, body });
+  return await adminLayout(db, { title: 'Ajustes de puntos', active: 'ajustes', body });
 }
 
 function pageHeadInner(): string {

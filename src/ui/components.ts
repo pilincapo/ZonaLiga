@@ -12,6 +12,64 @@ export interface NavItem {
   badge?: string | number;
 }
 
+/**
+ * Grupo del menú del panel: suelto (con href, sin ítems: Inicio, Estadísticas)
+ * o desplegable (con ítems). El grupo se marca activo si su match coincide o
+ * si alguno de sus ítems es la página actual.
+ */
+export interface NavGroup {
+  label: string;
+  items: NavItem[];
+  href?: string;
+  match?: string;
+}
+
+/** Selector global de torneo del header del panel (viaja con ?t=). */
+export interface TournamentPickerData {
+  tournaments: { slug: string; name: string; status: string }[];
+  /** Torneo marcado como seleccionado (en el panel: el activo). */
+  currentSlug?: string;
+}
+
+function tournamentPicker(p: TournamentPickerData): string {
+  if (p.tournaments.length === 0) return '';
+  const options = p.tournaments
+    .map((t) => {
+      const extra = t.status === 'finished' ? ' (finalizado)' : t.status === 'draft' ? ' (borrador)' : '';
+      const sel = t.slug === p.currentSlug ? ' selected' : '';
+      return `<option value="${escUrl(t.slug)}"${sel}>${esc(t.name)}${extra}</option>`;
+    })
+    .join('');
+  // Form GET con action vacío: recarga la página actual con ?t=nuevo. Sin JS
+  // también funciona (el navegador muestra el botón de enviar del form).
+  return `<form class="tpick" method="get" action="" title="Torneo activo">
+    ${icon('trophy', 15)}
+    <select name="t" aria-label="Torneo activo" onchange="this.form.submit()">${options}</select>
+  </form>`;
+}
+
+/** Menú del panel con grupos: sueltos como links y desplegables con nav-pop. */
+function adminNav(groups: NavGroup[], active: string): string {
+  const itemHtml = (n: NavItem) => {
+    const badge = n.badge ? ` <span class="badge amber">${esc(String(n.badge))}</span>` : '';
+    return `<a href="${escUrl(n.href)}" class="${active === n.match ? 'active' : ''}">${esc(n.label)}${badge}</a>`;
+  };
+  return groups
+    .map((g) => {
+      if (g.items.length === 0 && g.href) {
+        return itemHtml({ href: g.href, label: g.label, match: g.match ?? '' });
+      }
+      const groupActive = g.match === active || g.items.some((i) => i.match === active);
+      const totalBadge = g.items.reduce((acc, i) => acc + (typeof i.badge === 'number' ? i.badge : 0), 0);
+      const badge = totalBadge > 0 ? `<span class="badge amber">${totalBadge}</span>` : '';
+      return `<div class="nav-group${groupActive ? ' active' : ''}">
+      <button type="button" class="nav-drop${groupActive ? ' active' : ''}" aria-expanded="false" aria-haspopup="true">${esc(g.label)}${badge}<span class="caret" aria-hidden="true">▾</span></button>
+      <div class="nav-pop">${g.items.map(itemHtml).join('')}</div>
+    </div>`;
+    })
+    .join('');
+}
+
 const BRAND_SVG = `<svg viewBox="0 0 40 44" fill="none" aria-hidden="true">
   <path d="M20 2.2l15.6 5.6v12.6c0 9.8-6.5 17.2-15.6 20.4C10.9 37.6 4.4 30.2 4.4 20.4V7.8L20 2.2z" fill="#0e8a4a"/>
   <path d="M20 2.2l15.6 5.6v12.6c0 9.8-6.5 17.2-15.6 20.4C10.9 37.6 4.4 30.2 4.4 20.4V7.8L20 2.2z" stroke="#21c063" stroke-width="2.4"/>
@@ -21,7 +79,7 @@ const BRAND_SVG = `<svg viewBox="0 0 40 44" fill="none" aria-hidden="true">
 </svg>`;
 
 /** Subir al cambiar CSS/íconos: versiona la URL y saltea cachés viejas. */
-const ASSET_VERSION = '28';
+const ASSET_VERSION = '30';
 
 const SUN_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.7 1.7M16.9 16.9l1.7 1.7M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7"/></svg>`;
 const MOON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2z"/></svg>`;
@@ -138,11 +196,17 @@ export function layout(opts: {
   nav: NavItem[];
   body: string;
   isAdmin?: boolean;
+  /** Navegación del panel: grupos con dropdown + selector global de torneo. */
+  adminGroups?: NavGroup[];
+  /** Torneos para el selector global del header del panel. */
+  tournaments?: TournamentPickerData;
   brandHref?: string;
   actions?: string;
 }): string {
-  const nav = opts.nav
-    .map((n) => {
+  const nav = opts.adminGroups
+    ? adminNav(opts.adminGroups, opts.active ?? '')
+    : opts.nav
+        .map((n) => {
       const badge = n.badge ? ` <span class="badge amber">${esc(String(n.badge))}</span>` : '';
       return `<a href="${escUrl(n.href)}" class="${opts.active === n.match ? 'active' : ''}">${esc(n.label)}${badge}</a>`;
     })
@@ -170,7 +234,7 @@ ${THEME_BOOTSTRAP}
     ${brandMark(opts.brandHref ?? (opts.isAdmin ? '/admin' : '/'))}
     <button id="navToggle" aria-label="Menú" aria-expanded="false">☰</button>
     <nav class="nav" id="mainNav">${nav}</nav>
-    <div class="header-actions">${opts.actions ?? defaultActions(opts.isAdmin ?? false)}${themeMenu()}</div>
+    <div class="header-actions">${opts.tournaments ? tournamentPicker(opts.tournaments) : ''}${opts.actions ?? defaultActions(opts.isAdmin ?? false)}${themeMenu()}</div>
   </div>
 </header>
 <main class="container">
@@ -183,6 +247,27 @@ ${siteFooter()}
     var open = document.getElementById('mainNav').classList.toggle('open');
     t.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
+  /* Dropdowns del panel: abren al toque, cierran con clic afuera o Escape.
+     En móvil, el botón del grupo funciona como acordeón. */
+  var drops = [].slice.call(document.querySelectorAll('.nav-group'));
+  function closeDrops(except) {
+    drops.forEach(function (g) {
+      if (g !== except) { g.classList.remove('open'); var b = g.querySelector('.nav-drop'); if (b) b.setAttribute('aria-expanded', 'false'); }
+    });
+  }
+  drops.forEach(function (g) {
+    var btn = g.querySelector('.nav-drop');
+    if (!btn) return;
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var willOpen = !g.classList.contains('open');
+      closeDrops(g);
+      g.classList.toggle('open', willOpen);
+      btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+  });
+  document.addEventListener('click', function () { closeDrops(null); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrops(null); });
   /* Tema: claro / oscuro / automático */
   var tBtn = document.getElementById('themeToggle');
   var tPop = document.getElementById('themePop');

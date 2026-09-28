@@ -77,9 +77,9 @@ adminRoutes.use('*', async (c, next) => {
   return c.redirect(`/admin/login?next=${encodeURIComponent(path)}`);
 });
 
-adminRoutes.get('/login', (c) => {
+adminRoutes.get('/login', async (c) => {
   const next = c.req.query('next');
-  return c.html(admin.loginPage(undefined, next));
+  return c.html(await admin.loginPage(undefined, next));
 });
 
 adminRoutes.post('/login', async (c) => {
@@ -483,7 +483,7 @@ adminRoutes.get('/fixture/vista-previa', async (c) => {
   const teamRows = await c.env.DB.prepare('SELECT id, name FROM teams').all<{ id: number; name: string }>();
   const teamNames = new Map((teamRows.results ?? []).map((r) => [r.id, r.name]));
   return c.html(
-    admin.fixturePreviewPage({
+    await admin.fixturePreviewPage({
       tournamentId: t.id,
       tournamentSlug: t.slug,
       tournamentName: t.name,

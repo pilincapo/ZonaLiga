@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.51] — 2026-09-28 — Panel reorganizado: nuevo menú con secciones
+
+### Mejora
+
+- El panel de administración estrena su navegación en 6 secciones: Inicio, Competencia (Torneos, Fixture y llaves), Operación (Fechas, Resultados, Entregas), Equipos (Equipos, Jugadores, Delegados), Estadísticas y Administración (Ajustes de puntos, Suspensiones).
+- Fechas deja de estar escondido: ahora es un ítem de primer nivel dentro de Operación.
+- El header del panel suma un selector único de torneo activo y menús desplegables en computadora; en celular el menú funciona como acordeón.
+
 ## [0.2.50] — 2026-09-28 — Color en el historial y en cada equipo
 
 ### Mejora

@@ -149,6 +149,93 @@ img { max-width: 100%; }
 }
 .nav .badge { margin-left: 5px; }
 
+/* Grupos desplegables del panel (nivel desktop) */
+.nav-group { position: relative; }
+.nav-drop {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 10px;
+  border: none; background: transparent;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.74);
+  font: inherit; font-size: 0.86rem; font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+}
+.nav-drop:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.nav-drop.active { color: #fff; }
+.nav-drop.active::after {
+  content: '';
+  position: absolute; left: 12px; right: 12px; bottom: -2px;
+  height: 2px; border-radius: 2px; background: var(--accent);
+}
+.nav-drop .caret { font-size: 0.62rem; opacity: 0.7; transition: transform 0.15s ease; }
+.nav-group.open .nav-drop .caret { transform: rotate(180deg); }
+.nav-pop {
+  display: none;
+  position: absolute;
+  left: 0; top: calc(100% + 8px);
+  min-width: 200px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+  flex-direction: column; gap: 2px;
+}
+.nav-group.open .nav-pop { display: flex; }
+.nav-pop a {
+  display: flex; align-items: center;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: var(--text) !important;
+  font-size: 0.9rem; font-weight: 600;
+  white-space: nowrap;
+}
+.nav-pop a:hover { background: var(--surface-2); color: var(--text) !important; text-decoration: none; }
+.nav-pop a.active { background: var(--accent-soft); color: var(--accent-strong) !important; }
+.nav-pop .badge { margin-left: auto; }
+
+/* Selector global de torneo (header del panel) */
+.tpick {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 9px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+.tpick select {
+  width: auto; min-width: 0; max-width: 180px;
+  padding: 3px 22px 3px 4px;
+  margin: 0;
+  background-color: transparent;
+  border: none;
+  color: #fff;
+  font-size: 0.84rem; font-weight: 700;
+}
+.tpick select:focus { outline: none; box-shadow: none; }
+.tpick select option { color: var(--text); }
+html[data-theme='dark'] .tpick { border-color: rgba(255, 255, 255, 0.16); }
+
+/* Móvil: los grupos se vuelven acordeón dentro del cajón ☰ */
+@media (max-width: 860px) {
+  .nav .nav-pop {
+    position: static;
+    display: none;
+    width: 100%;
+    min-width: 0;
+    box-shadow: none;
+    border: none;
+    background: transparent;
+    padding: 0 0 4px;
+  }
+  .nav .nav-group.open .nav-pop { display: flex; }
+  .nav .nav-pop a { padding-left: 22px; }
+  .nav .nav-drop .caret { margin-left: auto; }
+  .nav .nav-drop { width: 100%; }
+  .nav .nav-group { width: 100%; }
+}
+
 .site-header .btn-outline { border-color: rgba(255, 255, 255, 0.3); color: #fff !important; background: transparent; }
 .site-header .btn-outline:hover { background: rgba(255, 255, 255, 0.1); }
 

@@ -56,7 +56,7 @@ import { delegateShareText, generateDelegateCode } from '../lib/delegates.ts';
 import { waLink } from '../lib/share.ts';
 import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
 import { crest, crossoverBadge } from './match.ts';
-import { layout, type NavItem } from './components.ts';
+import { layout, type NavItem, type NavGroup, type TournamentPickerData } from './components.ts';
 import { planFixture, groupByFixtureRound, planSummary, type PlannedMatch } from '../lib/planifier.ts';
 import { orderMatchesForDisplay } from '../lib/order.ts';
 import { isCrossoverMatch } from '../lib/crossover.ts';
@@ -73,11 +73,91 @@ export const ADMIN_NAV: NavItem[] = [
   { href: '/admin/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
 ];
 
-function adminLayout(opts: { title: string; active: string; body: string; pending?: number }): string {
-  const nav = opts.pending
-    ? ADMIN_NAV.map((item) => (item.match === 'entregas' ? { ...item, badge: opts.pending } : item))
-    : ADMIN_NAV;
-  return layout({ title: opts.title, active: opts.active, nav, body: opts.body, isAdmin: true });
+/**
+ * Navegación del panel en 6 secciones (diseño UX aprobado): Inicio,
+ * Competencia (antes del torneo), Operación (cada semana), Equipos,
+ * Estadísticas y Administración (tribunal). Estadísticas todavía no tiene
+ * página propia: el enlace queda preparado para /admin/estadisticas.
+ */
+export function adminGroupsNav(opts: { pending?: number; unassigned?: number }): NavGroup[] {
+  return [
+    { label: 'Inicio', href: '/admin', match: 'admin', items: [] },
+    {
+      label: 'Competencia',
+      items: [
+        { href: '/admin/torneos', label: 'Torneos', match: 'torneos' },
+        { href: '/admin/fixture', label: 'Fixture y llaves', match: 'fixture' },
+      ],
+    },
+    {
+      label: 'Operación',
+      items: [
+        ...(opts.unassigned ? [{ href: '/admin/fechas', label: 'Fechas', match: 'fechas', badge: opts.unassigned } as NavItem] : [{ href: '/admin/fechas', label: 'Fechas', match: 'fechas' } as NavItem]),
+        { href: '/admin/planilla', label: 'Resultados', match: 'planilla' },
+        ...(opts.pending ? [{ href: '/admin/entregas', label: 'Entregas', match: 'entregas', badge: opts.pending } as NavItem] : [{ href: '/admin/entregas', label: 'Entregas', match: 'entregas' } as NavItem]),
+      ],
+    },
+    {
+      label: 'Equipos',
+      items: [
+        { href: '/admin/equipos', label: 'Equipos', match: 'equipos' },
+        { href: '/admin/jugadores', label: 'Jugadores', match: 'jugadores' },
+        { href: '/admin/delegados', label: 'Delegados', match: 'delegados' },
+      ],
+    },
+    { label: 'Estadísticas', href: '/admin/estadisticas', match: 'estadisticas', items: [] },
+    {
+      label: 'Administración',
+      items: [
+        { href: '/admin/ajustes', label: 'Ajustes de puntos', match: 'ajustes' },
+        { href: '/admin/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
+      ],
+    },
+  ];
+}
+
+/**
+ * Layout común del panel. Con `db` resuelve también los datos del header:
+ * selector global de torneo, pendientes de Entregas y fechas sin agendar.
+ * Sin `db` (login, vista previa) renderiza el menú solo.
+ */
+export async function adminLayout(
+  db: D1Database | null,
+  opts: { title: string; active: string; body: string }
+): Promise<string> {
+  let pending: number | undefined;
+  let unassigned: number | undefined;
+  let picker: TournamentPickerData | undefined;
+  if (db) {
+    const tournaments = await listTournaments(db);
+    const active = tournaments.find((t) => t.status === 'active') ?? tournaments[0];
+    const [pend, unass] = await Promise.all([
+      countPendingSubmissions(db),
+      active
+        ? db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM matches WHERE tournament_id = ?1 AND status = 'scheduled' AND (kickoff_time = '' OR venue = '')"
+            )
+            .bind(active.id)
+            .first<{ n: number }>()
+        : Promise.resolve(null),
+    ]);
+    pending = pend || undefined;
+    unassigned = unass?.n || undefined;
+    picker = {
+      tournaments: tournaments.map((t) => ({ slug: t.slug, name: t.name, status: t.status })),
+      currentSlug: active?.slug,
+    };
+  }
+  return layout({
+    title: opts.title,
+    active: opts.active,
+    nav: ADMIN_NAV,
+    adminGroups: adminGroupsNav({ pending, unassigned }),
+    tournaments: picker,
+    body: opts.body,
+    isAdmin: true,
+  });
 }
 
 function flash(kind: 'error' | 'success', message: string | undefined): string {
@@ -98,7 +178,7 @@ function pageHead(title: string, action?: { href: string; label: string }): stri
 
 /* ============================== LOGIN ============================== */
 
-export function loginPage(error?: string, next?: string): string {
+export async function loginPage(error?: string, next?: string): Promise<string> {
   const body = `
 <section class="hero"><div class="hero-kicker">ZonaLiga</div><h1>Panel de administración</h1></section>
 <section class="block"><div class="card form-card">
@@ -115,7 +195,7 @@ export function loginPage(error?: string, next?: string): string {
     </form>
   </div>
 </div></section>`;
-  return adminLayout({ title: 'Ingresar', active: 'login', body });
+  return await adminLayout(null, { title: 'Ingresar', active: 'login', body });
 }
 
 /* ============================== DASHBOARD ============================== */
@@ -161,7 +241,7 @@ ${pageHead('Resumen', { href: '/admin/torneos/nuevo', label: '+ Nuevo torneo' })
   <a href="/admin/fixture">generar fixture</a> ·
   <a href="/admin/jugadores">cargar plantilla</a>
 </div></div></section>`;
-  return adminLayout({ title: 'Panel', active: 'admin', body, pending });
+  return await adminLayout(db, { title: 'Panel', active: 'admin', body });
 }
 
 /* ============================== ENTREGAS DE DELEGADOS ============================== */
@@ -174,7 +254,7 @@ export async function entregasAdminPage(db: D1Database, msg?: string, errMsg?: s
     eventsBySubmission.set(sub.id, await submissionEvents(db, sub.id));
   }
   const inner = await submissionsAdminPage(db, pending, eventsBySubmission, teamMap, msg, errMsg);
-  return adminLayout({ title: 'Entregas', active: 'entregas', body: inner, pending: pending.length });
+  return adminLayout(db, { title: 'Entregas', active: 'entregas', body: inner });
 }
 
 /* ============================== TORNEOS ============================== */
@@ -270,7 +350,7 @@ ${pageHead('Torneos', { href: '/admin/torneos/nuevo', label: '+ Nuevo torneo' })
   <thead><tr><th>Nombre</th><th>Formato</th><th>Estado</th><th></th></tr></thead>
   <tbody>${rows || '<tr><td colspan="4" class="empty-note">Sin torneos. Creá el primero.</td></tr>'}</tbody>
 </table></div></div></section>`;
-  return adminLayout({ title: 'Torneos', active: 'torneos', body });
+  return adminLayout(db, { title: 'Torneos', active: 'torneos', body });
 }
 
 function badge(status: string): string {
@@ -395,7 +475,7 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
   })();
   </script>
 </div></div></section>`;
-  return adminLayout({ title: isEdit ? 'Editar torneo' : 'Nuevo torneo', active: 'torneos', body });
+  return adminLayout(db, { title: isEdit ? 'Editar torneo' : 'Nuevo torneo', active: 'torneos', body });
 }
 
 /* ============================== EQUIPOS ============================== */
@@ -425,7 +505,7 @@ ${pageHead('Equipos', { href: '/admin/equipos/nuevo', label: '+ Nuevo equipo' })
   <thead><tr><th>Nombre</th><th>Corto</th><th>Color</th><th></th><th></th></tr></thead>
   <tbody>${rows || '<tr><td colspan="5" class="empty-note">Sin equipos todavía.</td></tr>'}</tbody>
 </table></div></div></section>`;
-  return adminLayout({ title: 'Equipos', active: 'equipos', body });
+  return adminLayout(db, { title: 'Equipos', active: 'equipos', body });
 }
 
 /** Bloque de delegado del equipo: nombre, habilitación, código y compartir. */
@@ -505,7 +585,7 @@ ${pageHead(isEdit ? `Editar: ${tm!.name}` : 'Nuevo equipo')}
   </form>
   ${delegateBlock}
 </div></div></section>`;
-  return adminLayout({ title: isEdit ? 'Editar equipo' : 'Nuevo equipo', active: 'equipos', body });
+  return adminLayout(db, { title: isEdit ? 'Editar equipo' : 'Nuevo equipo', active: 'equipos', body });
 }
 
 /* ============================== JUGADORES ============================== */
@@ -569,7 +649,7 @@ ${pageHead('Jugadores')}
   <thead><tr><th>#</th><th>Jugador</th><th>Pos</th><th></th><th></th></tr></thead>
   <tbody>${rows || '<tr><td colspan="5" class="empty-note">Sin jugadores en este equipo.</td></tr>'}</tbody>
 </table></div></div></section>`;
-  return adminLayout({ title: 'Jugadores', active: 'jugadores', body });
+  return adminLayout(db, { title: 'Jugadores', active: 'jugadores', body });
 }
 
 /* ============================== FIXTURE ============================== */
@@ -577,7 +657,7 @@ ${pageHead('Jugadores')}
 export async function fixtureAdminPage(db: D1Database, slugParam: string | undefined, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
-    return adminLayout({ title: 'Fixture', active: 'fixture', body: `${pageHead('Fixture')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
+    return adminLayout(db, { title: 'Fixture', active: 'fixture', body: `${pageHead('Fixture')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
   }
   const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
   const view = await loadTournamentView(db, { id: t.id, includeInactiveTeams: true });
@@ -906,7 +986,7 @@ ${playoffBlock}
 ${makeUpBlock}
 ${freeDatesBlock}
 ${roundSections || '<section class="block"><div class="card"><div class="card-body">Fixture vacío. Generá uno automático o agregá partidos.</div></div></section>'}`;
-  return adminLayout({ title: 'Fixture', active: 'fixture', body });
+  return adminLayout(db, { title: 'Fixture', active: 'fixture', body });
 }
 
 export async function matchFormPage(
@@ -965,7 +1045,7 @@ ${pageHead(m ? `Editar partido #${m.id}` : 'Nuevo partido')}
     <a class="btn btn-ghost" href="/admin/fixture">Cancelar</a>
   </form>
 </div></div></section>`;
-  return adminLayout({ title: 'Partido', active: 'fixture', body });
+  return adminLayout(db, { title: 'Partido', active: 'fixture', body });
 }
 
 /* ============================== PLANILLA (carga de resultado) ============================== */
@@ -973,7 +1053,7 @@ ${pageHead(m ? `Editar partido #${m.id}` : 'Nuevo partido')}
 export async function sheetListPage(db: D1Database, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
-    return adminLayout({ title: 'Planilla', active: 'planilla', body: `${pageHead('Planilla')}<div class="card"><div class="card-body">Primero creá un torneo y su fixture.</div></div>` });
+    return adminLayout(db, { title: 'Planilla', active: 'planilla', body: `${pageHead('Planilla')}<div class="card"><div class="card-body">Primero creá un torneo y su fixture.</div></div>` });
   }
   const t = tournaments[0]!;
   const [view, pendingMatches] = await Promise.all([
@@ -1021,13 +1101,13 @@ ${pageHead('Planillas')}
   <tbody>${done.map(row).join('') || '<tr><td colspan="5" class="empty-note">Todavía no hay resultados.</td></tr>'}</tbody>
   </table></div>
 </div></section>`;
-  return adminLayout({ title: 'Planilla', active: 'planilla', body });
+  return adminLayout(db, { title: 'Planilla', active: 'planilla', body });
 }
 
 export async function sheetPage(db: D1Database, matchId: number, msg?: string, error?: string): Promise<string> {
   const m = await getMatch(db, matchId);
   if (!m) {
-    return adminLayout({ title: 'Planilla', active: 'planilla', body: `${pageHead('Planilla')}<div class="error-box">Partido inexistente.</div>` });
+    return adminLayout(db, { title: 'Planilla', active: 'planilla', body: `${pageHead('Planilla')}<div class="error-box">Partido inexistente.</div>` });
   }
   const [teams, events] = await Promise.all([listTeams(db, true), listEvents(db, m.id)]);
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
@@ -1176,7 +1256,7 @@ ${submissionsBlock}
   <div class="card">${evBlock('home')}</div>
   <div class="card">${evBlock('away')}</div>
 </section>`;
-  return adminLayout({ title: 'Planilla', active: 'planilla', body });
+  return adminLayout(db, { title: 'Planilla', active: 'planilla', body });
 }
 
 /* ============================== FECHAS (día/hora/cancha) ============================== */
@@ -1208,7 +1288,7 @@ function venueCell(m: Match, venues: string[]): string {
 export async function roundsSchedulePage(db: D1Database, slugParam: string | undefined, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
-    return adminLayout({ title: 'Fechas', active: 'fixture', body: `${pageHead('Fechas')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
+    return adminLayout(db, { title: 'Fechas', active: 'fechas', body: `${pageHead('Fechas')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
   }
   const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
   const view = await loadTournamentView(db, { id: t.id, includeInactiveTeams: true });
@@ -1431,7 +1511,7 @@ ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></d
     }
   })();
 </script>`;
-  return adminLayout({ title: 'Fechas', active: 'fixture', body });
+  return adminLayout(db, { title: 'Fechas', active: 'fechas', body });
 }
 
 /* ============================== SUSPENSIONES (admin) ============================== */
@@ -1439,7 +1519,7 @@ ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></d
 export async function suspensionsAdminPage(db: D1Database, slugParam: string | undefined, msg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
-    return adminLayout({ title: 'Suspensiones', active: 'suspensiones', body: `${pageHead('Suspensiones')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
+    return adminLayout(db, { title: 'Suspensiones', active: 'suspensiones', body: `${pageHead('Suspensiones')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
   }
   const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
   const view = await loadTournamentView(db, { id: t.id, includeInactiveTeams: true, events: true });
@@ -1474,7 +1554,7 @@ ${pageHead('Suspensiones')}
   <thead><tr><th>Jugador</th><th>Equipo</th><th>Motivo</th><th class="num">Partidos</th><th></th></tr></thead>
   <tbody>${rows.join('') || '<tr><td colspan="5" class="empty-note">Sin suspensiones 🎉</td></tr>'}</tbody>
 </table></div></div></section>`;
-  return adminLayout({ title: 'Suspensiones', active: 'suspensiones', body });
+  return adminLayout(db, { title: 'Suspensiones', active: 'suspensiones', body });
 }
 
 /* ============================== VISTA PREVIA DEL FIXTURE ============================== */
@@ -1490,7 +1570,7 @@ const KIND_LABEL: Record<PlannedMatch['kind'], string> = {
  * por partido) y los botones Confirmar / Descartar. Nada se toca hasta que
  * el admin confirma.
  */
-export function fixturePreviewPage(opts: {
+export async function fixturePreviewPage(opts: {
   tournamentId: number;
   tournamentSlug: string;
   tournamentName: string;
@@ -1498,7 +1578,7 @@ export function fixturePreviewPage(opts: {
   payload: string;
   createdAt: string;
   teamNames: Map<number, string>;
-}): string {
+}): Promise<string> {
   let plan: PlannedMatch[] = [];
   let crossoverOverflow: number[] = [];
   let crossoverAnchor: number | null = null;
@@ -1587,7 +1667,7 @@ ${
 `
     : ''
 }${sections || '<section class="block"><div class="card"><div class="card-body">El borrador está vacío o ilegible: volvé a preparar la vista previa.</div></div></section>'}`;
-  return adminLayout({ title: 'Vista previa del fixture', active: 'fixture', body });
+  return await adminLayout(null, { title: 'Vista previa del fixture', active: 'fixture', body });
 }
 
 /* Exportados para handlers */
