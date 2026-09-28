@@ -15,6 +15,12 @@
 
 ---
 
+## [0.2.53] — 2026-09-28 — Reposición de postergados en Fechas
+
+### Mejora
+
+- La reposición de partidos postergados ahora vive en Operación → Fechas, junto a la grilla de la semana; Fixture queda solo con sus herramientas de estructura.
+
 ## [0.2.52] — 2026-09-28 — Nuevas páginas: Delegados y Estadísticas
 
 ### Nuevo
