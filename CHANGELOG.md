@@ -15,6 +15,13 @@
 
 ---
 
+## [0.2.54] — 2026-09-28 — Ajustes de pantalla angosta en el panel
+
+### Arreglo
+
+- En el celular, la fila de acciones de cada fecha (Guardar / Regenerar) se apila y ningún botón queda cortado.
+- En computadora con ventana angosta, el menú del panel compacta su espaciado para que las 6 secciones entren sin truncarse.
+
 ## [0.2.53] — 2026-09-28 — Reposición de postergados en Fechas
 
 ### Mejora

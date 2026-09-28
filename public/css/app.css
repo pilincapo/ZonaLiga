@@ -217,6 +217,22 @@ img { max-width: 100%; }
 .tpick select option { color: var(--text); }
 html[data-theme='dark'] .tpick { border-color: rgba(255, 255, 255, 0.16); }
 
+/* Desktop angosto (861–1000px): el menú del panel compacta su espaciado
+   para que los 6 grupos y Estadísticas entren sin truncarse. */
+@media (min-width: 861px) and (max-width: 1000px) {
+  .site-header.admin-header .container { gap: 8px; }
+  .admin-header .nav { gap: 0; flex: 1 1 auto; }
+  .admin-header .brand { gap: 6px; }
+  .admin-header .brand-word { font-size: 0.92rem; }
+  .admin-header .nav a, .admin-header .nav-drop { padding: 6px 2px; font-size: 0.72rem; }
+  .admin-header .nav-drop .caret { margin-left: 1px; font-size: 0.55rem; }
+  .admin-header .nav .badge { margin-left: 2px; }
+  .admin-header .header-actions { gap: 5px; }
+  .admin-header .header-actions .btn { padding: 5px 5px; font-size: 0.75rem; }
+  .tpick { padding: 3px 5px; gap: 4px; }
+  .tpick select { max-width: 110px; }
+}
+
 /* Móvil: los grupos se vuelven acordeón dentro del cajón ☰ */
 @media (max-width: 860px) {
   .nav .nav-pop {
@@ -1507,6 +1523,19 @@ table.data tr.tap-selected td {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 table.data tr.tap-selected .drag-handle { color: var(--accent); }
+
+/* Fechas (panel): la fila de acciones de cada fecha (Guardar + correr días
+   + Regenerar) apila en móvil para que ningún botón se corte. */
+@media (max-width: 620px) {
+  .admin-header ~ main form .row-between.mt-2 {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .admin-header ~ main form .row-between.mt-2 > span {
+    justify-content: space-between;
+  }
+}
 
 /* Portada: fila de partido vertical (el nombre nunca se corta) */
 .home-match { padding: 12px 4px; border-bottom: 1px solid var(--border); }
