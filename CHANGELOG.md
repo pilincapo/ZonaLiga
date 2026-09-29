@@ -13,6 +13,12 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.2.75] — 2026-09-29 — Legibilidad de los textos de ayuda en modo oscuro
+
+### Arreglo
+
+- Los textos de ayuda dentro de las tarjetas del panel se leen mejor en modo oscuro (pasaron del gris tenue al gris claro de los secundarios).
+
 ---
 
 ## [0.2.74] — 2026-09-29 — Ajuste de legibilidad del login en modo oscuro
