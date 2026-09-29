@@ -1453,21 +1453,28 @@ export async function sheetListPage(db: D1Database, msg?: string, errMsg?: strin
     <td><div class="flex">${crest(h, 'sm')} ${esc(h?.name ?? 'Por definir')} <span class="faint">vs</span> ${esc(a?.name ?? 'Por definir')} ${crest(a, 'sm')}${pendingMatches.has(m.id) ? ' <span class="badge amber">Entrega</span>' : ''}</div></td>
     <td class="num">${esc(score)}</td>
     <td>${m.played_on ? esc(formatDateShort(m.played_on)) : ''}</td>
-    <td class="actions-cell"><a class="btn btn-row btn-sm" href="/admin/planilla/${m.id}">Cargar planilla</a></td>
+    <td class="actions-cell"><a class="btn btn-primary btn-sm" href="/admin/planilla/${m.id}">Cargar planilla</a></td>
   </tr>`;
   };
 
   const body = `
 ${flash('success', msg)}${flash('error', errMsg)}
-${pageHead('Planillas')}
-<section class="block"><div class="card">${`<div class="card-head"><h2>Pendientes</h2><span class="muted small">${pending.length} partidos</span></div>`}
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Operación</span>
+    <h1>Planillas</h1>
+    <p>Cargá resultados, autores de gol y tarjetas de cada partido del torneo.</p>
+  </div>
+</div>
+<section class="block"><div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('clock', 16)} Pendientes</h2><span class="muted small">${pending.length} partido${pending.length === 1 ? '' : 's'}</span></div>
   <div class="table-wrap"><table class="data planillas-pend">
   <thead><tr><th></th><th>Partido</th><th class="num">Res.</th><th>Día</th><th></th></tr></thead>
   <tbody>${pending.map(row).join('') || '<tr><td colspan="5" class="empty-note">Nada pendiente 🎉</td></tr>'}</tbody>
   </table></div>
 </div></section>
-<section class="block"><div class="card">
-  <div class="card-head"><h2>Últimos cargados</h2><span class="muted small">${esc(t.name)}</span></div>
+<section class="block"><div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('shield', 16)} Últimos cargados</h2><span class="muted small">${esc(t.name)}</span></div>
   <div class="table-wrap"><table class="data planillas-done">
   <thead><tr><th></th><th>Partido</th><th class="num">Res.</th><th>Día</th><th></th></tr></thead>
   <tbody>${done.map(row).join('') || '<tr><td colspan="5" class="empty-note">Todavía no hay resultados.</td></tr>'}</tbody>
@@ -1546,8 +1553,8 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   const evBlock = (side: 'home' | 'away') => {
     const teamId = side === 'home' ? m.home_team_id : m.away_team_id;
     const players = side === 'home' ? homePlayers : awayPlayers;
-    return `<div class="card-body">
-  <h3 class="zone-title">Tarjetas y goles sueltos · ${esc(side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante'))}</h3>
+    return `<div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('card', 16)} Eventos · ${esc(side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante'))}</h2></div>
   <form method="post" action="/admin/planilla/${m.id}/evento">
     <input type="hidden" name="team_id" value="${teamId ?? ''}">
     <div class="form-row">
@@ -1575,9 +1582,17 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   const submissionsBlock = await pendingForMatchBlock(db, m, teamMap);
   const body = `
 ${flash('success', msg)}${flash('error', error)}
-${pageHead(`Planilla · ${home?.name ?? 'Por definir'} vs ${away?.name ?? 'Por definir'}`, { href: `/partido/${m.id}`, label: 'Ver ficha pública ↗' })}
-<section class="block"><div class="card"><div class="card-body">
-  <form method="post" action="/admin/planilla/${m.id}">
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Operación</span>
+    <h1>Planilla · ${esc(home?.name ?? 'Por definir')} vs ${esc(away?.name ?? 'Por definir')}</h1>
+    <p>Estado del partido, resultado con autores y eventos, en una sola pantalla.</p>
+  </div>
+  <a class="btn btn-ghost" href="/partido/${m.id}">Ver ficha pública ↗</a>
+</div>
+<section class="block"><form method="post" action="/admin/planilla/${m.id}">
+  <div class="dash-card">
+    <div class="dash-card-head"><h2>${icon('ball', 16)} Estado y resultado</h2></div>
     <div class="form-row">
       <div class="field">
         <label>Estado del partido</label>
@@ -1587,16 +1602,22 @@ ${pageHead(`Planilla · ${home?.name ?? 'Por definir'} vs ${away?.name ?? 'Por d
             .join('')}
         </select>
       </div>
+    </div>
+    <div class="dash-sub">Datos del partido</div>
+    <div class="form-row">
       <div class="field"><label>Fecha jugado</label><input type="date" name="played_on" value="${esc(m.played_on ?? '')}"></div>
       <div class="field"><label>Hora</label><input type="time" name="kickoff_time" value="${esc(m.kickoff_time ?? '')}"></div>
       <div class="field"><label>Cancha</label><input type="text" name="venue" value="${esc(m.venue ?? '')}"></div>
     </div>
+    <div class="dash-sub">Resultado</div>
     <div class="form-row">
       <div class="field"><label>Goles local</label><input type="number" name="home_goals" min="0" max="20" value="${m.home_goals}"></div>
       <div class="field"><label>Goles visitante</label><input type="number" name="away_goals" min="0" max="20" value="${m.away_goals}"></div>
     </div>
     <p class="hint"><strong>¿Quién hizo los goles?</strong> Elegí el autor de cada uno: jugador de la plantilla, “En contra” (gol en el arco propio, suma para el rival) o “Sin autor”.</p>
+    <div class="dash-sub">Autores de goles · ${esc(home?.name ?? 'Local')}</div>
     ${goalPicks('home')}
+    <div class="dash-sub">Autores de goles · ${esc(away?.name ?? 'Visitante')}</div>
     ${goalPicks('away')}
     <p class="hint">Al guardar, los goles del partido se reemplazan con lo declarado acá: nunca se duplican ni se suman de más. Si un equipo no tiene plantilla cargada, sus goles quedan sin autor (salvo los “En contra”).</p>
     <script>
@@ -1615,18 +1636,21 @@ ${pageHead(`Planilla · ${home?.name ?? 'Por definir'} vs ${away?.name ?? 'Por d
         });
       })();
     </script>
+  </div>
+  <div class="dash-card" style="margin-top:14px">
+    <div class="dash-card-head"><h2>${icon('chart', 16)} Ajustes y notas</h2></div>
     <div class="form-row">
       <div class="field"><label>Puntos local (override)</label><input type="number" name="home_points" min="0" max="3" value="${m.home_points ?? ''}" placeholder="auto"></div>
       <div class="field"><label>Puntos visitante (override)</label><input type="number" name="away_points" min="0" max="3" value="${m.away_points ?? ''}" placeholder="auto"></div>
     </div>
     <div class="field"><label>Notas</label><textarea name="notes" style="min-height:60px">${esc(m.notes ?? '')}</textarea></div>
     <button class="btn btn-primary" type="submit">Guardar planilla</button>
-  </form>
-</div></div></section>
+  </div>
+</form></section>
 ${submissionsBlock}
 <section class="block grid-2">
-  <div class="card">${evBlock('home')}</div>
-  <div class="card">${evBlock('away')}</div>
+${evBlock('home')}
+${evBlock('away')}
 </section>`;
   return adminLayout(db, { title: 'Planilla', active: 'planilla', body });
 }
@@ -1705,8 +1729,8 @@ function makeUpSectionHtml(
     )
     .join(' · ');
   return `
-<section class="block"><div class="card" style="border-color:var(--st-amber)"><div class="card-body">
-  <strong>Partidos postergados pendientes de reposición</strong>
+<section class="block"><div class="dash-card fmakeup">
+  <div class="dash-card-head"><h2>${icon('clock', 16)} Partidos postergados pendientes de reposición</h2></div>
   <p class="hint">${postponed.length} partido(s) no entraron en las canchas y horarios del torneo y quedaron pendientes: ${equiposLibran.size} equipo(s) tienen fechas libres hasta que se jueguen. Plan sugerido: ${planText}.</p>
   <form method="post" action="/admin/fixture/reposicion" class="form-row">
     <input type="hidden" name="tournament_id" value="${t.id}">
@@ -1721,7 +1745,7 @@ function makeUpSectionHtml(
     </div>
   </form>
   <p class="hint">Alternativa: reprogramalos de a uno acá mismo, con la grilla de arriba o editando cada partido.</p>
-</div></div></section>`;
+</div></section>`;
 }
 
 export async function roundsSchedulePage(db: D1Database, slugParam: string | undefined, msg?: string, errMsg?: string): Promise<string> {
@@ -1766,7 +1790,7 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
     </tr>`
         )
         .join('');
-      return `<form method="post" action="/admin/fechas/guardar"><input type="hidden" name="tournament_id" value="${t.id}"><input type="hidden" name="round" value="${r}"><h3 class="zone-title">Fecha ${r}</h3><div class="card"><div class="table-wrap"><table class="data">
+      return `<form method="post" action="/admin/fechas/guardar"><input type="hidden" name="tournament_id" value="${t.id}"><input type="hidden" name="round" value="${r}"><h3 class="zone-title">Fecha ${r}</h3><div class="dash-card"><div class="table-wrap"><table class="data">
     <thead><tr><th></th><th>Partido</th><th>Día</th><th>Hora</th><th>Cancha</th></tr></thead>
     <tbody>${rows}</tbody>
     </table></div></div><div class="row-between mt-2">
@@ -1779,10 +1803,19 @@ export async function roundsSchedulePage(db: D1Database, slugParam: string | und
     })
     .join('');
 
+  const teamPickOptions = tournaments
+    .map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`)
+    .join('');
   const body = `
 ${flash('success', msg)}${flash('error', errMsg)}
-${pageHead('Días, horas y canchas')}
-${tournaments.length > 1 ? `<form method="get" action="/admin/fechas"><select name="t" onchange="this.form.submit()">${tournaments.map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></form>` : ''}
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Operación</span>
+    <h1>Fechas</h1>
+    <p>Día, hora y cancha de cada fecha: arrastrá para intercambiar y guardá cuando esté listo.</p>
+  </div>
+  ${tournaments.length > 1 ? `<form method="get" action="/admin/fechas" class="pselect"><label for="fcPick">Torneo</label><div class="tpage-search pselect-box">${icon('trophy', 15)}<select id="fcPick" name="t" onchange="this.form.submit()">${teamPickOptions}</select></div></form>` : ''}
+</div>
 ${sections || '<div class="card"><div class="card-body">Fixture vacío.</div></div>'}
 ${makeUpSectionHtml(t, matches, teams, byRound, [...byRound.keys()].sort((a, b) => a - b))}
 <p class="hint">Arrastrá una fila (⋮⋮) y soltala sobre otra de la <strong>misma fecha</strong> —o tocá una fila y después otra— para intercambiarles horario y cancha. Funciona igual en la computadora y en el celular. Nada se guarda hasta apretar “Guardar fecha”. Si un equipo pidió otro horario, alcanza con arrastrar (o tocar) su partido sobre el que hoy ocupa ese horario.</p>

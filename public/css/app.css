@@ -2248,6 +2248,34 @@ html[data-theme='dark'] .fgen { border-left-color: var(--accent-strong); }
 html[data-theme='dark'] .admin-page .zone-title { color: #ffffff; }
 .admin-page .form-row .field { min-width: 0; }
 
+/* Subtítulos internos de una card (secciones de un mismo formulario) */
+.dash-sub {
+  margin: 14px 0 8px;
+  font-size: 0.66rem; font-weight: 800; letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  display: flex; align-items: center; gap: 8px;
+}
+.dash-sub::after { content: ''; height: 1px; background: var(--border); flex: 1; }
+html[data-theme='dark'] .dash-sub { color: var(--accent-strong); }
+html[data-theme='dark'] .dash-sub::after { background: #2c3e55; }
+
+/* Card de reposición de postergados (Fechas) */
+.fmakeup { border-left: 3px solid var(--st-amber); }
+html[data-theme='dark'] .fmakeup { background: var(--surface-2); border-color: #33455e; border-left-color: var(--st-amber); }
+
+/* Formularios envueltos en dash-card (planilla de partido) */
+form .dash-card + .dash-card, form .dash-card { margin-bottom: 2px; }
+section.block > form { display: block; }
+
+/* Planilla: eventos en dos columnas con altura pareja */
+.admin-page .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.admin-page .grid-2 .dash-card { height: 100%; }
+@media (max-width: 900px) { .admin-page .grid-2 { grid-template-columns: 1fr; } }
+
+/* Fechas: fila Guardar/Regenerar sin desbordes en pantallas angostas */
+.admin-page .row-between { flex-wrap: wrap; }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1100px) {

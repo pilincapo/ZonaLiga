@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.69] — 2026-09-29 — Nuevo diseño de Fechas y Planillas
+
+### Mejora
+
+- Fechas, listado de Planillas y la planilla de cada partido adoptan el lenguaje visual del dashboard: encabezado con selector de torneo, cards con títulos de sección (estado y resultado, autores de goles por equipo, ajustes y notas, eventos del local y del visitante, reposición de postergados). El arrastre de horarios, los formularios y toda la lógica quedaron intactos.
+
+---
+
 ## [0.2.68] — 2026-09-29 — Nuevo diseño de Delegados y marco visual de Fixture
 
 ### Mejora
