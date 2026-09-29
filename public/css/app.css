@@ -2193,6 +2193,49 @@ html[data-theme='dark'] .tcard-tag { color: var(--accent-strong); }
   .tcard-acts { margin-left: 0; width: 100%; justify-content: flex-start; padding-top: 10px; border-top: 1px solid var(--border); }
 }
 
+/* ---------- Equipos + Jugadores (cards de plantilla) ---------- */
+
+.pcard.off { opacity: 0.68; }
+.pcard .pcrest { background: transparent; }
+.pcard .pcrest .crest.sm { width: 34px; height: 34px; border-radius: 9px; font-size: 0.8rem; }
+html[data-theme='dark'] .tcard.pcard { background: var(--surface-2); border-color: #33455e; }
+html[data-theme='dark'] .tcard.pcard.off { border-color: #33455e; }
+
+.pnum {
+  width: 38px; height: 38px; border-radius: 10px; flex: none;
+  display: grid; place-items: center;
+  background: var(--surface-3); color: var(--muted);
+  font-family: var(--font-head); font-weight: 800; font-size: 0.95rem;
+}
+html[data-theme='dark'] .pnum { background: rgba(255, 255, 255, 0.08); color: #b3c2d4; }
+
+.pchip {
+  display: inline-flex; align-items: center;
+  border-radius: 999px; padding: 2px 9px;
+  font-size: 0.66rem; font-weight: 800; letter-spacing: 0.6px;
+  border: 1px solid transparent;
+  background: var(--surface-2); color: var(--muted);
+}
+.pchip.AR { background: var(--st-amber-soft); color: var(--st-amber); }
+.pchip.DF { background: var(--st-blue-soft); color: var(--st-blue); }
+.pchip.MED { background: var(--st-violet-soft); color: var(--st-violet); }
+.pchip.DEL { background: var(--st-green-soft); color: var(--st-green); }
+
+.pmetrics { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1100px) { .pmetrics { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 620px) { .pmetrics { grid-template-columns: repeat(2, 1fr); } }
+
+.pselect { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 240px; }
+.pselect label { font-size: 0.64rem; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+.pselect select {
+  border: none; background: transparent; outline: none;
+  color: var(--text); font-size: 0.9rem; font-weight: 600; width: 100%;
+  cursor: pointer;
+}
+.pselect select option { color: #0f1d2d; }
+
+.padd { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1100px) {

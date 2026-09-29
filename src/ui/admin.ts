@@ -791,29 +791,99 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
 
 export async function teamsAdminPage(db: D1Database, msg?: string, errMsg?: string): Promise<string> {
   const teams = await listTeams(db, true);
-  const rows = teams
-    .map(
-      (tm) => `<tr>
-    <td><a href="/equipos/${escUrl(tm.slug)}"><strong>${esc(tm.name)}</strong></a></td>
-    <td>${esc(tm.short_name)}</td>
-    <td><span class="crest sm" style="background:${escUrl(tm.color)}">${esc(tm.short_name || '···')}</span></td>
-    <td>${tm.active ? '' : '<span class="badge ghost">Inactivo</span>'}</td>
-    <td class="actions-cell">
-      <a class="btn btn-ghost btn-sm" href="/admin/equipos/${tm.id}">Editar</a>
+  const activos = teams.filter((tm) => tm.active).length;
+  const inactivos = teams.length - activos;
+  const metric = (label: string, sub: string, value: number, tone: string, ico: string) => `
+  <div class="dash-metric ${tone}">
+    <span class="dash-metric-ico">${icon(ico as 'users', 18)}</span>
+    <span class="dash-metric-tx"><span class="dash-metric-lbl">${esc(label)}</span><span class="dash-metric-num">${value}</span><span class="dash-metric-sub">${esc(sub)}</span></span>
+    <span class="dash-metric-bar"><span></span></span>
+  </div>`;
+  const cards = teams
+    .map((tm) => {
+      const badgeHtml = tm.active
+        ? '<span class="badge green">Activo</span>'
+        : '<span class="badge ghost">Inactivo</span>';
+      // <strong>Nombre</strong>…/admin/equipos/ID">Editar: lo parsean los
+      // scripts de seed (seed-dev/prod) y fix-zonas; no cambiar la estructura.
+      return `<article class="tcard pcard ${tm.active ? '' : 'off'}" data-nombre="${esc(tm.name.toLowerCase())}" data-activo="${tm.active ? '1' : '0'}">
+    <span class="tcard-ico pcrest">${crest(tm, 'sm')}</span>
+    <div class="tcard-tx">
+      <div class="tcard-top"><a href="/equipos/${escUrl(tm.slug)}"><strong>${esc(tm.name)}</strong></a>${badgeHtml}</div>
+      <div class="tcard-meta">
+        <span>Nombre corto: ${esc(tm.short_name || '···')}</span>
+        <span>${tm.active ? 'Participa de la liga' : 'No participa de la liga'}</span>
+      </div>
+    </div>
+    <div class="tcard-acts">
+      <a class="btn btn-ghost btn-sm" href="/equipos/${escUrl(tm.slug)}" title="Ver en el sitio">Ver</a>
+      <a class="btn btn-primary btn-sm" href="/admin/equipos/${tm.id}">Editar</a>
       <form method="post" action="/admin/equipos/${tm.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar equipo? Se borran sus jugadores.')">
-        <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+        <button class="tcard-ghost" type="submit" title="Eliminar equipo" aria-label="Eliminar equipo">✕</button>
       </form>
-    </td>
-  </tr>`
-    )
+    </div>
+  </article>`;
+    })
     .join('');
   const body = `
 ${flash('success', msg)}${flash('error', errMsg)}
-${pageHead('Equipos', { href: '/admin/equipos/nuevo', label: '+ Nuevo equipo' })}
-<section class="block"><div class="card"><div class="table-wrap"><table class="data">
-  <thead><tr><th>Nombre</th><th>Corto</th><th>Color</th><th></th><th></th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="5" class="empty-note">Sin equipos todavía.</td></tr>'}</tbody>
-</table></div></div></section>`;
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Equipos</span>
+    <h1>Equipos</h1>
+    <p>Los clubes que participan de la liga, con su escudo y su nombre corto para las tablas.</p>
+  </div>
+  <a class="btn btn-primary" href="/admin/equipos/nuevo">+ Nuevo equipo</a>
+</div>
+<div class="dash-metrics">
+  ${metric('Total', 'equipos', teams.length, 'm-blue', 'list')}
+  ${metric('Activos', 'jugando la liga', activos, 'm-green', 'users')}
+  ${metric('Inactivos', 'fuera de la liga', inactivos, 'm-amber', 'shield')}
+</div>
+<section class="block"><div class="card" style="padding:14px">
+  <div class="tpage-filters">
+    <div class="tpage-search">${icon('search', 15)}<input id="tSearch" type="search" placeholder="Buscar equipo por nombre…" aria-label="Buscar equipo"></div>
+    <div class="tpage-tabs" role="group" aria-label="Filtrar por estado">
+      <button type="button" class="tpage-tab on" data-activo="">Todos</button>
+      <button type="button" class="tpage-tab" data-activo="1">Activos</button>
+      <button type="button" class="tpage-tab" data-activo="0">Inactivos</button>
+    </div>
+  </div>
+</div></section>
+<section class="block"><div class="tpage-list" id="tList">
+  ${cards || '<div class="empty-note">Sin equipos todavía. Creá el primero.</div>'}
+  <div class="empty-note" id="tEmpty" style="display:none">Ningún equipo coincide con el filtro.</div>
+</div></section>
+<script>
+  (function () {
+    var list = document.getElementById('tList');
+    var input = document.getElementById('tSearch');
+    if (!list || !input) return;
+    var tabs = [].slice.call(document.querySelectorAll('.tpage-tab'));
+    var cards = [].slice.call(list.querySelectorAll('.tcard'));
+    var vacio = document.getElementById('tEmpty');
+    function sync() {
+      var q = (input.value || '').trim().toLowerCase();
+      var act = '';
+      tabs.forEach(function (b) { if (b.classList.contains('on')) act = b.getAttribute('data-activo') || ''; });
+      var visibles = 0;
+      cards.forEach(function (c) {
+        var ok = (act === '' || c.getAttribute('data-activo') === act) && (!q || (c.getAttribute('data-nombre') || '').indexOf(q) !== -1);
+        c.style.display = ok ? '' : 'none';
+        if (ok) visibles++;
+      });
+      if (vacio) vacio.style.display = visibles ? 'none' : '';
+    }
+    tabs.forEach(function (b) {
+      b.addEventListener('click', function () {
+        tabs.forEach(function (x) { x.classList.remove('on'); });
+        b.classList.add('on');
+        sync();
+      });
+    });
+    input.addEventListener('input', sync);
+  })();
+</script>`;
   return adminLayout(db, { title: 'Equipos', active: 'equipos', body });
 }
 
@@ -903,6 +973,7 @@ export async function playersAdminPage(db: D1Database, selectedTeamId?: number, 
   const teams = await listTeams(db, true);
   const selectedId = selectedTeamId ?? teams[0]?.id;
   const players = selectedId != null ? await listPlayers(db, selectedId, true) : [];
+  const team = teams.find((tm) => tm.id === selectedId) ?? null;
 
   const teamOptions = teams
     .map(
@@ -916,48 +987,76 @@ export async function playersAdminPage(db: D1Database, selectedTeamId?: number, 
       .map((p) => `<option value="${p}" ${p === selected ? 'selected' : ''}>${p || '—'}</option>`)
       .join('');
 
-  const rows = players
+  // Métricas reales del equipo seleccionado: plantilla y desglose por posición
+  // (solo jugadores activos, mismo criterio del listado público).
+  const POS_LABEL: Record<string, string> = { AR: 'arqueros', DF: 'defensores', MED: 'mediocampistas', DEL: 'delanteros' };
+  const POS_TONE: Record<string, string> = { AR: 'm-amber', DF: 'm-blue', MED: 'm-violet', DEL: 'm-green' };
+  const porPos = POSITION_ORDER.map((pos) => ({
+    pos,
+    n: players.filter((p) => p.position === pos && p.active).length,
+  }));
+
+  const metric = (label: string, sub: string, value: number, tone: string, ico: string) => `
+  <div class="dash-metric ${tone}">
+    <span class="dash-metric-ico">${icon(ico as 'users', 18)}</span>
+    <span class="dash-metric-tx"><span class="dash-metric-lbl">${esc(label)}</span><span class="dash-metric-num">${value}</span><span class="dash-metric-sub">${esc(sub)}</span></span>
+    <span class="dash-metric-bar"><span></span></span>
+  </div>`;
+
+  const cards = players
     .map(
-      (p) => `<tr>
-    <td class="num">${p.number ?? ''}</td>
-    <td><strong>${esc(p.name)}</strong></td>
-    <td>${esc(p.position || '—')}</td>
-    <td>${p.active ? '' : '<span class="badge ghost">Baja</span>'}</td>
-    <td class="actions-cell">
+      (p) => `<article class="tcard pcard ${p.active ? '' : 'off'}">
+    <span class="pnum">${p.number != null ? esc(String(p.number)) : '—'}</span>
+    <div class="tcard-tx">
+      <div class="tcard-top"><strong>${esc(p.name)}</strong>${p.active ? '' : '<span class="badge ghost">Baja</span>'}</div>
+      <div class="tcard-meta"><span>${p.position ? `<span class="pchip ${esc(p.position)}">${esc(p.position)}</span>` : 'Sin posición'}</span></div>
+    </div>
+    <div class="tcard-acts">
       <form method="post" action="/admin/jugadores/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar jugador?')">
-        <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+        <button class="tcard-ghost" type="submit" title="Eliminar jugador" aria-label="Eliminar jugador">✕</button>
       </form>
-    </td>
-  </tr>`
+    </div>
+  </article>`
     )
     .join('');
 
   const body = `
 ${flash('success', msg)}${flash('error', errMsg)}
-${pageHead('Jugadores')}
-<section class="block"><div class="card"><div class="card-body">
-  <form method="get" action="/admin/jugadores" class="form-row">
-    <div class="field grow">
-      <label>Equipo</label>
-      <select name="team" onchange="this.form.submit()">${teamOptions || '<option value="">Sin equipos — cargá equipos primero</option>'}</select>
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Equipos</span>
+    <h1>Jugadores</h1>
+    <p>La plantilla de cada equipo: camiseta, nombre y posición.</p>
+  </div>
+  <form method="get" action="/admin/jugadores" class="pselect">
+    <label for="teamPick">Equipo</label>
+    <div class="tpage-search pselect-box">
+      ${icon('users', 15)}
+      <select id="teamPick" name="team" onchange="this.form.submit()">${teamOptions || '<option value="">Sin equipos — cargá equipos primero</option>'}</select>
     </div>
   </form>
-  ${selectedId != null
-    ? `<form method="post" action="/admin/jugadores">
-    <input type="hidden" name="team_id" value="${selectedId}">
-    <div class="form-row">
-      <div class="field grow"><label>Nombre</label><input type="text" name="name" required placeholder="Nombre y apellido"></div>
-      <div class="field" style="max-width:90px"><label>#</label><input type="number" name="number" min="1" max="99"></div>
-      <div class="field" style="max-width:110px"><label>Posición</label><select name="position">${positionOptions('')}</select></div>
-    </div>
-    <button class="btn btn-primary" type="submit">+ Agregar jugador</button>
-  </form>`
+</div>
+${team
+    ? `<div class="dash-metrics pmetrics">
+  ${metric('Jugadores', `plantilla de ${team.name}`, players.length, 'm-blue', 'list')}
+  ${porPos.map((x) => metric(x.pos, POS_LABEL[x.pos] ?? '', x.n, POS_TONE[x.pos] ?? 'm-green', 'shield')).join('')}
+</div>`
     : ''}
-</div></div></section>
-<section class="block"><div class="card"><div class="table-wrap"><table class="data">
-  <thead><tr><th>#</th><th>Jugador</th><th>Pos</th><th></th><th></th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="5" class="empty-note">Sin jugadores en este equipo.</td></tr>'}</tbody>
-</table></div></div></section>`;
+<section class="block"><div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('bolt', 16)} Agregar jugador${team ? ` a ${esc(team.name)}` : ''}</h2></div>
+  ${selectedId != null
+    ? `<form method="post" action="/admin/jugadores" class="padd">
+    <input type="hidden" name="team_id" value="${selectedId}">
+    <div class="field grow"><label>Nombre</label><input type="text" name="name" required placeholder="Nombre y apellido"></div>
+    <div class="field" style="max-width:90px"><label>#</label><input type="number" name="number" min="1" max="99"></div>
+    <div class="field" style="max-width:130px"><label>Posición</label><select name="position">${positionOptions('')}</select></div>
+    <button class="btn btn-primary" type="submit">+ Agregar</button>
+  </form>`
+    : '<div class="empty-note">Cargá un equipo primero para poder sumar jugadores.</div>'}
+</div></section>
+<section class="block"><div class="tpage-list">
+  ${cards || `<div class="empty-note">Sin jugadores en este equipo.</div>`}
+</div></section>`;
   return adminLayout(db, { title: 'Jugadores', active: 'jugadores', body });
 }
 

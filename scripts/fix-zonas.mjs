@@ -101,7 +101,7 @@ for (const m of formBlock.matchAll(/<input[^>]*type="checkbox"[^>]*name="([^"]+)
 const teamsHtml = await (await req('/admin/equipos')).text();
 const rows = [
   ...teamsHtml.matchAll(
-    /<strong>([^<]+)<\/strong><\/a><\/td>[\s\S]{0,300}?(\/admin\/equipos\/(\d+)">Editar|badge ghost">Inactivo)/g
+    /<strong>([^<]+)<\/strong><\/a>[\s\S]{0,500}?(\/admin\/equipos\/(\d+)">Editar|badge ghost">Inactivo)/g
   ),
 ];
 const active = [];

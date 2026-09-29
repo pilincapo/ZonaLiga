@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.67] — 2026-09-29 — Nuevo diseño de Equipos y Jugadores
+
+### Mejora
+
+- Equipos y Jugadores adoptan el lenguaje visual del dashboard: métricas reales, filtros instantáneos y cards por equipo (escudo, nombre, estado y acciones) o por jugador (dorsal, posición y estado). En Jugadores, el selector de equipo pasa al encabezado y el alta se integra en una tarjeta. Sin cambios de funcionalidad.
+
+---
+
 ## [0.2.66] — 2026-09-29 — Nuevo diseño del listado de torneos
 
 ### Mejora
