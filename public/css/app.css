@@ -2081,6 +2081,19 @@ html[data-theme='dark'] .dash-torneo { box-shadow: 0 6px 20px -10px rgba(46, 224
 html[data-theme='dark'] .dash-torneo-tx strong { color: #ffffff; }
 html[data-theme='dark'] .dash-torneo-status { color: rgba(255, 255, 255, 0.92); }
 
+/* ---------- Contenido clásico dentro del shell (todas las /admin/*) ----------
+   Las pantallas heredadas (torneos, fixture, planilla, etc.) conservan su
+   contenido; solo se centran y limitan de ancho dentro del nuevo shell. --- */
+
+.admin-page { max-width: 1200px; }
+.admin-page .hero { padding-top: 4px; }
+.admin-page .block { margin-bottom: 16px; }
+.admin-page .card { border-color: var(--border-strong); }
+html[data-theme='dark'] .admin-page .card { background: var(--surface-2); border-color: #33455e; }
+html[data-theme='dark'] .admin-page table.data th { color: #aebfca; background: var(--surface-3); }
+html[data-theme='dark'] .admin-page table.data td { border-bottom-color: #2c3e55; }
+html[data-theme='dark'] .admin-page .card-body { color: var(--text); }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1100px) {

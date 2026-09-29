@@ -57,7 +57,6 @@ import { waLink } from '../lib/share.ts';
 import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
 import { crest, crossoverBadge } from './match.ts';
 import {
-  layout,
   dashboardShell,
   icon,
   type NavItem,
@@ -126,9 +125,11 @@ export function adminGroupsNav(opts: { pending?: number; unassigned?: number }):
 }
 
 /**
- * Layout común del panel. Con `db` resuelve también los datos del header:
- * selector global de torneo, pendientes de Entregas y fechas sin agendar.
- * Sin `db` (login, vista previa) renderiza el menú solo.
+ * Layout común del panel: TODAS las pantallas /admin/* usan el mismo shell
+ * del dashboard (sidebar + topbar), reutilizando dashboardShell(). Con `db`
+ * resuelve además los datos del topbar: selector global de torneo, pendientes
+ * de Entregas y fechas sin agendar. Sin `db` (login, vista previa) renderiza
+ * el shell sin selector.
  */
 export async function adminLayout(
   db: D1Database | null,
@@ -158,14 +159,16 @@ export async function adminLayout(
       currentSlug: active?.slug,
     };
   }
-  return layout({
+  // El contenido clásico de cada página se centra bajo el shell del dashboard
+  // (el dashboard de /admin usa su grilla propia, sin este envoltorio).
+  return dashboardShell({
     title: opts.title,
     active: opts.active,
-    nav: ADMIN_NAV,
-    adminGroups: adminGroupsNav({ pending, unassigned }),
-    tournaments: picker,
-    body: opts.body,
-    isAdmin: true,
+    groups: adminGroupsNav({ pending, unassigned }),
+    picker,
+    search: { action: '/buscar', placeholder: 'Buscar equipos, jugadores, partidos…' },
+    pending,
+    body: `<div class="admin-page">${opts.body}</div>`,
   });
 }
 

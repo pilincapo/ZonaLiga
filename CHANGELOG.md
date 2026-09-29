@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.64] — 2026-09-29 — Todo el panel usa el shell del dashboard
+
+### Mejora
+
+- Todas las pantallas del panel (`/admin/*`) adoptan el mismo shell visual del inicio: menú lateral, barra superior con selector de torneo, buscador, campana de entregas y cambio de tema. El contenido de cada pantalla no cambia; solo el marco común. El panel del delegado y el sitio público siguen igual.
+
+---
+
 ## [0.2.63] — 2026-09-29 — Dashboard admin: pasada de contraste en modo oscuro
 
 ### Mejora
