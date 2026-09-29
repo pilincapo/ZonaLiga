@@ -1288,14 +1288,32 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     })
     .join('');
 
+  const teamPickOptions = tournaments
+    .map((x) => `<option value="${escUrl(x.slug)}" ${x.slug === t.slug ? 'selected' : ''}>${esc(x.name)}</option>`)
+    .join('');
   const body = `
 ${flash('success', msg)}${flash('error', errMsg)}${blockNote}${gapsNote}
-${pageHead(`Fixture — ${t.name}`, { href: `/admin/fixture/nuevo?t=${t.slug}`, label: '+ Partido suelto' })}
-<section class="block"><div class="card"><div class="card-body">
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Competencia</span>
+    <h1>Fixture</h1>
+    <p>Generá el fixture, revisá cada fecha y administrá los partidos del torneo.</p>
+  </div>
+  <form method="get" action="/admin/fixture" class="pselect">
+    <label for="fxPick">Torneo</label>
+    <div class="tpage-search pselect-box">
+      ${icon('trophy', 15)}
+      <select id="fxPick" name="t" onchange="this.form.submit()">${teamPickOptions}</select>
+    </div>
+  </form>
+  <a class="btn btn-primary" href="/admin/fixture/nuevo?t=${t.slug}">+ Partido suelto</a>
+</div>
+<section class="block"><div class="dash-card fgen">
+  <div class="dash-card-head"><h2>${icon('calendar', 16)} Generar fixture automático</h2><a href="/admin/fechas?t=${escUrl(t.slug)}">Asignar día, hora y cancha →</a></div>
   <form method="post" action="/admin/fixture/previsualizar" class="form-row">
     <input type="hidden" name="tournament_id" value="${t.id}">
     <div class="field grow">
-      <label>Generar fixture automático</label>
+      <label>Formato del torneo</label>
       <select name="mode">
         <option value="single">Ida (una vuelta)</option>
         <option value="double">Ida y vuelta</option>
@@ -1324,7 +1342,7 @@ ${
     : ''
 }
     <div class="field" style="align-self:flex-end">
-      <span style="display:flex;gap:8px">
+      <span style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-primary" type="submit" ${genBlocked ? 'disabled' : ''}>Preparar vista previa</button>
         <button class="btn btn-ghost" type="submit" formaction="/admin/fixture/regenerar" onclick="return confirm('Se rearman SOLO los cruces pendientes: los partidos jugados y sus resultados quedan intactos. ¿Continuar?')">↻ Regenerar cruce</button>
       </span>
@@ -1336,10 +1354,7 @@ ${
       ? `<p class="hint">Cruce vigente: fecha ${crossovers[0]!.round} · ${esc(crossovers[0]!.rule)}${crossovers[0]!.counts ? ' · suma puntos' : ' · no suma'}. Se reemplaza al generar de nuevo.</p>`
       : ''
   }
-</div></div></section>
-<section class="block"><div class="card"><div class="card-body">
-  <strong>Orden de partidos por fecha:</strong> <a href="/admin/fechas?t=${escUrl(t.slug)}">asignar día, hora y cancha →</a>
-</div></div></section>
+</div></section>
 ${playoffBlock}
 ${freeDatesBlock}
 ${roundSections || '<section class="block"><div class="card"><div class="card-body">Fixture vacío. Generá uno automático o agregá partidos.</div></div></section>'}`;

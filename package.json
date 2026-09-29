@@ -1,6 +1,6 @@
 {
   "name": "liga-amateur",
-  "version": "0.2.67",
+  "version": "0.2.68",
   "private": true,
   "type": "module",
   "description": "App de control de ligas de fútbol amateur — Cloudflare Workers + D1 + Hono",

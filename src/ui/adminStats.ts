@@ -13,7 +13,8 @@ import { topCards, topScorers, teamCards, listTeams, listTournaments, type Cards
 import { pendingForTournament, type PendingSubmissionRow } from '../lib/submissions.ts';
 import { loadTournamentView } from '../lib/tournamentView.ts';
 import { adminLayout } from './admin.ts';
-import { emptyNote } from './components.ts';
+import { emptyNote, icon } from './components.ts';
+import { crest } from './match.ts';
 
 function flash(kind: 'error' | 'success', message: string | undefined): string {
   if (!message) return '';
@@ -33,14 +34,27 @@ export async function delegadosAdminPage(
   const pendByTeam = new Map<number, number>();
   for (const p of pendientes) pendByTeam.set(p.team_id, (pendByTeam.get(p.team_id) ?? 0) + 1);
 
-  const rows = teamsRows
+  // Métricas derivadas del mismo estado que muestra la tabla clásica.
+  const habilitados = teamsRows.filter((tm) => tm.delegate_enabled === 1 && !!tm.delegate_code).length;
+  const sinCodigo = teamsRows.filter((tm) => tm.delegate_enabled === 1 && !tm.delegate_code).length;
+  const sinDelegado = teamsRows.length - habilitados - sinCodigo;
+
+  const metric = (label: string, sub: string, value: number, tone: string, ico: string) => `
+  <div class="dash-metric ${tone}">
+    <span class="dash-metric-ico">${icon(ico as 'users', 18)}</span>
+    <span class="dash-metric-tx"><span class="dash-metric-lbl">${esc(label)}</span><span class="dash-metric-num">${value}</span><span class="dash-metric-sub">${esc(sub)}</span></span>
+    <span class="dash-metric-bar"><span></span></span>
+  </div>`;
+
+  const cards = teamsRows
     .map((tm) => {
       const habilitado = tm.delegate_enabled === 1 && !!tm.delegate_code;
       const estado = habilitado
-        ? `<span class="badge green">Habilitado</span>`
+        ? '<span class="badge green">Habilitado</span>'
         : tm.delegate_enabled === 1
-          ? `<span class="badge amber">Sin código</span>`
-          : `<span class="badge ghost">Sin delegado</span>`;
+          ? '<span class="badge amber">Sin código</span>'
+          : '<span class="badge ghost">Sin delegado</span>';
+      const estadoKey = habilitado ? 'ok' : tm.delegate_enabled === 1 ? 'sin-codigo' : 'sin';
       const pend = pendByTeam.get(tm.id) ?? 0;
       const pendCell =
         pend > 0
@@ -48,7 +62,7 @@ export async function delegadosAdminPage(
           : '<span class="faint">—</span>';
       const acciones = habilitado
         ? `<form method="post" action="/admin/equipos/${tm.id}/delegado/codigo" style="display:inline"><button class="btn btn-ghost btn-sm" type="submit" title="Genera un código nuevo (el anterior deja de funcionar)">⟳ Código</button></form>
-           <form method="post" action="/admin/equipos/${tm.id}/delegado/revocar" style="display:inline" onsubmit="return confirm('¿Revocar el acceso del delegado de ${esc(tm.name)}?')"><button class="btn btn-ghost btn-sm" type="submit">✕ Revocar</button></form>`
+           <form method="post" action="/admin/equipos/${tm.id}/delegado/revocar" style="display:inline" onsubmit="return confirm('¿Revocar el acceso del delegado de ${esc(tm.name)}?')"><button class="tcard-ghost" type="submit" title="Revocar acceso">✕</button></form>`
         : `<form method="post" action="/admin/equipos/${tm.id}/delegado" style="display:inline"><input type="hidden" name="delegate_enabled" value="on"><button class="btn btn-row btn-sm" type="submit" title="Habilita un delegado y genera su código">Habilitar</button></form>`;
       const codigo = habilitado && tm.delegate_code
         ? `<code class="small">${esc(tm.delegate_code)}</code>`
@@ -56,33 +70,83 @@ export async function delegadosAdminPage(
       const nombre = tm.delegate_enabled === 1 && tm.delegate_name
         ? esc(tm.delegate_name)
         : '<span class="faint">—</span>';
-      return `<tr>
-  <td><a href="/admin/equipos/${escUrl(String(tm.id))}">${esc(tm.name)}</a>${tm.active ? '' : ' <span class="badge ghost">inactivo</span>'}</td>
-  <td>${nombre}</td>
-  <td>${estado}</td>
-  <td>${codigo}</td>
-  <td>${pendCell}</td>
-  <td class="actions-cell">${acciones}</td>
-</tr>`;
+      const buscar = `${tm.name} ${tm.delegate_enabled === 1 ? tm.delegate_name ?? '' : ''}`.toLowerCase();
+      return `<article class="tcard pcard ${tm.active ? '' : 'off'}" data-buscar="${esc(buscar)}" data-estado="${estadoKey}">
+    <span class="tcard-ico pcrest">${crest(tm, 'sm')}</span>
+    <div class="tcard-tx">
+      <div class="tcard-top"><a href="/admin/equipos/${escUrl(String(tm.id))}"><strong>${esc(tm.name)}</strong></a>${estado}${tm.active ? '' : ' <span class="badge ghost">inactivo</span>'}</div>
+      <div class="tcard-meta">
+        <span>Delegado: ${nombre}</span>
+        <span>Código: ${codigo}</span>
+        ${pendCell}
+      </div>
+    </div>
+    <div class="tcard-acts">${acciones}</div>
+  </article>`;
     })
     .join('');
 
   const body = `
 ${flash('success', msg)}
 ${flash('error', errMsg)}
-<section class="hero" style="padding-bottom:12px">
-  <div class="row-between">
-    <div>
-      <div class="hero-kicker">Equipos</div>
-      <h1>Delegados</h1>
-      <p class="hero-sub">Códigos de acceso por club. El delegado entra en /delegado con su código y carga el resultado; vos lo aprobás desde Entregas.</p>
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Equipos</span>
+    <h1>Delegados</h1>
+    <p>Códigos de acceso por club: el delegado entra en /delegado con su código y carga el resultado; vos lo aprobás desde Entregas.</p>
+  </div>
+</div>
+<div class="dash-metrics">
+  ${metric('Total', 'equipos', teamsRows.length, 'm-blue', 'list')}
+  ${metric('Habilitados', 'con código activo', habilitados, 'm-green', 'shield')}
+  ${metric('Sin código', 'habilitado a medias', sinCodigo, 'm-amber', 'bell')}
+  ${metric('Sin delegado', 'acceso sin abrir', sinDelegado, 'm-violet', 'users')}
+</div>
+<section class="block"><div class="card" style="padding:14px">
+  <div class="tpage-filters">
+    <div class="tpage-search">${icon('search', 15)}<input id="tSearch" type="search" placeholder="Buscar por equipo o delegado…" aria-label="Buscar delegado"></div>
+    <div class="tpage-tabs" role="group" aria-label="Filtrar por estado">
+      <button type="button" class="tpage-tab on" data-estado="">Todos</button>
+      <button type="button" class="tpage-tab" data-estado="ok">Habilitados</button>
+      <button type="button" class="tpage-tab" data-estado="sin-codigo">Sin código</button>
+      <button type="button" class="tpage-tab" data-estado="sin">Sin delegado</button>
     </div>
   </div>
-</section>
-<section class="block"><div class="card"><div class="table-wrap"><table class="data">
-  <thead><tr><th>Equipo</th><th>Delegado</th><th>Estado</th><th>Código</th><th class="num">Entregas</th><th></th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="6" class="empty-note">Todavía no hay equipos. Crealos desde Equipos.</td></tr>'}</tbody>
-</table></div></div></section>`;
+</div></section>
+<section class="block"><div class="tpage-list" id="tList">
+  ${cards || '<div class="empty-note">Todavía no hay equipos. Crealos desde Equipos.</div>'}
+  <div class="empty-note" id="tEmpty" style="display:none">Ningún delegado coincide con el filtro.</div>
+</div></section>
+<script>
+  (function () {
+    var list = document.getElementById('tList');
+    var input = document.getElementById('tSearch');
+    if (!list || !input) return;
+    var tabs = [].slice.call(document.querySelectorAll('.tpage-tab'));
+    var cards = [].slice.call(list.querySelectorAll('.tcard'));
+    var vacio = document.getElementById('tEmpty');
+    function sync() {
+      var q = (input.value || '').trim().toLowerCase();
+      var est = '';
+      tabs.forEach(function (b) { if (b.classList.contains('on')) est = b.getAttribute('data-estado') || ''; });
+      var visibles = 0;
+      cards.forEach(function (c) {
+        var ok = (est === '' || c.getAttribute('data-estado') === est) && (!q || (c.getAttribute('data-buscar') || '').indexOf(q) !== -1);
+        c.style.display = ok ? '' : 'none';
+        if (ok) visibles++;
+      });
+      if (vacio) vacio.style.display = visibles ? 'none' : '';
+    }
+    tabs.forEach(function (b) {
+      b.addEventListener('click', function () {
+        tabs.forEach(function (x) { x.classList.remove('on'); });
+        b.classList.add('on');
+        sync();
+      });
+    });
+    input.addEventListener('input', sync);
+  })();
+</script>`;
   return adminLayout(db, { title: 'Delegados', active: 'delegados', body });
 }
 

@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.68] — 2026-09-29 — Nuevo diseño de Delegados y marco visual de Fixture
+
+### Mejora
+
+- Delegados estrena el lenguaje visual del dashboard: métricas reales (total, habilitados, sin código y sin delegado), búsqueda y filtro por estado, y una card por equipo con delegado, código y entregas pendientes. En Fixture, el encabezado gana un selector de torneo, el generador es una tarjeta destacada y las fechas llevan un marcador verde; toda la lógica y estructuras de tabla quedaron intactas.
+
+---
+
 ## [0.2.67] — 2026-09-29 — Nuevo diseño de Equipos y Jugadores
 
 ### Mejora

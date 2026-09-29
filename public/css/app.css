@@ -2236,6 +2236,18 @@ html[data-theme='dark'] .pnum { background: rgba(255, 255, 255, 0.08); color: #b
 
 .padd { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 
+/* ---------- Fixture (card generadora + encabezados de fecha) ---------- */
+
+.fgen { border-left: 3px solid var(--accent); }
+html[data-theme='dark'] .fgen { border-left-color: var(--accent-strong); }
+.admin-page .zone-title { display: flex; align-items: center; gap: 10px; }
+.admin-page .zone-title::before {
+  content: ''; width: 10px; height: 10px; border-radius: 3px;
+  background: var(--accent); flex: none;
+}
+html[data-theme='dark'] .admin-page .zone-title { color: #ffffff; }
+.admin-page .form-row .field { min-width: 0; }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1100px) {
