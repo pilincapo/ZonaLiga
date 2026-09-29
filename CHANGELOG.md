@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.72] — 2026-09-29 — Botones de eliminación unificados y guía de diseño del panel
+
+### Mejora
+
+- El botón ✕ de eliminar partidos del fixture usa el mismo estilo discreto del resto del panel (el de eventos de la planilla conserva su rojo de precaución). Se documenta el sistema de diseño del panel (tokens, componentes y patrones) para futuras pantallas.
+
+---
+
 ## [0.2.71] — 2026-09-29 — Nuevo diseño de Suspensiones y Ajustes de puntos
 
 ### Mejora

@@ -1269,7 +1269,7 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
       <td class="actions-cell">
         <a class="btn btn-ghost btn-sm" href="/admin/planilla/${m.id}">Planilla</a>
         <form method="post" action="/admin/fixture/${m.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar partido?')">
-          <button class="btn btn-danger btn-sm">✕</button>
+          <button class="tcard-ghost" type="submit" title="Eliminar partido" aria-label="Eliminar partido">✕</button>
         </form>
       </td>
     </tr>`;
