@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.66] — 2026-09-29 — Nuevo diseño del listado de torneos
+
+### Mejora
+
+- La pantalla de torneos del panel estrena el lenguaje visual del dashboard: métricas con datos reales, buscador y filtro por estado instantáneos, y una card por torneo con sus acciones; el torneo seleccionado queda destacado en verde. Sin cambios de funcionalidad.
+
+---
+
 ## [0.2.65] — 2026-09-29 — Arreglo: el cambio de tema ya funciona en todo el panel
 
 ### Arreglo

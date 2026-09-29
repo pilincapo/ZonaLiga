@@ -557,28 +557,108 @@ function rulesFields(rules: Rules): string {
 
 export async function tournamentsPage(db: D1Database, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
-  const rows = tournaments
-    .map(
-      (t) => `<tr>
-    <td><a href="/?t=${escUrl(t.slug)}"><strong>${esc(t.name)}</strong></a></td>
-    <td>${esc(formatLabel(t.format))}</td>
-    <td>${badge(t.status)}</td>
-    <td class="actions-cell">
-      <a class="btn btn-ghost btn-sm" href="/admin/torneos/${t.id}">Editar</a>
+  const total = tournaments.length;
+  const enCurso = tournaments.filter((t) => t.status === 'active').length;
+  const borradores = tournaments.filter((t) => t.status === 'draft').length;
+  const finalizados = tournaments.filter((t) => t.status === 'finished').length;
+  // Mismo criterio que el selector global: activo, si no, el primero.
+  const currentSlug = tournaments.find((t) => t.status === 'active')?.slug ?? tournaments[0]?.slug;
+  const metric = (label: string, sub: string, value: number, tone: string, ico: string) => `
+  <div class="dash-metric ${tone}">
+    <span class="dash-metric-ico">${icon(ico as 'trophy', 18)}</span>
+    <span class="dash-metric-tx"><span class="dash-metric-lbl">${esc(label)}</span><span class="dash-metric-num">${value}</span><span class="dash-metric-sub">${esc(sub)}</span></span>
+    <span class="dash-metric-bar"><span></span></span>
+  </div>`;
+  const cards = tournaments
+    .map((t) => {
+      const live = t.slug === currentSlug;
+      const cls = (live ? 'live ' : '') + (t.status === 'draft' ? 'draft' : t.status === 'finished' ? 'fin' : '');
+      const creado = formatDateShort(t.created_at.slice(0, 10));
+      return `<article class="tcard ${cls.trim()}" data-nombre="${esc(t.name.toLowerCase())}" data-estado="${esc(t.status)}">
+    <span class="tcard-ico">${icon('trophy', 20)}</span>
+    <div class="tcard-tx">
+      <div class="tcard-top">
+        <strong>${esc(t.name)}</strong>
+        ${badge(t.status)}
+        ${t.slug === currentSlug ? `<span class="tcard-tag">${icon('ball', 11)} Seleccionado</span>` : ''}
+      </div>
+      <div class="tcard-meta">
+        ${t.season ? `<span>${icon('calendar', 13)} Temporada ${esc(t.season)}</span>` : ''}
+        <span>${icon('list', 13)} ${esc(formatLabel(t.format))}</span>
+        ${creado ? `<span>${icon('clock', 13)} Desde ${creado}</span>` : ''}
+      </div>
+    </div>
+    <div class="tcard-acts">
+      <a class="btn btn-ghost btn-sm" href="/?t=${escUrl(t.slug)}" title="Ver en el sitio">Ver</a>
+      <a class="btn btn-primary btn-sm" href="/admin/torneos/${t.id}">Editar</a>
       <form method="post" action="/admin/torneos/${t.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar torneo y todos sus partidos?')">
-        <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+        <button class="tcard-ghost" type="submit" title="Eliminar torneo" aria-label="Eliminar torneo">✕</button>
       </form>
-    </td>
-  </tr>`
-    )
+    </div>
+  </article>`;
+    })
     .join('');
   const body = `
 ${flash('success', msg)}${flash('error', errMsg)}
-${pageHead('Torneos', { href: '/admin/torneos/nuevo', label: '+ Nuevo torneo' })}
-<section class="block"><div class="card"><div class="table-wrap"><table class="data">
-  <thead><tr><th>Nombre</th><th>Formato</th><th>Estado</th><th></th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="4" class="empty-note">Sin torneos. Creá el primero.</td></tr>'}</tbody>
-</table></div></div></section>`;
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Competencia</span>
+    <h1>Torneos</h1>
+    <p>Creá, configurá y seguí el estado de cada competencia de la liga.</p>
+  </div>
+  <a class="btn btn-primary" href="/admin/torneos/nuevo">+ Nuevo torneo</a>
+</div>
+<div class="dash-metrics">
+  ${metric('Total', 'competencias', total, 'm-blue', 'list')}
+  ${metric('En curso', 'en juego', enCurso, 'm-green', 'ball')}
+  ${metric('Borradores', 'por configurar', borradores, 'm-amber', 'calendar')}
+  ${metric('Finalizados', 'archivados', finalizados, 'm-violet', 'shield')}
+</div>
+<section class="block"><div class="card" style="padding:14px">
+  <div class="tpage-filters">
+    <div class="tpage-search">${icon('search', 15)}<input id="tSearch" type="search" placeholder="Buscar torneo por nombre…" aria-label="Buscar torneo"></div>
+    <div class="tpage-tabs" role="group" aria-label="Filtrar por estado">
+      <button type="button" class="tpage-tab on" data-estado="">Todos</button>
+      <button type="button" class="tpage-tab" data-estado="active">En curso</button>
+      <button type="button" class="tpage-tab" data-estado="draft">Borradores</button>
+      <button type="button" class="tpage-tab" data-estado="finished">Finalizados</button>
+    </div>
+  </div>
+</div></section>
+<section class="block"><div class="tpage-list" id="tList">
+  ${cards || '<div class="empty-note">Sin torneos. Creá el primero.</div>'}
+  <div class="empty-note" id="tEmpty" style="display:none">Ningún torneo coincide con el filtro.</div>
+</div></section>
+<script>
+  (function () {
+    var list = document.getElementById('tList');
+    var input = document.getElementById('tSearch');
+    if (!list || !input) return;
+    var tabs = [].slice.call(document.querySelectorAll('.tpage-tab'));
+    var cards = [].slice.call(list.querySelectorAll('.tcard'));
+    var vacio = document.getElementById('tEmpty');
+    function sync() {
+      var q = (input.value || '').trim().toLowerCase();
+      var est = '';
+      tabs.forEach(function (b) { if (b.classList.contains('on')) est = b.getAttribute('data-estado') || ''; });
+      var visibles = 0;
+      cards.forEach(function (c) {
+        var ok = (!est || c.getAttribute('data-estado') === est) && (!q || (c.getAttribute('data-nombre') || '').indexOf(q) !== -1);
+        c.style.display = ok ? '' : 'none';
+        if (ok) visibles++;
+      });
+      if (vacio) vacio.style.display = visibles ? 'none' : '';
+    }
+    tabs.forEach(function (b) {
+      b.addEventListener('click', function () {
+        tabs.forEach(function (x) { x.classList.remove('on'); });
+        b.classList.add('on');
+        sync();
+      });
+    });
+    input.addEventListener('input', sync);
+  })();
+</script>`;
   return adminLayout(db, { title: 'Torneos', active: 'torneos', body });
 }
 
