@@ -52,9 +52,24 @@ import { CROSSOVER_NOTE, CROSSOVER_NOTE_COUNTS } from '../lib/crossover.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
-import { getMatch, getTeam } from '../lib/queries.ts';
+import { getMatch, getPlayer, getTeam } from '../lib/queries.ts';
 import { getSubmission } from '../lib/submissions.ts';
 import { deleteAdjustment, insertAdjustment, parseAdjustment } from '../lib/adjustments.ts';
+import {
+  annulSanction,
+  getSanction,
+  insertSanction,
+  parseAnnulment,
+  parseSanction,
+} from '../lib/sanctions.ts';
+import {
+  fixturePoolOfTournament,
+  participatingIdsFromForm,
+  participantsOrAllTeams,
+  participantsWithoutZone,
+  replaceTournamentParticipation,
+  zonedTeamIdsFromForm,
+} from '../lib/participation.ts';
 import { adjustmentsAdminPage } from '../ui/adminAjustes.ts';
 import { delegadosAdminPage, estadisticasAdminPage } from '../ui/adminStats.ts';
 import * as admin from '../ui/admin.ts';
@@ -136,11 +151,19 @@ adminRoutes.post('/torneos', async (c) => {
   if (existing) slug = `${slug}-${Date.now().toString(36)}`;
   const rules = readRules(f);
   const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f) };
-  await c.env.DB.prepare(
+  const res = await c.env.DB.prepare(
     'INSERT INTO tournaments (name, slug, season, format, config, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
   )
     .bind(name, slug, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'))
     .run();
+  // Participantes: los marcados "Participa" MÁS los que tienen zona elegida
+  // (la zona conserva al equipo aunque su casilla venga desmarcada). Solo
+  // cuenta si las zonas vienen activas: con zonas apagadas, los zone_of_* son
+  // restos del DOM oculto y no deben forzar participación.
+  const newId = res.meta.last_row_id;
+  const zoned = f['zones_enabled'] ? zonedTeamIdsFromForm(f) : [];
+  const ids = [...new Set([...participatingIdsFromForm(f), ...zoned])];
+  await replaceTournamentParticipation(c.env.DB, newId, ids);
   return c.redirect('/admin/torneos?msg=' + encodeURIComponent('Torneo creado'));
 });
 
@@ -166,6 +189,13 @@ adminRoutes.post('/torneos/:id', async (c) => {
   await c.env.DB.prepare('UPDATE tournaments SET name = ?1, season = ?2, format = ?3, config = ?4, status = ?5 WHERE id = ?6')
     .bind(name, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'), id)
     .run();
+  // Participación al día en la misma edición: marcados "Participa" + los que
+  // tienen zona (la zona conserva al equipo aunque su casilla esté apagada),
+  // siempre que las zonas vengan activas en este guardado.
+  // Batch atómico: queda la lista exacta del formulario, sin duplicados.
+  const zoned = f['zones_enabled'] ? zonedTeamIdsFromForm(f) : [];
+  const ids = [...new Set([...participatingIdsFromForm(f), ...zoned])];
+  await replaceTournamentParticipation(c.env.DB, id, ids);
   return c.redirect('/admin/torneos?msg=' + encodeURIComponent('Torneo actualizado'));
 });
 
@@ -427,16 +457,33 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
     return c.redirect(dest + '&err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.'));
   }
 
-  // Config completa del torneo: equipos, zonas, cruces y canchas/horarios.
-  const teams = await c.env.DB
-    .prepare('SELECT id, name FROM teams WHERE active = 1 ORDER BY id')
-    .all<{ id: number; name: string }>();
-  const ids = (teams.results ?? []).map((r) => r.id);
+  // Pool del torneo: SOLO sus equipos participantes (tabla tournament_teams).
+  // Torneos viejos sin filas de participación siguen con el pool histórico
+  // (todos los activos globales) para no cambiar el comportamiento existente.
+  const pool = await fixturePoolOfTournament(c.env.DB, tournamentId);
+  const ids = pool ? pool.ids : [];
   if (ids.length < 2) {
     return c.redirect(dest + '&err=' + encodeURIComponent('Necesitás al menos 2 equipos activos'));
   }
   const configJson = tRow.config ?? '{}';
   const schedule = scheduleOf(configJson);
+
+  // Con zonas activas, un participante sin zona no genera partidos de zona
+  // (el planificador arma el círculo por zona): se avisa en vez de dejarlo
+  // fuera silenciosamente. No inventa zona ni quita la participación.
+  const zc = zonesOf(configJson);
+  if (zc.enabled) {
+    const sinZona = participantsWithoutZone(ids, zc);
+    if (sinZona.length > 0) {
+      return c.redirect(
+        dest +
+          '&err=' +
+          encodeURIComponent(
+            `Participan sin zona: ${sinZona.length} equipo(s). Asignales zona en la edición del torneo o apagá las zonas.`
+          )
+      );
+    }
+  }
 
   let plan;
   try {
@@ -694,7 +741,10 @@ adminRoutes.post('/fixture/regenerar', async (c) => {
     active: number;
   }>();
   const names = new Map((teamRows.results ?? []).map((r) => [r.id, r.name]));
-  const activeTeamIds = (teamRows.results ?? []).filter((r) => r.active).map((r) => r.id);
+  // Solo participantes del torneo (fixturePoolOfTournament: con retrocompatibilidad
+  // histórica si el torneo no tiene filas de participación).
+  const pool = await fixturePoolOfTournament(c.env.DB, tournamentId);
+  const activeTeamIds = pool ? pool.ids : [];
   if (activeTeamIds.length < 2) {
     return c.redirect(`${dest}&err=` + encodeURIComponent('Necesitás al menos 2 equipos activos'));
   }
@@ -793,10 +843,12 @@ adminRoutes.post('/fixture/playoff', async (c) => {
   if (pending > 0) return fail(`Faltan ${pending} partido(s) por jugar para habilitar el playoff`);
 
   // Tablas por zona (los cruces que no cuentan no ensucian el orden).
-  const activeIds = new Set((teamRows.results ?? []).filter((r) => r.active).map((r) => r.id));
+  // Solo participantes del torneo (mismo criterio del generador y la regeneración).
+  const pool = await fixturePoolOfTournament(c.env.DB, tournamentId);
+  const activeIds = new Set(pool ? pool.ids : []);
   const standings = computeStandings(
     matchesForStandings(matches, t.config),
-    (teamRows.results ?? []).map((r) => ({ id: r.id, name: r.name })),
+    (teamRows.results ?? []).filter((r) => activeIds.has(r.id)).map((r) => ({ id: r.id, name: r.name })),
     rulesOf(t)
   );
   const tableA = standings.filter((r) => zones.zones[0]!.teamIds.includes(r.teamId) && activeIds.has(r.teamId));
@@ -1230,6 +1282,12 @@ adminRoutes.post('/ajustes', async (c) => {
   }
   const t = await resolveTournamentForAdjustment(c.env.DB, slug);
   if (!t) return c.redirect(adjustmentRedirect(slug, 'err', 'Torneo inexistente'));
+  // Guardia: el ajuste va a un equipo PARTICIPANTE del torneo. Torneos viejos
+  // sin filas de participación aceptan cualquier equipo (comportamiento previo).
+  const { teams: pool, fallback } = await participantsOrAllTeams(c.env.DB, t.id);
+  if (!fallback && !pool.some((tm) => tm.id === parsed.value!.teamId)) {
+    return c.redirect(adjustmentRedirect(slug, 'err', 'Ese equipo no participa de este torneo'));
+  }
   await insertAdjustment(c.env.DB, t.id, parsed.value!);
   const sign = parsed.value!.delta > 0 ? `+${parsed.value!.delta}` : String(parsed.value!.delta);
   return c.redirect(adjustmentRedirect(slug, 'msg', `Ajuste de ${sign} puntos aplicado y documentado`));
@@ -1245,4 +1303,61 @@ adminRoutes.post('/ajustes/:id/borrar', async (c) => {
 
 adminRoutes.get('/suspensiones', async (c) => {
   return c.html(await admin.suspensionsAdminPage(c.env.DB, c.req.query('t')));
+});
+
+/* ---------- Sanciones disciplinarias (manuales) ---------- */
+
+const SANCIONES_MSG = 'Sanción registrada';
+
+adminRoutes.get('/sanciones', async (c) => {
+  // La página vive en /admin/suspensiones: acá solo se redirige respetando el
+  // selector de torneo (atajo cómodo; el form del modal postea a /admin/sanciones).
+  return c.redirect(`/admin/suspensiones${c.req.query('t') ? `?t=${encodeURIComponent(c.req.query('t')!)}` : ''}`);
+});
+
+adminRoutes.post('/sanciones', async (c) => {
+  const form = await c.req.parseBody();
+  const slug = typeof form['t'] === 'string' ? form['t'] : c.req.query('t');
+  const back = () => `/admin/suspensiones${slug ? `?t=${encodeURIComponent(slug)}` : ''}`;
+  // El torneo viaja como hidden (y el select informativo va disabled, que no
+  // se envía): si el form no lo trae, se resuelve por el slug del selector.
+  const formForParse: Record<string, unknown> = { ...form };
+  if (!formForParse['tournament_id'] && slug) {
+    const tBySlug = await resolveTournament(c.env.DB, slug);
+    if (tBySlug) formForParse['tournament_id'] = String(tBySlug.id);
+  }
+  const parsed = parseSanction(formForParse);
+  if (!parsed.ok) {
+    return c.redirect(`${back()}&err=` + encodeURIComponent(parsed.error ?? 'Datos inválidos'));
+  }
+  const v = parsed.value!;
+  // Guardias de contexto: el torneo del form manda, y el equipo/jugador deben existir.
+  const team = await getTeam(c.env.DB, v.teamId);
+  if (!team) return c.redirect(`${back()}&err=` + encodeURIComponent('El equipo no existe'));
+  if (v.playerId != null) {
+    const player = await getPlayer(c.env.DB, v.playerId);
+    if (!player || player.team_id !== v.teamId) {
+      return c.redirect(`${back()}&err=` + encodeURIComponent('El jugador no pertenece a ese equipo'));
+    }
+  }
+  await insertSanction(c.env.DB, v);
+  return c.redirect(`${back()}&msg=` + encodeURIComponent(SANCIONES_MSG));
+});
+
+adminRoutes.post('/sanciones/:id/anular', async (c) => {
+  const id = Number(c.req.param('id'));
+  const form = await c.req.parseBody();
+  const slug = typeof form['t'] === 'string' ? form['t'] : c.req.query('t');
+  const back = () => `/admin/suspensiones${slug ? `?t=${encodeURIComponent(slug)}` : ''}`;
+  const parsed = parseAnnulment(form as Record<string, unknown>);
+  if (!parsed.ok) {
+    return c.redirect(`${back()}&err=` + encodeURIComponent(parsed.error ?? 'Falta el motivo'));
+  }
+  const s = await getSanction(c.env.DB, id);
+  if (!s) return c.redirect(`${back()}&err=` + encodeURIComponent('La sanción no existe'));
+  if (s.status !== 'activa') {
+    return c.redirect(`${back()}&err=` + encodeURIComponent('Solo se puede anular una sanción activa'));
+  }
+  await annulSanction(c.env.DB, id, parsed.reason!);
+  return c.redirect(`${back()}&msg=` + encodeURIComponent('Sanción anulada')); 
 });

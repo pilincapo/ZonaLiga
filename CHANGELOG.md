@@ -13,6 +13,26 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.2.77] — 2026-09-29 — Sanciones disciplinarias del tribunal
+
+### Nuevo
+
+- El panel de Suspensiones combina las suspensiones automáticas por tarjetas con las sanciones disciplinarias que registra el tribunal: alta de sanciones a jugador o equipo, con duración por fechas, por días o hasta una fecha, categoría, descripción y observaciones.
+- Historial de sanciones cumplidas y anuladas; la anulación pide motivo obligatorio y conserva el registro.
+- Cada sanción muestra su origen (automática o manual) y las fechas o días restantes cuando se pueden calcular.
+
+---
+
+## [0.2.76] — 2026-09-29 — Participación de equipos por torneo
+
+### Nuevo
+
+- El formulario del torneo permite elegir qué equipos participan, con una casilla por equipo, y la zona se elige en la misma fila (apagada si el equipo no participa).
+- Los equipos participantes quedan guardados por torneo: al armar el fixture, cada torneo usa solo sus equipos.
+- Un torneo viejo sin equipos marcados sigue funcionando como hasta ahora (usa todos los activos), para no cambiar nada de lo que ya operaba.
+
+---
+
 ## [0.2.75] — 2026-09-29 — Legibilidad de los textos de ayuda en modo oscuro
 
 ### Arreglo

@@ -5,7 +5,8 @@
 import { esc, escUrl } from '../lib/html.ts';
 import { formatDateShort } from '../lib/format.ts';
 import { adjustmentsForTournament, type AdjustmentRow } from '../lib/adjustments.ts';
-import { listTeams, listTournaments } from '../lib/queries.ts';
+import { listTournaments } from '../lib/queries.ts';
+import { participantsOrAllTeams } from '../lib/participation.ts';
 import { adminLayout } from './admin.ts';
 import { emptyNote, icon } from './components.ts';
 
@@ -49,7 +50,11 @@ export async function adjustmentsAdminPage(
     });
   }
   const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
-  const [teams, rows] = await Promise.all([listTeams(db, true), adjustmentsForTournament(db, t.id)]);
+  // El select de equipo lista SOLO participantes del torneo seleccionado
+  // (con retrocompatibilidad: torneo sin filas de participación → todos).
+  // El historial muestra los ajustes ya guardados tal cual, aunque su equipo
+  // hoy no participe.
+  const [{ teams }, rows] = await Promise.all([participantsOrAllTeams(db, t.id), adjustmentsForTournament(db, t.id)]);
 
   const history = rows.length
     ? `<div class="table-wrap"><table class="data">

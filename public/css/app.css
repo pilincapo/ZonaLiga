@@ -2375,3 +2375,16 @@ html[data-theme='dark'] .dash-card .hint { color: #93a7bc; }
   .dash-metrics { grid-template-columns: 1fr; }
   .dash-res-date { display: none; }
 }
+
+/* ----- Modal de sanciones (fase 3) ----- */
+.dash-modal {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0;
+  max-width: 680px;
+  width: calc(100vw - 32px);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.dash-modal::backdrop { background: rgba(6, 12, 8, 0.55); }
+html[data-theme='dark'] .dash-modal::backdrop { background: rgba(0, 0, 0, 0.6); }

@@ -979,4 +979,342 @@ describe.skipIf(!has)('e2e: cruce solo desde el generador de fixture', () => {
     // La config quedo sin declaracion: el panel no muestra cruce vigente.
     expect(fixtureHtml).not.toContain('Cruce vigente');
   });
+
+  it('participación: crear con participantes, editar quitando/agregando, zonas intactas y sin duplicados', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Torneo nuevo con 3 de los 4 equipos marcados como participantes.
+    // Los ids se buscan POR NOMBRE dentro de la tarjeta: otros tests crean
+    // equipos extra y el orden del listado no es confiable.
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const idOf = (name: string) => {
+      const chunk = teamsHtml.split('<article').find((c) => c.includes(name)) ?? '';
+      return /href="\/admin\/equipos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '';
+    };
+    const a = idOf('Deportivo E2E');
+    const b = idOf('Atlético E2E');
+    const c = idOf('Villa E2E');
+    const d = idOf('Norte E2E');
+    expect(a && b && c && d, 'los 4 equipos E2E deben estar en el listado').toBeTruthy();
+    const creado = await admin.post('/admin/torneos', {
+      name: 'Participación E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'draft',
+      [`participate_${a}`]: 'on',
+      [`participate_${b}`]: 'on',
+      [`participate_${c}`]: 'on',
+    });
+    expect(creado.status).toBe(302);
+
+    // El id del torneo nuevo sale de su tarjeta en el listado. El nombre
+    // también aparece en el selector del encabezado (chunk sin "Editar"),
+    // así que se queda con el primer chunk que tenga el nombre Y el link.
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tidPart =
+      listado
+        .split('<article')
+        .filter((chunk) => chunk.includes('Participación E2E'))
+        .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+        .find(Boolean) ?? '';
+    expect(tidPart, 'el torneo de participación debe estar en el listado').toBeTruthy();
+
+    // Formulario al editar: los 3 marcados con su casilla encendida.
+    const form1 = await (await admin.get(`/admin/torneos/${tidPart}`)).text();
+    expect(form1).toContain(`name="participate_${a}" data-participate checked`);
+    expect(form1).toContain(`name="participate_${b}" data-participate checked`);
+    expect(form1).toContain(`name="participate_${c}" data-participate checked`);
+    expect(form1).not.toContain(`name="participate_${d}" data-participate checked`);
+
+    // Editar: quitamos a c y agregamos a d. El form postea SOLO los encendidos
+    // (como hace el navegador con los checkboxes).
+    const edit = await admin.post(`/admin/torneos/${tidPart}`, {
+      name: 'Participación E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'draft',
+      [`participate_${a}`]: 'on',
+      [`participate_${b}`]: 'on',
+      [`participate_${d}`]: 'on',
+    });
+    expect(edit.status).toBe(302);
+
+    // Al reabrir el formulario, el estado persistido refleja el cambio.
+    const form2 = await (await admin.get(`/admin/torneos/${tidPart}`)).text();
+    expect(form2).toContain(`name="participate_${a}" data-participate checked`);
+    expect(form2).toContain(`name="participate_${b}" data-participate checked`);
+    expect(form2).toContain(`name="participate_${d}" data-participate checked`);
+    expect(form2).not.toContain(`name="participate_${c}" data-participate checked`);
+
+    // Sin duplicados: al re-guardar lo mismo, el estado no cambia.
+    const reedit = await admin.post(`/admin/torneos/${tidPart}`, {
+      name: 'Participación E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'draft',
+      [`participate_${a}`]: 'on',
+      [`participate_${b}`]: 'on',
+      [`participate_${d}`]: 'on',
+    });
+    expect(reedit.status).toBe(302);
+    const form3 = await (await admin.get(`/admin/torneos/${tidPart}`)).text();
+    expect(form3).toContain(`name="participate_${a}" data-participate checked`);
+    expect(form3).toContain(`name="participate_${b}" data-participate checked`);
+    expect(form3).toContain(`name="participate_${d}" data-participate checked`);
+    expect(form3).not.toContain(`name="participate_${c}" data-participate checked`);
+
+    // Zonas: con 2 zonas activas y equipos asignados, la zona se conserva y
+    // el equipo con zona queda como participante aunque su casilla venga apagada.
+    const conZonas = await admin.post(`/admin/torneos/${tidPart}`, {
+      name: 'Participación E2E',
+      season: '2026',
+      format: 'zonas_playoffs',
+      status: 'draft',
+      zones_enabled: 'on',
+      zone_names: 'A\nB',
+      [`zone_of_${a}`]: '1',
+      [`zone_of_${b}`]: '1',
+      [`zone_of_${c}`]: '2',
+      [`zone_of_${d}`]: '2',
+      [`participate_${a}`]: 'on',
+    });
+    expect(conZonas.status).toBe(302);
+    const formZonas = await (await admin.get(`/admin/torneos/${tidPart}`)).text();
+    // Con zonas activas, todos los que tienen zona asignada quedan como
+    // participantes (la zona conserva al equipo aunque su casilla venga
+    // desmarcada); las zonas quedaron seleccionadas en el form.
+    for (const id of [a, b, c, d]) {
+      expect(formZonas).toContain(`name="participate_${id}" data-participate checked`);
+    }
+    expect(formZonas).toMatch(new RegExp(`name="zone_of_${c}"[^>]*>[\\s\\S]*?value="2" selected`));
+    expect(formZonas).toMatch(new RegExp(`name="zone_of_${d}"[^>]*>[\\s\\S]*?value="2" selected`));
+  });
+
+  it('partido manual y ajustes muestran solo participantes; participante sin zona queda detectado', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Ids por nombre de tarjeta (los mismos equipos del beforeAll).
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const idOf = (name: string) => {
+      const chunk = teamsHtml.split('<article').find((x) => x.includes(name)) ?? '';
+      return /href="\/admin\/equipos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '';
+    };
+    const a = idOf('Deportivo E2E');
+    const d = idOf('Norte E2E');
+    expect(a && d).toBeTruthy();
+
+    // Torneo con SOLO Deportivo E2E y Norte E2E como participantes.
+    const creado = await admin.post('/admin/torneos', {
+      name: 'Filtro E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'draft',
+      [`participate_${a}`]: 'on',
+      [`participate_${d}`]: 'on',
+    });
+    expect(creado.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tidFiltro =
+      listado
+        .split('<article')
+        .filter((chunk) => chunk.includes('Filtro E2E'))
+        .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+        .find(Boolean) ?? '';
+    expect(tidFiltro).toBeTruthy();
+
+    // PARTIDO MANUAL: el form del torneo elegido solo ofrece a sus
+    // participantes (ni Atlético ni Villa, que existen globalmente).
+    const matchForm = await (await admin.get(`/admin/fixture/nuevo?t=filtro-e2e`)).text();
+    const selHome = /<select name="home_team_id">([\s\S]*?)<\/select>/.exec(matchForm)?.[1] ?? '';
+    expect(selHome).toContain(`value="${a}"`);
+    expect(selHome).toContain(`value="${d}"`);
+    expect(selHome).not.toContain('Atlético E2E');
+    expect(selHome).not.toContain('Villa E2E');
+    expect(matchForm).toContain('match-teams-data');
+
+    // La guardia del server también rechaza un POST con un no participante.
+    const ajeno = idOf('Atlético E2E');
+    const postAjeno = await admin.post('/admin/fixture/nuevo', {
+      tournament_id: tidFiltro,
+      home_team_id: a,
+      away_team_id: ajeno,
+      status: 'scheduled',
+    });
+    expect(postAjeno.status).toBe(302);
+
+    // AJUSTES: el select lista solo participantes y el POST rechaza al ajeno.
+    const ajustesHtml = await (await admin.get('/admin/ajustes?t=filtro-e2e')).text();
+    const selAdj = /<select id="adj-team" name="team_id"[^>]*>([\s\S]*?)<\/select>/.exec(ajustesHtml)?.[1] ?? '';
+    expect(selAdj).toContain(`value="${a}"`);
+    expect(selAdj).toContain(`value="${d}"`);
+    expect(selAdj).not.toContain(`value="${ajeno}"`);
+
+    const ajusteAjeno = await admin.post('/admin/ajustes?t=filtro-e2e', {
+      team_id: ajeno,
+      delta: '-3',
+      reason: 'no participa',
+    });
+    expect(ajusteAjeno.status).toBe(302);
+    expect(decodeURIComponent(/err=([^&]+)/.exec(ajusteAjeno.headers.get('location') ?? '')?.[1] ?? '')).toContain(
+      'no participa de este torneo'
+    );
+
+    // Un ajuste a un participante real sí se aplica.
+    const ajusteOk = await admin.post('/admin/ajustes?t=filtro-e2e', {
+      team_id: a,
+      delta: '-2',
+      reason: 'Prueba de ajuste a participante',
+    });
+    expect(ajusteOk.status).toBe(302);
+    expect(decodeURIComponent(ajusteOk.headers.get('location') ?? '')).toContain('aplicado');
+
+    // SIN ZONA: con zonas activas y un participante sin asignar, el formulario
+    // del torneo lo detecta explícitamente (aviso) y el generador lo rechaza.
+    const conZonas = await admin.post(`/admin/torneos/${tidFiltro}`, {
+      name: 'Filtro E2E',
+      season: '2026',
+      format: 'zonas_playoffs',
+      status: 'draft',
+      zones_enabled: 'on',
+      zone_names: 'A\nB',
+      [`zone_of_${a}`]: '1',
+      [`zone_of_${d}`]: '2',
+      [`participate_${a}`]: 'on',
+      [`participate_${d}`]: 'on',
+    });
+    expect(conZonas.status).toBe(302);
+    const formSinZona = await (await admin.get(`/admin/torneos/${tidFiltro}`)).text();
+    expect(formSinZona).not.toContain('Participan sin zona');
+
+    // Ahora agrego un tercer participante SIN zona: el aviso aparece.
+    const conTercero = await admin.post(`/admin/torneos/${tidFiltro}`, {
+      name: 'Filtro E2E',
+      season: '2026',
+      format: 'zonas_playoffs',
+      status: 'draft',
+      zones_enabled: 'on',
+      zone_names: 'A\nB',
+      [`zone_of_${a}`]: '1',
+      [`zone_of_${d}`]: '2',
+      [`participate_${a}`]: 'on',
+      [`participate_${d}`]: 'on',
+      [`participate_${ajeno}`]: 'on',
+    });
+    expect(conTercero.status).toBe(302);
+    const formAviso = await (await admin.get(`/admin/torneos/${tidFiltro}`)).text();
+    expect(formAviso).toContain('Participan sin zona');
+    expect(formAviso).toContain('Atlético E2E');
+    // La participación del tercero quedó guardada igual (no se elimina sola).
+    expect(formAviso).toContain(`name="participate_${ajeno}" data-participate checked`);
+
+    // El generador avisa y no genera (evita dejarlo fuera silenciosamente).
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tidFiltro, mode: 'single' });
+    expect(decodeURIComponent(gen.headers.get('location') ?? '')).toContain('Participan sin zona');
+
+    // PARTICIPANTE CON ZONA: asignada la zona que faltaba, todo funciona.
+    const reparado = await admin.post(`/admin/torneos/${tidFiltro}`, {
+      name: 'Filtro E2E',
+      season: '2026',
+      format: 'zonas_playoffs',
+      status: 'draft',
+      zones_enabled: 'on',
+      zone_names: 'A\nB',
+      [`zone_of_${a}`]: '1',
+      [`zone_of_${d}`]: '2',
+      [`zone_of_${ajeno}`]: '1',
+      [`participate_${a}`]: 'on',
+      [`participate_${d}`]: 'on',
+      [`participate_${ajeno}`]: 'on',
+    });
+    expect(reparado.status).toBe(302);
+    const formOk = await (await admin.get(`/admin/torneos/${tidFiltro}`)).text();
+    expect(formOk).not.toContain('Participan sin zona');
+    const genOk = await admin.post('/admin/fixture/previsualizar', { tournament_id: tidFiltro, mode: 'single' });
+    expect(decodeURIComponent(genOk.headers.get('location') ?? '')).toContain('vista-previa');
+  });
+
+  it('sanciones: alta real, aparece combinada con origen manual, anulación con motivo y sin motivo falla', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // El torneo principal (beforeAll) y su equipo Deportivo E2E con jugadores.
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const chunk = teamsHtml.split('<article').find((x) => x.includes('Deportivo E2E')) ?? '';
+    const teamA = /href="\/admin\/equipos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '';
+    expect(teamA).toBeTruthy();
+
+    // Cargar un jugador a ese equipo (la plantilla arranca vacía en la D1 e2e)
+    // y encontrarlo por su ficha pública, donde el id es explícito.
+    const jug = await admin.post('/admin/jugadores', { team_id: teamA, name: 'Sancionado E2E', number: '9' });
+    expect(jug.status).toBe(302);
+    const equiposHtml = await (await admin.get('/admin/equipos')).text();
+    const chunkA = equiposHtml.split('<article').find((x) => x.includes('Deportivo E2E')) ?? '';
+    const teamSlug = /href="\/equipos\/([a-z0-9-]+)"/.exec(chunkA)?.[1] ?? '';
+    expect(teamSlug, 'el equipo debe tener su slug público').toBeTruthy();
+    const teamPublic = await (await admin.get(`/equipos/${teamSlug}`)).text();
+    const pid = /href="\/jugador\/(\d+)">Sancionado E2E/.exec(teamPublic)?.[1] ?? '';
+    expect(pid, 'el jugador debe existir en la ficha pública').toBeTruthy();
+
+    // Sin motivo de anulación: el POST de anular rechaza (pero primero creamos una).
+    // Alta inválida: fechas sin amount → error visible.
+    const altaInvalida = await admin.post('/admin/sanciones', {
+      t: 'copa-e2e',
+      scope: 'player',
+      team_id: teamA,
+      player_id: pid,
+      duration_kind: 'fechas',
+      amount: '',
+      incident_date: '2026-09-29',
+      category: 'Agresión',
+    });
+    expect(altaInvalida.status).toBe(302);
+    expect(decodeURIComponent(/err=([^&]+)/.exec(altaInvalida.headers.get('location') ?? '')?.[1] ?? '')).toContain('cantidad');
+
+    // Alta válida: 2 fechas al jugador.
+    const alta = await admin.post('/admin/sanciones', {
+      t: 'copa-e2e',
+      scope: 'player',
+      team_id: teamA,
+      player_id: pid,
+      duration_kind: 'fechas',
+      amount: '2',
+      incident_date: '2026-09-29',
+      category: 'Agresión',
+      description: 'Mano violenta fuera del juego',
+    });
+    expect(alta.status).toBe(302);
+    expect(decodeURIComponent(alta.headers.get('location') ?? '')).toContain('Sanción registrada');
+
+    // Aparece en la lista combinada con origen MANUAL, estado ACTIVA y acción Anular.
+    const page1 = await (await admin.get('/admin/suspensiones?t=copa-e2e')).text();
+    expect(page1).toContain('Sancionado E2E');
+    expect(page1).toContain('Agresión');
+    expect(page1).toContain('Manual</span>');
+    expect(page1).toContain('Activa</span>');
+    expect(page1).toMatch(/sanciones\/\d+\/anular/);
+
+    // Anular sin motivo: rechaza y la sanción sigue activa.
+    const sanctionId = /sanciones\/(\d+)\/anular/.exec(page1)?.[1] ?? '';
+    expect(sanctionId).toBeTruthy();
+    const anularSinMotivo = await admin.post(`/admin/sanciones/${sanctionId}/anular`, { t: 'copa-e2e', annul_reason: '   ' });
+    expect(anularSinMotivo.status).toBe(302);
+    expect(decodeURIComponent(/err=([^&]+)/.exec(anularSinMotivo.headers.get('location') ?? '')?.[1] ?? '')).toContain('motivo');
+
+    // Anular con motivo: va al historial con la razón visible y sale de activas.
+    const anular = await admin.post(`/admin/sanciones/${sanctionId}/anular`, {
+      t: 'copa-e2e',
+      annul_reason: 'Revisión de video: no hubo agresión',
+    });
+    expect(anular.status).toBe(302);
+    expect(decodeURIComponent(anular.headers.get('location') ?? '')).toContain('Sanción anulada');
+
+    const page2 = await (await admin.get('/admin/suspensiones?t=copa-e2e')).text();
+    expect(page2).toContain('Historial');
+    expect(page2).toContain('Revisión de video: no hubo agresión');
+    expect(page2).not.toMatch(new RegExp(`sanciones\\/${sanctionId}\\/anular`)); // ya no se puede anular
+    // La sanción anulada no se borra: su nombre sigue (en historial).
+    expect(page2).toContain('Sancionado E2E');
+  });
 });

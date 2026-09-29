@@ -34,6 +34,13 @@ import {
 import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
+import { teamIdsOfTournament, participantsOrAllTeams, participantsWithoutZone } from '../lib/participation.ts';
+import { sanctionsForTournament } from '../lib/sanctions.ts';
+import type { SanctionRow, SanctionStatus } from '../lib/sanctions.ts';
+import { combineDiscipline, type DisciplineEntry } from '../lib/discipline.ts';
+import type { PlayerSuspension } from '../lib/suspensions.ts';
+import { remainingSuspensionMatches } from '../lib/suspensions.ts';
+import { leagueNow } from '../lib/live.ts';
 import {
   buildCrossoverPairs,
   crossoverRoundsOf,
@@ -685,17 +692,27 @@ export async function tournamentFormPage(db: D1Database, id?: number, error?: st
   const schedule = t ? scheduleOf(t.config) : EMPTY_SCHEDULE;
   const zones = t ? zonesOf(t.config) : EMPTY_ZONES;
   const activeTeams = (await listTeams(db, true)).filter((tm) => tm.active);
+  const savedParticipants = id != null ? await teamIdsOfTournament(db, id) : [];
+  const participantSet = new Set([...savedParticipants, ...zones.zones.flatMap((z) => z.teamIds)]);
+  // Detectar participantes sin zona cuando las zonas están activas: solo aviso,
+  // no inventa zona ni quita la participación.
+  const sinZona = participantsWithoutZone(savedParticipants, zones)
+    .map((tid) => activeTeams.find((tm) => tm.id === tid)?.name ?? `#${tid}`);
   const zoneRows = activeTeams
     .map((tm) => {
       const zi = zones.zones.findIndex((z) => z.teamIds.includes(tm.id)) + 1;
       const opts =
-        '<option value="">Sin zona</option>' +
+        '<option value="">—</option>' +
         zones.zones
           .map(
             (z, i) => `<option value="${i + 1}" ${zi === i + 1 ? 'selected' : ''}>${esc(z.name)}</option>`
           )
           .join('');
-      return `<tr><td>${esc(tm.name)}</td><td><select name="zone_of_${tm.id}" data-zone-select>${opts}</select></td></tr>`;
+      return `<tr>
+      <td>${esc(tm.name)}</td>
+      <td class="num"><input type="checkbox" name="participate_${tm.id}" data-participate ${participantSet.has(tm.id) ? 'checked' : ''} style="width:auto"></td>
+      <td><select name="zone_of_${tm.id}" data-zone-select ${zi > 0 ? '' : 'disabled'}>${opts}</select></td>
+    </tr>`;
     })
     .join('');
   const isEdit = t != null;
@@ -743,9 +760,10 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
         <label for="zone_names">Nombres de zonas (uno por línea, 2 a 8)</label>
         <textarea id="zone_names" name="zone_names" rows="3" placeholder="A\nB">${esc(zones.zones.map((z) => z.name).join('\n'))}</textarea>
       </div>
+      ${sinZona.length ? `<p class="hint" style="color:var(--warn,#f59e0b)">⚠ Participan sin zona: ${esc(sinZona.join(', '))}. Asignales zona acá o no van a entrar al fixture.</p>` : ''}
       <div class="table-wrap"><table class="data zones-table">
-        <thead><tr><th>Equipo</th><th>Zona</th></tr></thead>
-        <tbody>${zoneRows || '<tr><td colspan="2" class="empty-note">Sin equipos activos todavía.</td></tr>'}</tbody>
+        <thead><tr><th>Equipo</th><th class="num">Participa</th><th>Zona</th></tr></thead>
+        <tbody>${zoneRows || '<tr><td colspan="3" class="empty-note">Sin equipos activos todavía.</td></tr>'}</tbody>
       </table></div>
     </div>
     <h3 class="zone-title">Canchas y horarios</h3>
@@ -764,10 +782,18 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
     function syncBox() { box.style.display = cb.checked ? '' : 'none'; }
     cb.addEventListener('change', syncBox);
     syncBox();
+    // Mockup de participación: el checkbox habilita/deshabilita el selector
+    // de zona de su fila. (La persistencia llega tras aprobar el diseño.)
+    var rows = Array.prototype.slice.call(document.querySelectorAll('input[data-participate]'));
+    rows.forEach(function (p) {
+      var sel = p.closest('tr').querySelector('select[data-zone-select]');
+      function syncPart() { if (sel) sel.disabled = !p.checked; }
+      p.addEventListener('change', syncPart);
+    });
     if (!ta) return;
     var selects = Array.prototype.slice.call(document.querySelectorAll('select[data-zone-select]'));
     function syncSelects() {
-      var names = ta.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 8);
+      var names = ta.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 8);
       selects.forEach(function (sel) {
         var prev = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
         sel.innerHTML = '';
@@ -1375,16 +1401,38 @@ export async function matchFormPage(
   const m = matchId != null ? await getMatch(db, matchId) : null;
   const t = m ? tournaments.find((x) => x.id === m.tournament_id) : (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0];
 
-  const teamOptions = (selected: number | null | undefined) =>
-    `<option value="" ${selected == null ? 'selected' : ''}>Por definir</option>` +
-    teams
-      .map((tm) => `<option value="${tm.id}" ${tm.id === selected ? 'selected' : ''}>${esc(tm.name)}</option>`)
-      .join('');
+  // Opciones por torneo: solo participantes. Mapa torneo → equipos para que
+  // el JS actualice los selects al cambiar el torneo sin recargar la página.
+  // Un equipo que ya figura en el partido (editando) entra igual, aunque hoy
+  // no participe: no se rompe lo existente.
+  const perTournament = new Map<number, Map<number, string>>();
+  for (const x of tournaments) {
+    const { teams: pool } = await participantsOrAllTeams(db, x.id);
+    perTournament.set(x.id, new Map(pool.map((tm) => [tm.id, tm.name])));
+  }
+  if (m?.tournament_id != null && !perTournament.has(m.tournament_id)) {
+    perTournament.set(m.tournament_id, new Map(teams.map((tm) => [tm.id, tm.name])));
+  }
+  const optionsFor = (tid: number, selected: number | null | undefined): string => {
+    const pool = perTournament.get(tid) ?? new Map(teams.map((tm) => [tm.id, tm.name]));
+    if (selected != null && !pool.has(selected)) pool.set(selected, teams.find((tm) => tm.id === selected)?.name ?? `#${selected}`);
+    return (
+      `<option value="" ${selected == null ? 'selected' : ''}>Por definir</option>` +
+      [...pool.entries()]
+        .map(([id, name]) => `<option value="${id}" ${id === selected ? 'selected' : ''}>${esc(name)}</option>`)
+        .join('')
+    );
+  };
+  const teamOptions = (selected: number | null | undefined) => optionsFor(t?.id ?? 0, selected);
+  const teamsJson = esc(
+    JSON.stringify([...perTournament.entries()].map(([tid, pool]) => ({ id: tid, teams: [...pool.entries()].map(([id, name]) => ({ id, name })) })))
+  );
 
   const body = `
 ${flash('error', error)}
 ${pageHead(m ? `Editar partido #${m.id}` : 'Nuevo partido')}
 <section class="block"><div class="card form-card"><div class="card-body">
+  <script type="application/json" id="match-teams-data">${teamsJson}</script>
   <form method="post" action="${m ? `/admin/fixture/${m.id}` : '/admin/fixture/nuevo'}">
     <div class="field">
       <label>Torneo</label>
@@ -1419,6 +1467,36 @@ ${pageHead(m ? `Editar partido #${m.id}` : 'Nuevo partido')}
     <button class="btn btn-primary" type="submit">Guardar</button>
     <a class="btn btn-ghost" href="/admin/fixture">Cancelar</a>
   </form>
+  <script>
+  (function () {
+    // Al cambiar el torneo, local y visitante muestran solo sus participantes.
+    var data = JSON.parse(document.getElementById('match-teams-data').textContent);
+    var form = document.querySelector('form[action*="/fixture"]');
+    if (!form) return;
+    var tsel = form.querySelector('select[name="tournament_id"]');
+    var home = form.querySelector('select[name="home_team_id"]');
+    var away = form.querySelector('select[name="away_team_id"]');
+    if (!tsel || !home || !away) return;
+    function byId(tid) { return data.find(function (x) { return x.id === Number(tid); }); }
+    function fill(sel, pool, keep) {
+      var current = keep != null ? String(keep) : sel.value;
+      sel.innerHTML = '<option value=""' + (current === '' || !pool.some(function (p) { return String(p.id) === current; }) ? ' selected' : '') + '>Por definir</option>';
+      pool.forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = String(p.id); o.textContent = p.name;
+        if (String(p.id) === current) o.selected = true;
+        sel.appendChild(o);
+      });
+    }
+    function sync() {
+      var pool = (byId(tsel.value) || { teams: [] }).teams;
+      // Al rearmar, si el valor actual ya no está en el pool, cae a "Por definir".
+      fill(home, pool);
+      fill(away, pool);
+    }
+    tsel.addEventListener('change', sync);
+  })();
+  </script>
 </div></div></section>`;
   return adminLayout(db, { title: 'Partido', active: 'fixture', body });
 }
@@ -1992,7 +2070,7 @@ ${makeUpSectionHtml(t, matches, teams, byRound, [...byRound.keys()].sort((a, b) 
 
 /* ============================== SUSPENSIONES (admin) ============================== */
 
-export async function suspensionsAdminPage(db: D1Database, slugParam: string | undefined, msg?: string): Promise<string> {
+export async function suspensionsAdminPage(db: D1Database, slugParam: string | undefined, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
     return adminLayout(db, { title: 'Suspensiones', active: 'suspensiones', body: `${pageHead('Suspensiones')}<div class="card"><div class="card-body">Primero creá un torneo.</div></div>` });
@@ -2007,27 +2085,117 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
   const maxRound = matches.reduce((acc, m) => Math.max(acc, m.round ?? 0), 0);
   const suspensions = computeSuspensions(events, matches, rules, maxRound);
 
-  const cards: string[] = [];
-  const teamIds = new Set<number>();
-  for (const s of suspensions) {
-    const p = await db.prepare('SELECT * FROM players WHERE id = ?1').bind(s.playerId).first<{ name: string }>();
-    const team = teamMap.get(s.teamId);
-    if (s.teamId) teamIds.add(s.teamId);
-    const nombre = p?.name ?? '—';
-    const partes = nombre.split(' ').filter(Boolean);
-    const iniciales = nombre === '—' ? '·' : (partes.length > 1 ? `${partes[0]?.[0] ?? ''}${partes[1]?.[0] ?? ''}` : nombre.slice(0, 2)).toUpperCase();
-    cards.push(`<article class="tcard pcard">
-    <span class="susp-ico">${esc(iniciales)}</span>
-    <div class="tcard-tx">
-      <div class="tcard-top"><strong>${esc(nombre)}</strong><span class="badge red">${s.matches} partido${s.matches === 1 ? '' : 's'}</span></div>
-      <div class="tcard-meta">
-        <span>Equipo: ${esc(team?.name ?? '—')}</span>
-        <span>Motivo: ${esc(s.reason)}</span>
-        ${s.asOfRound != null ? `<span>Desde Fecha ${s.asOfRound}</span>` : ''}
-      </div>
-    </div>
-  </article>`);
+  // Disciplina unificada: automáticas + manuales (origen conservado, sin fusión).
+  const today = leagueNow().date;
+  const allSanctions = await sanctionsForTournament(db, t.id);
+  const playedRounds = matches
+    .filter((m) => m.status === 'played' || m.status === 'walkover')
+    .map((m) => m.round ?? 0)
+    .filter((r) => r > 0);
+  const servedRemaining = (s: PlayerSuspension): number | null => {
+    const rest = remainingSuspensionMatches(s, matches, maxRound);
+    // Si tiene fechas pendientes, son exactamente las que le restan; si no,
+    // ya cumplió: 0. null solo si no hay datos de partidos (no debería pasar
+    // con un torneo con fixture).
+    return rest.length > 0 ? rest.length : 0;
+  };
+  // Round del incidente de cada manual: el último round con partido del
+  // equipo en la fecha del incidente (el incidente puede ser fuera de cancha:
+  // si no se puede saber, null y el restante no se inventa).
+  const incidentRoundOf = (s: SanctionRow): number | null => {
+    if (!s.team_id) return null;
+    const rounds = matches
+      .filter((m) => (m.home_team_id === s.team_id || m.away_team_id === s.team_id) && m.played_on === s.incident_date)
+      .map((m) => m.round)
+      .filter((r): r is number => r != null);
+    return rounds.length ? Math.max(...rounds) : null;
+  };
+  const { active: discipline, archive: disciplineArchive } = combineDiscipline(
+    suspensions.map((s) => ({ tournamentId: t.id, suspension: s, servedRemaining: servedRemaining(s) })),
+    allSanctions.map((s) => ({
+      sanction: s,
+      incidentRound: incidentRoundOf(s),
+      playedRounds,
+      today,
+    }))
+  );
+
+  // Nombres de jugadores sancionados (automáticas + manuales) en una sola tanda.
+  // Y plantillas por equipo para el select del modal.
+  const playerIds = new Set<number>();
+  for (const s of suspensions) playerIds.add(s.playerId);
+  for (const s of allSanctions) if (s.player_id != null) playerIds.add(s.player_id);
+  const playerName = new Map<number, string>();
+  for (const pid of playerIds) {
+    const row = await db.prepare('SELECT name FROM players WHERE id = ?1').bind(pid).first<{ name: string }>();
+    if (row) playerName.set(pid, row.name);
   }
+  const playersOf = new Map<number, { id: number; name: string }[]>();
+  for (const tm of teams) {
+    const roster = await listPlayers(db, tm.id, true);
+    playersOf.set(tm.id, roster.map((p) => ({ id: p.id, name: p.name })));
+  }
+
+  // Filas de AUTOMÁTICAS: remaining real calculado por la capa de disciplina
+  // (no se recalcula en la UI).
+  const autoRows: string = discipline
+    .filter((e) => e.source === 'auto')
+    .map((e) => {
+      const nombre = (e.playerId != null ? playerName.get(e.playerId) : null) ?? '—';
+      return `<tr>
+      <td>${esc(nombre)}</td>
+      <td>${esc(teamMap.get(e.teamId ?? -1)?.name ?? '—')}</td>
+      <td>${esc(e.reason)}</td>
+      <td class="num">${e.remaining ?? '—'}</td>
+      <td><span class="badge red">Activa</span></td>
+      <td><span class="badge ghost">Automática</span></td>
+    </tr>`;
+    })
+    .join('');
+
+  const scopeBadge = (scope: 'player' | 'team'): string =>
+    scope === 'team' ? '<span class="badge ghost">Equipo</span> ' : '';
+  const durationBadge = (d: DisciplineEntry['duration']): string => {
+    if (d.kind === 'fechas') return `<span class="badge ghost">${d.amount} fecha${d.amount === 1 ? '' : 's'}</span>`;
+    if (d.kind === 'dias') return `<span class="badge ghost">${d.amount} día${d.amount === 1 ? '' : 's'}</span>`;
+    return `<span class="badge ghost">Hasta el ${esc(d.untilDate ?? '—')}</span>`;
+  };
+  const statusBadge = (status: SanctionStatus, annulReason?: string): string => {
+    if (status === 'activa') return '<span class="badge red">Activa</span>';
+    if (status === 'cumplida') return '<span class="badge green">Cumplida</span>';
+    return `<span class="badge ghost">Anulada</span>${annulReason ? `<div class="small muted">Motivo de anulación: ${esc(annulReason)}</div>` : ''}`;
+  };
+  const manualRow = (e: DisciplineEntry, inHistory: boolean): string => {
+    const name = e.scope === 'team' ? `Equipo ${teamMap.get(e.teamId ?? -1)?.name ?? '—'}` : playerName.get(e.playerId ?? -1) ?? '—';
+    const orig = e.sanctionId != null ? allSanctions.find((s) => s.id === e.sanctionId) : undefined;
+    const annulCell =
+      e.status === 'anulada' && orig?.annul_reason
+        ? `<div class="small muted">Motivo de anulación: ${esc(orig.annul_reason)}</div>`
+        : '';
+    return `<tr>
+      <td>${scopeBadge(e.scope)}${esc(name)}${annulCell}</td>
+      <td>${esc(teamMap.get(e.teamId ?? -1)?.name ?? '—')}</td>
+      <td>${esc(e.reason)}</td>
+      <td>${durationBadge(e.duration)}</td>
+      <td>${esc(e.originDate ?? '—')}</td>
+      <td>${statusBadge(e.status)}</td>
+      <td><span class="badge amber">Manual</span></td>
+      <td class="actions-cell">${
+        !inHistory && e.status === 'activa'
+          ? `<form method="post" action="/admin/sanciones/${e.sanctionId}/anular" onsubmit="var m = prompt('Motivo de la anulación (obligatorio):'); if (!m || !m.trim()) return false; this.querySelector('input[name=annul_reason]').value = m.trim(); return true;">
+              <input type="hidden" name="t" value="${escUrl(t.slug)}">
+              <input type="hidden" name="annul_reason" value="">
+              <button class="btn btn-danger btn-sm" type="submit" title="Anular con motivo">Anular</button>
+            </form>`
+          : ''
+      }</td>
+    </tr>`;
+  };
+  const manualRows: string = discipline
+    .filter((e) => e.source === 'manual')
+    .map((e) => manualRow(e, false))
+    .join('');
+  const historyRows: string = disciplineArchive.map((e) => manualRow(e, true)).join('');
 
   const teamPickOptions = tournaments
     .map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`)
@@ -2038,30 +2206,112 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
     <span class="dash-metric-tx"><span class="dash-metric-lbl">${esc(label)}</span><span class="dash-metric-num">${value}</span><span class="dash-metric-sub">${esc(sub)}</span></span>
     <span class="dash-metric-bar"><span></span></span>
   </div>`;
+  const categorias = ['Agresión', 'Pelea / desmanes', 'Conducta antideportiva', 'Incidente con árbitro', 'Incidente con otro equipo', 'Incumplimiento reglamentario', 'Otro'];
+  const manualActive = discipline.filter((e) => e.source === 'manual');
+  const affectedTeams = new Set<number>([...discipline, ...disciplineArchive].map((e) => e.teamId).filter((x): x is number => x != null));
   const body = `
 ${flash('success', msg)}
+${flash('error', errMsg)}
 <div class="dash-hero">
   <div class="dash-hero-tx">
     <span class="dash-kicker">Administración</span>
     <h1>Suspensiones</h1>
-    <p>Quiénes no pueden jugar y por cuántas fechas: se calculan solas con las reglas del torneo y las tarjetas cargadas.</p>
+    <p>Las automáticas se calculan con las tarjetas cargadas; las disciplinarias las registra el tribunal de la liga.</p>
   </div>
-  <form method="get" action="/admin/suspensiones" class="pselect">
-    <label for="spPick">Torneo</label>
-    <div class="tpage-search pselect-box">${icon('trophy', 15)}<select id="spPick" name="t" onchange="this.form.submit()">${teamPickOptions}</select></div>
-  </form>
+  <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <form method="get" action="/admin/suspensiones" class="pselect">
+      <label for="spPick">Torneo</label>
+      <div class="tpage-search pselect-box">${icon('trophy', 15)}<select id="spPick" name="t" onchange="this.form.submit()">${teamPickOptions}</select></div>
+    </form>
+    <button class="btn btn-primary" type="button" onclick="document.getElementById('sanctionModal').showModal()" style="margin-bottom:2px">+ Nueva sanción</button>
+  </div>
 </div>
 <div class="dash-metrics">
-  ${metric('Suspendidos', 'jugadores', suspensions.length, 'm-red', 'card')}
-  ${metric('Equipos afectados', 'con sancionados', teamIds.size, 'm-amber', 'shield')}
+  ${metric('Automáticas', 'por tarjetas', suspensions.length, 'm-red', 'card')}
+  ${metric('Disciplinarias activas', 'del tribunal', manualActive.length, 'm-amber', 'shield')}
+  ${metric('Equipos afectados', 'con sancionados', affectedTeams.size, 'm-blue', 'users')}
 </div>
 <section class="block"><div class="dash-card">
-  <div class="dash-card-head"><h2>${icon('shield', 16)} Reglas vigentes</h2></div>
+  <div class="dash-card-head"><h2>${icon('shield', 16)} Reglas vigentes (automáticas)</h2></div>
   <p class="hint" style="margin:0">Roja = ${rules.redSuspensionMatches} partido(s). Amarillas: cada ${rules.yellowAccumulation || '—'} acumuladas = 1 partido ${rules.yellowAccumWindow ? `(ventana de ${rules.yellowAccumWindow} fechas)` : '(acumulación total)'}. Configurable en el torneo.</p>
 </div></section>
-<section class="block"><div class="tpage-list">
-  ${cards.join('') || '<div class="empty-note">Sin suspensiones 🎉</div>'}
-</div></section>`;
+<section class="block"><div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('card', 16)} Suspensiones automáticas</h2><span class="badge ghost">${suspensions.length}</span></div>
+  ${autoRows
+    ? `<div class="table-wrap"><table class="data">
+      <thead><tr><th>Jugador</th><th>Equipo</th><th>Motivo</th><th class="num">Fechas restantes</th><th>Estado</th><th>Origen</th></tr></thead>
+      <tbody>${autoRows}</tbody>
+    </table></div>`
+    : '<div class="empty-note">Sin suspensiones automáticas 🎉</div>'}
+</div></section>
+<section class="block"><div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('bolt', 16)} Sanciones disciplinarias</h2><span class="badge amber">${manualActive.length} activa${manualActive.length === 1 ? '' : 's'}</span></div>
+  ${manualRows
+    ? `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Afectado</th><th>Equipo</th><th>Categoría</th><th>Duración</th><th>Incidente</th><th>Estado</th><th>Origen</th><th></th></tr></thead>
+    <tbody>${manualRows}</tbody>
+  </table></div>`
+    : '<div class="empty-note">Sin sanciones del tribunal 🎉</div>'}
+  <details style="margin-top:10px" ${disciplineArchive.length ? 'open' : ''}>
+    <summary style="cursor:pointer;font-weight:600">Historial (cumplidas y anuladas)${disciplineArchive.length ? ` · ${disciplineArchive.length}` : ''}</summary>
+    ${historyRows
+      ? `<div class="table-wrap" style="margin-top:8px"><table class="data">
+      <thead><tr><th>Afectado</th><th>Equipo</th><th>Categoría</th><th>Duración</th><th>Incidente</th><th>Estado</th><th>Origen</th><th></th></tr></thead>
+      <tbody>${historyRows}</tbody>
+    </table></div>`
+      : '<p class="hint">Todavía no hay sanciones cumplidas ni anuladas.</p>'}
+  </details>
+</div></section>
+<dialog id="sanctionModal" class="dash-modal">
+  <form method="post" action="/admin/sanciones" class="dash-card fgen" style="max-width:640px">
+    <input type="hidden" name="t" value="${escUrl(t.slug)}">
+    <div class="dash-card-head"><h2>${icon('bolt', 16)} Nueva sanción</h2><button class="btn btn-ghost btn-sm" type="button" onclick="this.closest('dialog').close()" title="Cerrar">✕</button></div>
+    <div class="form-row">
+      <div class="field"><label>Alcance</label><select name="scope" id="skScope"><option value="player">Jugador</option><option value="team">Equipo</option></select></div>
+      <div class="field"><label>Torneo</label><select name="tournament_id" disabled><option value="${t.id}" selected>${esc(t.name)}</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>Equipo</label><select name="team_id" required>${teams.map((tm) => `<option value="${tm.id}">${esc(tm.name)}</option>`).join('')}</select></div>
+      <div class="field" id="skPlayerField"><label>Jugador</label><select name="player_id"><option value="">—</option>${teams
+        .map((tm) => `<optgroup label="${esc(tm.name)}">${(playersOf.get(tm.id) ?? []).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</optgroup>`)
+        .join('')}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="field grow"><label>Categoría</label><select name="category">${categorias.map((cat) => `<option>${esc(cat)}</option>`).join('')}</select></div>
+      <div class="field"><label>Fecha del incidente</label><input type="date" name="incident_date" value="${today}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>Duración</label><select name="duration_kind" id="skDuration"><option value="fechas">Fechas</option><option value="dias">Días</option><option value="hasta_fecha">Hasta fecha</option></select></div>
+      <div class="field" id="skAmountField"><label>Cantidad</label><input type="number" name="amount" min="1" max="100" placeholder="Ej: 2"></div>
+      <div class="field" id="skUntilField" style="display:none"><label>Hasta (inclusive)</label><input type="date" name="until_date"></div>
+    </div>
+    <div class="field"><label>Descripción</label><input type="text" name="description" placeholder="Qué pasó (visible en el sitio)"></div>
+    <div class="field"><label>Observaciones</label><input type="text" name="notes" placeholder="Notas internas (no se publican)"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-ghost" type="button" onclick="this.closest('dialog').close()">Cancelar</button>
+      <button class="btn btn-primary" type="submit">Registrar sanción</button>
+    </div>
+  </form>
+  <script>
+  (function () {
+    var dlg = document.getElementById('sanctionModal');
+    if (!dlg) return;
+    var scope = dlg.querySelector('#skScope');
+    var playerField = dlg.querySelector('#skPlayerField');
+    var duration = dlg.querySelector('#skDuration');
+    var amountField = dlg.querySelector('#skAmountField');
+    var untilField = dlg.querySelector('#skUntilField');
+    function sync() {
+      playerField.style.display = scope.value === 'player' ? '' : 'none';
+      amountField.style.display = duration.value === 'hasta_fecha' ? 'none' : '';
+      untilField.style.display = duration.value === 'hasta_fecha' ? '' : 'none';
+    }
+    scope.addEventListener('change', sync);
+    duration.addEventListener('change', sync);
+    sync();
+  })();
+  </script>
+</dialog>`;
   return adminLayout(db, { title: 'Suspensiones', active: 'suspensiones', body });
 }
 
