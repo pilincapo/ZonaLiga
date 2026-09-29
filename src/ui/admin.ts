@@ -57,6 +57,7 @@ import { waLink } from '../lib/share.ts';
 import { pendingForMatchBlock, submissionsAdminPage } from './adminEntregas.ts';
 import { crest, crossoverBadge } from './match.ts';
 import {
+  BRAND_SVG,
   dashboardShell,
   icon,
   type NavItem,
@@ -192,10 +193,12 @@ function pageHead(title: string, action?: { href: string; label: string }): stri
 
 export async function loginPage(error?: string, next?: string): Promise<string> {
   const body = `
-<section class="hero"><div class="hero-kicker">ZonaLiga</div><h1>Panel de administración</h1></section>
-<section class="block"><div class="card form-card">
-  <div class="card-body">
-    ${flash('error', error)}
+<div class="login-wrap">
+  ${flash('error', error)}
+  <div class="dash-card fgen login-card">
+    <div class="login-brand">${BRAND_SVG}</div>
+    <span class="dash-kicker" style="text-align:center">Acceso</span>
+    <h1 style="text-align:center;font-size:1.35rem">Panel de administración</h1>
     <form method="post" action="/admin/login">
       <input type="hidden" name="next" value="${escUrl(next ?? '/admin')}">
       <div class="field">
@@ -203,10 +206,10 @@ export async function loginPage(error?: string, next?: string): Promise<string> 
         <input type="password" id="password" name="password" required autofocus autocomplete="current-password">
         <p class="hint">Es la contraseña configurada como secreto ADMIN_PASSWORD en Cloudflare.</p>
       </div>
-      <button class="btn btn-primary" type="submit">Entrar</button>
+      <button class="btn btn-primary" type="submit" style="width:100%">Entrar</button>
     </form>
   </div>
-</div></section>`;
+</div>`;
   return await adminLayout(null, { title: 'Ingresar', active: 'login', body });
 }
 
@@ -2112,9 +2115,9 @@ export async function fixturePreviewPage(opts: {
     .filter((x) => x.n > 0);
   const crucesStat =
     crucesPorFecha.length > 0
-      ? `<div class="card"><div class="card-body"><strong>Cruces por fecha</strong><p class="hint">Distribución de los partidos de cruce entre zonas en las fechas del borrador${crossoverAnchor != null ? ` (fecha elegida: ${crossoverAnchor})` : ''}.</p><div class="table-wrap"><table class="data"><thead><tr><th>Fecha</th><th>Cruces</th></tr></thead><tbody>${crucesPorFecha
+      ? `<div class="dash-card"><div class="dash-card-head"><h2>${icon('list', 16)} Cruces por fecha</h2></div><p class="hint" style="margin-top:0">Distribución de los partidos de cruce entre zonas en las fechas del borrador${crossoverAnchor != null ? ` (fecha elegida: ${crossoverAnchor})` : ''}.</p><div class="table-wrap"><table class="data"><thead><tr><th>Fecha</th><th>Cruces</th></tr></thead><tbody>${crucesPorFecha
           .map((x) => `<tr><td>Fecha ${x.round}${crossoverOverflow.includes(x.round) ? ' <span class="badge amber">desbordado</span>' : ''}</td><td>${x.n}</td></tr>`)
-          .join('')}</tbody></table></div></div></div>`
+          .join('')}</tbody></table></div></div>`
       : '';
   // Aviso de desborde: cruces que no entraron en la fecha elegida y cayeron
   // en fechas siguientes (por falta de slots o equipos ya ocupados).
@@ -2139,7 +2142,7 @@ export async function fixturePreviewPage(opts: {
         })
         .join('');
       return `<h3 class="zone-title">Fecha ${round}${day ? ` — ${esc(formatDateShort(day))}` : ''} <span class="faint small">(${list.length} partido(s))</span></h3>
-<div class="card"><div class="table-wrap"><table class="data">
+<div class="dash-card"><div class="table-wrap"><table class="data">
   <thead><tr><th>Tipo</th><th>Equipos</th><th>Cancha</th><th>Hora</th></tr></thead>
   <tbody>${rows}</tbody>
 </table></div></div>`;
@@ -2147,13 +2150,20 @@ export async function fixturePreviewPage(opts: {
     .join('');
   const cuando = opts.createdAt ? 'generada ' + esc(opts.createdAt) : 'recién';
   const body = `
-${flash('success', 'Vista previa lista (' + cuando + '). Nada se guardó todavía: revisá y confirmá abajo.')}
-${pageHead(`Vista previa — ${opts.tournamentName}`, { href: `/admin/fixture?t=${escUrl(opts.tournamentSlug)}`, label: '← Volver al fixture' })}
-<section class="block"><div class="card"><div class="card-body">
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Competencia</span>
+    <h1>Vista previa — ${esc(opts.tournamentName)}</h1>
+    <p>Revisá el borrador antes de aplicarlo: nada cambia hasta que confirmes (${cuando}).</p>
+  </div>
+  <a class="btn btn-ghost" href="/admin/fixture?t=${escUrl(opts.tournamentSlug)}">← Volver al fixture</a>
+</div>
+<section class="block"><div class="dash-card fgen">
+  <div class="dash-card-head"><h2>${icon('calendar', 16)} Resumen del borrador</h2></div>
   <strong>${esc(opts.summary)}</strong>
   ${overflowNote}
   <p class="hint">Revisá las fechas de abajo. Al confirmar se reemplaza TODO el fixture actual (solo se puede si no hay partidos jugados). Al descartar no cambia nada.</p>
-  <span style="display:flex;gap:8px">
+  <span style="display:flex;gap:8px;flex-wrap:wrap">
     <form method="post" action="/admin/fixture/confirmar" style="display:inline">
       <input type="hidden" name="tournament_id" value="${opts.tournamentId}">
       <input type="hidden" name="t" value="${escUrl(opts.tournamentSlug)}">
@@ -2165,7 +2175,7 @@ ${pageHead(`Vista previa — ${opts.tournamentName}`, { href: `/admin/fixture?t=
       <button class="btn btn-ghost" type="submit">✕ Descartar</button>
     </form>
   </span>
-</div></div></section>
+</div></section>
 ${
   crucesStat
     ? `<section class="block">${crucesStat}</section>

@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.73] — 2026-09-29 — Login y vista previa del fixture con el shell del panel
+
+### Mejora
+
+- El acceso al panel y la vista previa del fixture adoptan el shell del dashboard: el login se centra en una tarjeta con el escudo y la vista previa muestra el borrador en tarjetas con el resumen destacado antes de confirmar. Formularios y confirmaciones intactos; con esto todas las vistas del administrador comparten el mismo marco.
+
+---
+
 ## [0.2.72] — 2026-09-29 — Botones de eliminación unificados y guía de diseño del panel
 
 ### Mejora
