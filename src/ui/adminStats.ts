@@ -195,7 +195,7 @@ export async function estadisticasAdminPage(
   const tab: StatTab = STAT_TABS.some((x) => x.id === tabParam) ? (tabParam as StatTab) : 'tabla';
   const rules = rulesOf(t);
   const tabsQ = STAT_TABS.map(
-    (x) => `<a class="btn ${x.id === tab ? 'btn-primary' : 'btn-ghost'} btn-sm" href="/admin/estadisticas?t=${escUrl(t.slug)}&tab=${x.id}">${x.label}</a>`
+    (x) => `<a class="tpage-tab ${x.id === tab ? 'on' : ''}" href="/admin/estadisticas?t=${escUrl(t.slug)}&tab=${x.id}">${x.label}</a>`
   ).join('');
 
   const zonas = zonesOf(t.config);
@@ -240,16 +240,23 @@ export async function estadisticasAdminPage(
     }
   }
 
+  const teamPickOptions = tournaments
+    .map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`)
+    .join('');
   const body = `
-<section class="hero" style="padding-bottom:12px">
-  <div class="row-between">
-    <div>
-      <div class="hero-kicker">${esc(t.name)}</div>
-      <h1>Estadísticas</h1>
-    </div>
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Panel</span>
+    <h1>Estadísticas</h1>
+    <p>Tabla, goleadores, tarjetas y premios del torneo: mismos números que el sitio público.</p>
   </div>
-  <div class="fx-nav">${tabsQ}</div>
-</section>
+  <form method="get" action="/admin/estadisticas" class="pselect">
+    <input type="hidden" name="tab" value="${tab}">
+    <label for="stPick">Torneo</label>
+    <div class="tpage-search pselect-box">${icon('trophy', 15)}<select id="stPick" name="t" onchange="this.form.submit()">${teamPickOptions}</select></div>
+  </form>
+</div>
+<div class="tpage-tabs stabs">${tabsQ}</div>
 ${content}`;
   return adminLayout(db, { title: 'Estadísticas', active: 'estadisticas', body });
 }
@@ -282,7 +289,7 @@ function standingsTablesHtml(
         )
         .join('');
       return `${title ? `<h3 class="zone-title">${esc(title)}</h3>` : ''}
-  <div class="card"><div class="table-wrap"><table class="data standings">
+  <div class="dash-card"><div class="table-wrap"><table class="data standings">
     <thead><tr><th></th><th>Equipo</th><th class="num">PJ</th><th class="num">G</th><th class="num">E</th><th class="num">P</th><th class="num">GF</th><th class="num">GC</th><th class="num">DIF</th><th class="num">PTS</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div></div>`;
@@ -303,7 +310,7 @@ function scorersHtml(scorers: ScorersRow[]): string {
     )
     .join('');
   return `<h3 class="zone-title">Goleadores</h3>
-<div class="card"><div class="table-wrap"><table class="data">
+<div class="dash-card"><div class="table-wrap"><table class="data">
   <thead><tr><th></th><th>Jugador</th><th>Equipo</th><th class="num">Goles</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="4" class="empty-note">Sin goles registrados todavía</td></tr>'}</tbody>
 </table></div></div>`;
@@ -322,7 +329,7 @@ function cardsHtml(cards: CardsRow[]): string {
     )
     .join('');
   return `<h3 class="zone-title">Tarjetas</h3>
-<div class="card"><div class="table-wrap"><table class="data">
+<div class="dash-card"><div class="table-wrap"><table class="data">
   <thead><tr><th></th><th>Jugador</th><th>Equipo</th><th class="num">🟨</th><th class="num">🟥</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="5" class="empty-note">Sin tarjetas registradas</td></tr>'}</tbody>
 </table></div></div>`;
@@ -341,7 +348,7 @@ function fairPlayHtml(fp: ReturnType<typeof computeFairPlay>, teams: Team[]): st
     )
     .join('');
   return `<h3 class="zone-title">Fair play (amarilla ${FAIR_PLAY.yellow}, roja ${FAIR_PLAY.red} — gana el que menos tiene)</h3>
-<div class="card"><div class="table-wrap"><table class="data">
+<div class="dash-card"><div class="table-wrap"><table class="data">
   <thead><tr><th>Equipo</th><th class="num">🟨</th><th class="num">🟥</th><th class="num">Pts</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="4" class="empty-note">Sin tarjetas registradas</td></tr>'}</tbody>
 </table></div></div>`;
@@ -358,7 +365,7 @@ function vallaHtml(valla: ReturnType<typeof computeValla>, teams: Team[]): strin
     )
     .join('');
   return `<h3 class="zone-title">Valla menos vencida</h3>
-<div class="card"><div class="table-wrap"><table class="data">
+<div class="dash-card"><div class="table-wrap"><table class="data">
   <thead><tr><th>Equipo</th><th class="num">GC</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="3" class="empty-note">Sin partidos jugados todavía</td></tr>'}</tbody>
 </table></div></div>`;

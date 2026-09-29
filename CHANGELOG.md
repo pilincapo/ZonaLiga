@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.70] — 2026-09-29 — Nuevo diseño de Entregas y Estadísticas
+
+### Mejora
+
+- Entregas se vuelve una bandeja operativa: cada partido en una tarjeta destacada con su resultado oficial y cada entrega como card del equipo, con propuesta, comparación y acciones bien separadas; el aviso de dos entregas combinadas ahora se destaca. Estadísticas estrena encabezado con selector de torneo, pestañas visuales y tablas contenidas en cards del panel. Toda la lógica queda intacta.
+
+---
+
 ## [0.2.69] — 2026-09-29 — Nuevo diseño de Fechas y Planillas
 
 ### Mejora

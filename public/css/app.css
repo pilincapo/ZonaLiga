@@ -2276,6 +2276,34 @@ section.block > form { display: block; }
 /* Fechas: fila Guardar/Regenerar sin desbordes en pantallas angostas */
 .admin-page .row-between { flex-wrap: wrap; }
 
+/* ---------- Entregas (bandeja operativa) ---------- */
+
+.entmatch { border-left: 3px solid var(--st-amber); }
+html[data-theme='dark'] .entmatch { background: var(--surface-2); border-color: #33455e; border-left-color: var(--st-amber); }
+.entofficial {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin-bottom: 10px;
+  font-size: 0.82rem;
+}
+.entcombo {
+  margin-top: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--warning-soft); color: var(--warning-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: 0.8rem;
+}
+.sub-propose { font-size: 0.85rem; color: var(--text); }
+html[data-theme='dark'] .sub-propose { color: #eaf0f6; }
+.sub-acts { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.sub-acts form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.sub-acts label { display: inline-flex; gap: 6px; align-items: center; }
+.sub-acts input[type=text] { flex: 1; min-width: 160px; }
+
+/* Estadísticas: pestañas como links bajo el hero */
+.stabs { margin-bottom: 4px; }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1100px) {
