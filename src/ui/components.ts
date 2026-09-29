@@ -81,7 +81,7 @@ const BRAND_SVG = `<svg viewBox="0 0 40 44" fill="none" aria-hidden="true">
 </svg>`;
 
 /** Subir al cambiar CSS/íconos: versiona la URL y saltea cachés viejas. */
-const ASSET_VERSION = '43';
+const ASSET_VERSION = '44';
 
 const SUN_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.7 1.7M16.9 16.9l1.7 1.7M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7"/></svg>`;
 const MOON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2z"/></svg>`;
@@ -130,6 +130,55 @@ const THEME_BOOTSTRAP = `<script>
       if (mq.addEventListener) mq.addEventListener('change', onSystemChange);
       else if (mq.addListener) mq.addListener(onSystemChange);
     } catch (e) {}
+  })();
+</script>`;
+
+/** Lógica del menú de tema (claro/oscuro/automático). La usan el layout
+ *  clásico Y el shell del dashboard: sin esto, el botón no abre el menú. */
+const THEME_MENU_SCRIPT = `<script>
+  (function () {
+    var tBtn = document.getElementById('themeToggle');
+    var tPop = document.getElementById('themePop');
+    if (!tBtn || !tPop) return;
+    var choices = [].slice.call(tPop.querySelectorAll('[data-theme-choice]'));
+    var paint = function (dark) {
+      if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+      else document.documentElement.removeAttribute('data-theme');
+    };
+    var savedChoice = function () {
+      try {
+        var v = localStorage.getItem('zl-theme');
+        return v === 'dark' || v === 'light' ? v : 'auto';
+      } catch (e) { return 'auto'; }
+    };
+    var close = function () { tPop.setAttribute('hidden', ''); tBtn.setAttribute('aria-expanded', 'false'); };
+    var sync = function () {
+      var current = savedChoice();
+      choices.forEach(function (b) {
+        b.setAttribute('aria-checked', b.getAttribute('data-theme-choice') === current ? 'true' : 'false');
+      });
+    };
+    tBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (tPop.hasAttribute('hidden')) { sync(); tPop.removeAttribute('hidden'); tBtn.setAttribute('aria-expanded', 'true'); }
+      else close();
+    });
+    choices.forEach(function (b) {
+      b.addEventListener('click', function () {
+        var choice = b.getAttribute('data-theme-choice');
+        try {
+          if (choice === 'auto') localStorage.removeItem('zl-theme');
+          else localStorage.setItem('zl-theme', choice);
+        } catch (e) {}
+        var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        paint(choice === 'auto' ? systemDark : choice === 'dark');
+        sync();
+        close();
+      });
+    });
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+    sync();
   })();
 </script>`;
 
@@ -477,6 +526,7 @@ ${o.body}
   if (overlay) overlay.addEventListener('click', closeSide);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSide(); });
 </script>
+${THEME_MENU_SCRIPT}
 </body>
 </html>`;
 }

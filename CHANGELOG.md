@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.65] — 2026-09-29 — Arreglo: el cambio de tema ya funciona en todo el panel
+
+### Arreglo
+
+- El botón de tema (claro / oscuro / automático) del panel de administración volvió a abrir su menú y a guardar la elección en todas las pantallas: la lógica del menú no estaba incluida en el shell del panel.
+
+---
+
 ## [0.2.64] — 2026-09-29 — Todo el panel usa el shell del dashboard
 
 ### Mejora
