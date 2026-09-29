@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.74] — 2026-09-29 — Ajuste de legibilidad del login en modo oscuro
+
+### Arreglo
+
+- El texto de ayuda del acceso al panel se lee mejor en modo oscuro (pasó del gris tenue a un gris más claro, igual que los secundarios del panel).
+
+---
+
 ## [0.2.73] — 2026-09-29 — Login y vista previa del fixture con el shell del panel
 
 ### Mejora
