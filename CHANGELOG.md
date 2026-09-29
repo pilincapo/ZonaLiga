@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.63] — 2026-09-29 — Dashboard admin: pasada de contraste en modo oscuro
+
+### Mejora
+
+- El dashboard de `/admin` gana legibilidad sin cambiar estructura ni datos: títulos y números de métricas más claros y grandes, sidebar con logo y textos más visibles y grupos mejor separados, cards y accesos rápidos con más contraste sobre el fondo, tablas y filas de partidos con separadores y encabezados más marcados, y acento verde ZonaLiga reforzado.
+
+---
+
 ## [0.2.62] — 2026-09-28 — Nuevo diseño del inicio del panel de administración
 
 ### Mejora
