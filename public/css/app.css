@@ -2304,6 +2304,20 @@ html[data-theme='dark'] .sub-propose { color: #eaf0f6; }
 /* Estadísticas: pestañas como links bajo el hero */
 .stabs { margin-bottom: 4px; }
 
+/* ---------- Suspensiones + Ajustes ---------- */
+
+.m-red .dash-metric-ico { background: var(--danger-soft); color: var(--danger); }
+.m-red .dash-metric-bar span { background: var(--danger); }
+.susp-ico {
+  width: 42px; height: 42px; border-radius: 12px; flex: none;
+  display: grid; place-items: center;
+  background: var(--danger-soft); color: var(--danger);
+  font-family: var(--font-head); font-weight: 800; font-size: 0.85rem;
+}
+html[data-theme='dark'] .susp-ico { background: rgba(239, 68, 68, 0.16); color: #f87171; }
+.adj-pos { color: var(--st-green); }
+.adj-neg { color: var(--danger); }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1100px) {

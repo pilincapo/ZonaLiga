@@ -2004,29 +2004,61 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
   const maxRound = matches.reduce((acc, m) => Math.max(acc, m.round ?? 0), 0);
   const suspensions = computeSuspensions(events, matches, rules, maxRound);
 
-  const rows: string[] = [];
+  const cards: string[] = [];
+  const teamIds = new Set<number>();
   for (const s of suspensions) {
     const p = await db.prepare('SELECT * FROM players WHERE id = ?1').bind(s.playerId).first<{ name: string }>();
     const team = teamMap.get(s.teamId);
-    rows.push(`<tr>
-    <td><strong>${esc(p?.name ?? '—')}</strong></td>
-    <td>${esc(team?.name ?? '—')}</td>
-    <td>${esc(s.reason)}</td>
-    <td class="num">${s.matches}</td>
-    <td class="muted small">${s.asOfRound != null ? `Fecha ${s.asOfRound}` : ''}</td>
-  </tr>`);
+    if (s.teamId) teamIds.add(s.teamId);
+    const nombre = p?.name ?? '—';
+    const partes = nombre.split(' ').filter(Boolean);
+    const iniciales = nombre === '—' ? '·' : (partes.length > 1 ? `${partes[0]?.[0] ?? ''}${partes[1]?.[0] ?? ''}` : nombre.slice(0, 2)).toUpperCase();
+    cards.push(`<article class="tcard pcard">
+    <span class="susp-ico">${esc(iniciales)}</span>
+    <div class="tcard-tx">
+      <div class="tcard-top"><strong>${esc(nombre)}</strong><span class="badge red">${s.matches} partido${s.matches === 1 ? '' : 's'}</span></div>
+      <div class="tcard-meta">
+        <span>Equipo: ${esc(team?.name ?? '—')}</span>
+        <span>Motivo: ${esc(s.reason)}</span>
+        ${s.asOfRound != null ? `<span>Desde Fecha ${s.asOfRound}</span>` : ''}
+      </div>
+    </div>
+  </article>`);
   }
 
+  const teamPickOptions = tournaments
+    .map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`)
+    .join('');
+  const metric = (label: string, sub: string, value: number, tone: string, ico: string) => `
+  <div class="dash-metric ${tone}">
+    <span class="dash-metric-ico">${icon(ico as 'card', 18)}</span>
+    <span class="dash-metric-tx"><span class="dash-metric-lbl">${esc(label)}</span><span class="dash-metric-num">${value}</span><span class="dash-metric-sub">${esc(sub)}</span></span>
+    <span class="dash-metric-bar"><span></span></span>
+  </div>`;
   const body = `
 ${flash('success', msg)}
-${pageHead('Suspensiones')}
-<div class="card"><div class="card-body">
-  <p class="hint">Roja = ${rules.redSuspensionMatches} partido(s). Amarillas: cada ${rules.yellowAccumulation || '—'} acumuladas = 1 partido ${rules.yellowAccumWindow ? `(ventana de ${rules.yellowAccumWindow} fechas)` : '(acumulación total)'}. Configurable en el torneo.</p>
-</div></div>
-<section class="block"><div class="card"><div class="table-wrap"><table class="data">
-  <thead><tr><th>Jugador</th><th>Equipo</th><th>Motivo</th><th class="num">Partidos</th><th></th></tr></thead>
-  <tbody>${rows.join('') || '<tr><td colspan="5" class="empty-note">Sin suspensiones 🎉</td></tr>'}</tbody>
-</table></div></div></section>`;
+<div class="dash-hero">
+  <div class="dash-hero-tx">
+    <span class="dash-kicker">Administración</span>
+    <h1>Suspensiones</h1>
+    <p>Quiénes no pueden jugar y por cuántas fechas: se calculan solas con las reglas del torneo y las tarjetas cargadas.</p>
+  </div>
+  <form method="get" action="/admin/suspensiones" class="pselect">
+    <label for="spPick">Torneo</label>
+    <div class="tpage-search pselect-box">${icon('trophy', 15)}<select id="spPick" name="t" onchange="this.form.submit()">${teamPickOptions}</select></div>
+  </form>
+</div>
+<div class="dash-metrics">
+  ${metric('Suspendidos', 'jugadores', suspensions.length, 'm-red', 'card')}
+  ${metric('Equipos afectados', 'con sancionados', teamIds.size, 'm-amber', 'shield')}
+</div>
+<section class="block"><div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('shield', 16)} Reglas vigentes</h2></div>
+  <p class="hint" style="margin:0">Roja = ${rules.redSuspensionMatches} partido(s). Amarillas: cada ${rules.yellowAccumulation || '—'} acumuladas = 1 partido ${rules.yellowAccumWindow ? `(ventana de ${rules.yellowAccumWindow} fechas)` : '(acumulación total)'}. Configurable en el torneo.</p>
+</div></section>
+<section class="block"><div class="tpage-list">
+  ${cards.join('') || '<div class="empty-note">Sin suspensiones 🎉</div>'}
+</div></section>`;
   return adminLayout(db, { title: 'Suspensiones', active: 'suspensiones', body });
 }
 

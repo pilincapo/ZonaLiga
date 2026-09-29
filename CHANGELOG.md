@@ -15,6 +15,14 @@
 
 ---
 
+## [0.2.71] — 2026-09-29 — Nuevo diseño de Suspensiones y Ajustes de puntos
+
+### Mejora
+
+- Suspensiones estrena selector de torneo, reglas en su propia tarjeta y una card por jugador suspendido con las fechas pendientes bien visibles. Ajustes de puntos: formulario en tarjeta destacada y historial con el ajuste coloreado según sume o reste. Formularios y comportamiento intactos; con esto queda rediseñado todo el panel.
+
+---
+
 ## [0.2.70] — 2026-09-29 — Nuevo diseño de Entregas y Estadísticas
 
 ### Mejora
