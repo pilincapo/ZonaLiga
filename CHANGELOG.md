@@ -13,6 +13,21 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.2] — 2026-09-30 — Fixture por grupos (Fase 11B)
+
+### Nuevo
+
+- El generador de fixture ahora entiende los formatos Fase de Grupos y Grupos + Playoffs: reparte automáticamente los equipos participantes en los grupos definidos (reparto balanceado) y arma el fixture de cada grupo en forma independiente.
+- Cada grupo puede jugarse a una sola rueda (ida) o a dos ruedas (ida y vuelta invirtiendo la localía), elegible al momento de generar.
+- Los grupos quedan guardados en el torneo: la tabla de posiciones y el sitio público agrupan por grupo como siempre.
+- En Grupos + Playoffs, la vista previa recuerda cuántos clasificados por grupo hay y avisa que las llaves de playoffs se generan en otra fase.
+
+### Importante
+
+- Las llaves de playoffs siguen sin implementarse: esta fase solo genera la fase de grupos.
+
+---
+
 ## [0.3.1] — 2026-09-30 — Generador de fixture por formato (Fase 11A)
 
 ### Nuevo

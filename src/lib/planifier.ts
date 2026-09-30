@@ -70,6 +70,15 @@ export interface PlanInput {
    */
   competitionFormat?: string;
   /**
+   * Fase 11B: grupos ya distribuidos (para FASE_DE_GRUPOS / GRUPOS_PLAYOFFS).
+   * Cada grupo genera su round-robin independiente (1 o 2 ruedas); las fechas
+   * intercalan los partidos de todos los grupos. Si viene, deja sin efecto
+   * la config de zonas manual del torneo.
+   */
+  groups?: { name: string; teamIds: number[] }[];
+  /** Fase 11B: ruedas por grupo (1 = solo ida, 2 = ida y vuelta). Default 1. */
+  groupStageWheels?: 1 | 2;
+  /**
    * Tabla por zona al momento de planear (opcional). Si viene, define el
    * orden de los cruces con la misma regla del generador manual; si no, el
    * orden de la zona hace de "tabla" (fixture nuevo = tabla vacía).
@@ -176,15 +185,29 @@ export function planFixture(input: PlanInput): PlannedFixture {
 
   // 1) Bolsa de partidos de zona (o círculo global si no hay zonas activas).
   const zc = zonesOf(input.configJson);
-  const zoned = zc.enabled && zc.zones.length >= 2;
+  // Fase 11B: con grupos de la config de competencia, el reparto de zonas
+  // sale de los grupos y NO de la config manual de zonas del torneo.
+  const byGroups = Boolean(input.groups && input.groups.length >= 2);
+  const effectiveZones = byGroups
+    ? { enabled: true, zones: input.groups!.map((g) => ({ name: g.name, teamIds: g.teamIds })) }
+    : zc;
+  const zoned = effectiveZones.enabled && effectiveZones.zones.length >= 2;
   const pool: PlannedMatch[] = [];
 
   if (zoned) {
     const active = new Set(input.teamIds);
-    const calendars = zc.zones
+    // Fase 11B: en grupos con 2 ruedas cada grupo juega ida y vuelta.
+    const groupDouble =
+      input.competitionFormat === 'GRUPOS_PLAYOFFS' || input.competitionFormat === 'FASE_DE_GRUPOS'
+        ? input.groupStageWheels === 2
+        : false;
+    const calendars = effectiveZones.zones
       .map((z) => ({ zone: z.name, ids: z.teamIds.filter((id) => active.has(id)) }))
       .filter((z) => z.ids.length >= 2)
-      .map((z) => ({ zone: z.zone, fixture: generateRoundRobin(z.ids) }));
+      .map((z) => ({
+        zone: z.zone,
+        fixture: groupDouble ? generateDoubleRoundRobin(z.ids) : generateRoundRobin(z.ids),
+      }));
     const maxRounds = calendars.reduce((mx, c) => Math.max(mx, c.fixture.rounds.length), 0);
     for (let i = 0; i < maxRounds; i++) {
       for (const cal of calendars) {

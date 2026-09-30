@@ -1358,13 +1358,17 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   const matches = view?.matches ?? [];
   const teams = view?.teams ?? [];
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
-  // Fase 11A: formato de competencia (Fase 10). Si el torneo lo declara,
-  // las ruedas se toman de ahí y el selector del generador es informativo.
+  // Fase 11A/11B: formato de competencia (Fase 10). Si el torneo lo declara,
+  // las ruedas se toman de ahí y el selector del generador es informativo o
+  // de ruedas por grupo.
   const compFormat = parseCompetitionConfig(t.config, t.format);
   const compDrivesWheels =
     compFormat.format === 'TODOS_CONTRA_TODOS' ||
     compFormat.format === 'UNA_RUEDA' ||
-    compFormat.format === 'DOS_RUEDAS';
+    compFormat.format === 'DOS_RUEDAS' ||
+    compFormat.format === 'FASE_DE_GRUPOS' ||
+    compFormat.format === 'GRUPOS_PLAYOFFS';
+  const compWithGroups = compFormat.format === 'FASE_DE_GRUPOS' || compFormat.format === 'GRUPOS_PLAYOFFS';
 
   const byRound = new Map<number, Match[]>();
   for (const m of matches) {
@@ -1609,15 +1613,21 @@ ${flash('success', msg)}${flash('error', errMsg)}${blockNote}${gapsNote}
     <div class="field grow">
       <label>Formato del torneo</label>
       ${
-        compDrivesWheels
-          ? `<select name="mode" disabled>
-              <option value="single" ${compFormat.format === 'UNA_RUEDA' ? 'selected' : ''}>${esc(FORMAT_LABELS[compFormat.format])}</option>
+        compWithGroups
+          ? `<select name="mode">
+              <option value="single">Grupos: solo ida (1 rueda)</option>
+              <option value="double">Grupos: ida y vuelta (2 ruedas)</option>
             </select>
-            <p class="hint">Definido en la configuración de competencia del torneo. Para cambiarlo, editá el torneo.</p>`
-          : `<select name="mode">
-              <option value="single">Ida (una vuelta)</option>
-              <option value="double">Ida y vuelta</option>
-            </select>`
+            <p class="hint">${compFormat.groupStage.count} grupos definidos en el torneo. Al generar se reparten los equipos en los grupos y cada uno juega su fixture.</p>`
+          : compDrivesWheels
+            ? `<select name="mode" disabled>
+                <option value="single" ${compFormat.format === 'UNA_RUEDA' ? 'selected' : ''}>${esc(FORMAT_LABELS[compFormat.format])}</option>
+              </select>
+              <p class="hint">Definido en la configuración de competencia del torneo. Para cambiarlo, editá el torneo.</p>`
+            : `<select name="mode">
+                <option value="single">Ida (una vuelta)</option>
+                <option value="double">Ida y vuelta</option>
+              </select>`
       }
     </div>
 ${
@@ -2686,6 +2696,8 @@ export async function fixturePreviewPage(opts: {
   payload: string;
   createdAt: string;
   teamNames: Map<number, string>;
+  /** Fase 11B: si el formato define playoffs, aviso de llaves pendientes. */
+  pendingPlayoffsNote?: string;
 }): Promise<string> {
   let plan: PlannedMatch[] = [];
   let crossoverOverflow: number[] = [];
@@ -2762,6 +2774,7 @@ export async function fixturePreviewPage(opts: {
   <div class="dash-card-head"><h2>${icon('calendar', 16)} Resumen del borrador</h2></div>
   <strong>${esc(opts.summary)}</strong>
   ${overflowNote}
+  ${opts.pendingPlayoffsNote ?? ''}
   <p class="hint">Revisá las fechas de abajo. Al confirmar se reemplaza TODO el fixture actual (solo se puede si no hay partidos jugados). Al descartar no cambia nada.</p>
   <span style="display:flex;gap:8px;flex-wrap:wrap">
     <form method="post" action="/admin/fixture/confirmar" style="display:inline">

@@ -37,6 +37,7 @@ import {
   TIEBREAKER_KEYS,
   ALL_FORMATS,
   competitionConfigJson,
+  distributeGroups,
   formatHasGroups,
   formatHasPlayoffs,
   formatHasTable,
@@ -649,12 +650,35 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
   try {
     // Fase 11A: el formato de competencia (Fase 10) define las ruedas; el
     // mode del formulario queda solo como fallback para torneos legados.
-    const competitionFormat = parseCompetitionConfig(configJson, tRow.format).format;
+    const comp = parseCompetitionConfig(configJson, tRow.format);
+    const competitionFormat = comp.format;
+    // Fase 11B: en formatos por grupos, los participantes se reparten en
+    // grupos (serpentina alfabética) y cada grupo juega su round-robin. La
+    // 1 rueda es por defecto; 2 con el checkbox "ida y vuelta" del form.
+    // Los grupos quedan guardados en la config de zonas del torneo para que
+    // posiciones y estadísticas agrupen igual.
+    const withGroups = competitionFormat === 'FASE_DE_GRUPOS' || competitionFormat === 'GRUPOS_PLAYOFFS';
+    let groups: { name: string; teamIds: number[] }[] | undefined;
+    if (withGroups) {
+      const count = comp.groupStage.count;
+      if (count < 2) {
+        return c.redirect(dest + '&err=' + encodeURIComponent('El formato tiene grupos: configurá al menos 2 en el torneo.'));
+      }
+      groups = distributeGroups(ids, count);
+      console.log('E2EDEBUG grupos:', JSON.stringify({ count, idsLen: ids.length, groups: groups.map((g) => ({ n: g.name, len: g.teamIds.length })) }));
+      // Los grupos van a la config de zonas del torneo: misma estructura de
+      // siempre (posiciones agrupadas, aviso de zonas, etc.).
+      const cfg = JSON.parse(configJson || '{}') as Record<string, unknown>;
+      cfg['zones'] = { enabled: true, zones: groups };
+      await c.env.DB.prepare('UPDATE tournaments SET config = ?1 WHERE id = ?2').bind(JSON.stringify(cfg), tournamentId).run();
+    }
     plan = planFixture({
       teamIds: ids,
       configJson,
       mode,
       competitionFormat,
+      groups,
+      groupStageWheels: withGroups && mode === 'double' ? 2 : 1,
       schedule,
       crossoverRule: rule,
       crossoverCounts,
@@ -706,6 +730,13 @@ adminRoutes.get('/fixture/vista-previa', async (c) => {
   // Nombres de equipos para mostrar el plan legible (el payload trae ids).
   const teamRows = await c.env.DB.prepare('SELECT id, name FROM teams').all<{ id: number; name: string }>();
   const teamNames = new Map((teamRows.results ?? []).map((r) => [r.id, r.name]));
+  // Fase 11B: con GRUPOS_PLAYOFFS, los clasificados quedan preparados pero
+  // las llaves se generan en otra fase.
+  const comp = parseCompetitionConfig(t.config, t.format);
+  const pendingPlayoffsNote =
+    comp.format === 'GRUPOS_PLAYOFFS'
+      ? `<div class="warning-box">📌 Formato Grupos + Playoffs: al terminar la fase de grupos clasifican los primeros ${comp.groupStage.qualifiersPerGroup} de cada grupo (${comp.groupStage.count * comp.groupStage.qualifiersPerGroup} equipos). Las llaves de playoffs se generan en su momento — todavía no están implementadas en esta fase.</div>`
+      : '';
   return c.html(
     await admin.fixturePreviewPage({
       tournamentId: t.id,
@@ -715,6 +746,7 @@ adminRoutes.get('/fixture/vista-previa', async (c) => {
       payload: draft.payload,
       createdAt: draft.created_at,
       teamNames,
+      pendingPlayoffsNote,
     })
   );
 });

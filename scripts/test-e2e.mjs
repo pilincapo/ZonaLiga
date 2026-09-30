@@ -118,7 +118,9 @@ try {
 
   // 3) Tests; la limpieza corre en finally pase lo que pase.
   try {
-    const run = spawnSync(process.execPath, [VITEST_MJS, 'run', 'test/e2e-login.test.ts'], {
+    const vitestArgs = [VITEST_MJS, 'run', 'test/e2e-login.test.ts'];
+    if (process.env.E2E_TEST_NAME) vitestArgs.push('-t', process.env.E2E_TEST_NAME);
+    const run = spawnSync(process.execPath, vitestArgs, {
       cwd: root,
       env: { ...env, ZONALIGA_E2E_BASE: base, ZONALIGA_E2E_PASS: adminPassword },
       stdio: 'inherit',

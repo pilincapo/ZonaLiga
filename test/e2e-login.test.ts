@@ -1901,3 +1901,86 @@ describe.skipIf(!has)('e2e: generador de fixture por formato (Fase 11A)', () => 
     expect(del.status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: generador de fixture por grupos (Fase 11B)', () => {
+  it('GRUPOS_PLAYOFFS: 6 equipos en 2 grupos, fixture por grupo y aviso de llaves pendientes', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Torneo con formato Grupos + Playoffs: 2 grupos × 2 clasificados.
+    const alta = await admin.post('/admin/torneos', {
+      name: 'Grupos Playoffs E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('Grupos Playoffs E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    // 6 participantes: crea 2 equipos extra (el beforeAll crea 4).
+    await admin.post('/admin/equipos', { name: 'Zonda E2E', short_name: 'ZON', color: '#8b5cf6', active: 'on' });
+    await admin.post('/admin/equipos', { name: 'Yerbal E2E', short_name: 'YER', color: '#0ea5e9', active: 'on' });
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 6);
+    expect(teamIds.length).toBe(6);
+    const partBody: Record<string, string> = {
+      name: 'Grupos Playoffs E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'GRUPOS_PLAYOFFS',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    const part = await admin.post(`/admin/torneos/${tid}`, partBody);
+    expect(part.status).toBe(302);
+
+    // Generar (1 rueda): vista previa + confirmar.
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+
+    // La vista previa avisa de los playoffs pendientes (4 clasificados).
+    const preview = await (await admin.get('/admin/fixture/vista-previa?t=grupos-playoffs-e2e')).text();
+    expect(preview).toContain('clasifican los primeros 2 de cada grupo (4 equipos)');
+    expect(preview).toContain('todavía no están implementadas');
+
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'grupos-playoffs-e2e' });
+    expect(conf.status).toBe(302);
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+
+    // 6 equipos en 2 grupos de 3, una rueda: 2 × C(3,2) = 6 partidos.
+    const fx = await (await admin.get('/admin/fixture?t=grupos-playoffs-e2e')).text();
+    const partidos = [...fx.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!);
+    expect(new Set(partidos).size).toBe(6);
+    // Los partidos están marcados con su grupo (A/B) en la columna de zona.
+    expect(fx).toContain('>A<');
+    expect(fx).toContain('>B<');
+
+    // El torneo quedó con la config de zonas por grupos: posiciones agrupadas.
+    const form = await (await admin.get(`/admin/torneos/${tid}`)).text();
+    expect(form).toContain('value="GRUPOS_PLAYOFFS" selected');
+
+    // Limpieza.
+    const del = await admin.post(`/admin/torneos/${tid}/eliminar`, {});
+    expect(del.status).toBe(302);
+  });
+});

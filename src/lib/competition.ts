@@ -281,6 +281,34 @@ export function competitionConfigJson(comp: CompetitionConfig): Record<string, u
   };
 }
 
+/**
+ * Fase 11B: reparte los equipos participantes en `count` grupos. Determinista
+ * (alfabético, serpentina): el mismo listado produce el mismo reparto. Los
+ * equipos sobrantes de grupos incompletos quedan distribuidos desde el
+ * primer grupo. Devuelve los grupos con nombre A, B, C…
+ */
+export function distributeGroups(teamIds: number[], count: number): { name: string; teamIds: number[] }[] {
+  const n = Math.max(0, Math.round(count));
+  const ids = [...teamIds].sort((a, b) => a - b);
+  if (n < 1 || ids.length < 2) return [];
+  const groups: { name: string; teamIds: number[] }[] = Array.from({ length: n }, (_, i) => ({
+    name: GROUP_LETTERS[i] ?? `G${i + 1}`,
+    teamIds: [],
+  }));
+  // Serpentina: 1→N, luego N→1, para balancear el orden alfabético.
+  let g = 0;
+  let dir = 1;
+  for (const id of ids) {
+    groups[g]!.teamIds.push(id);
+    if (dir === 1 && g === n - 1) dir = -1;
+    else if (dir === -1 && g === 0) dir = 1;
+    else g += dir;
+  }
+  return groups;
+}
+
+export const GROUP_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
+
 // ---- Listas de valores válidos (una sola fuente, reusada por parseo y UI) ----
 
 export const ALL_FORMATS: readonly CompetitionFormat[] = [
