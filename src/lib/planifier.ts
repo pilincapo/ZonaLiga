@@ -63,6 +63,13 @@ export interface PlanInput {
   mode: 'single' | 'double';
   schedule: TournamentSchedule;
   /**
+   * Fase 11A: formato de competencia (Fase 10). Si viene y es uno de los
+   * formatos de liga (TODOS_CONTRA_TODOS/UNA_RUEDA/DOS_RUEDAS), define las
+   * ruedas y pisa `mode`. Formatos de grupos/playoffs aún no generan nada
+   * distinto: caen al comportamiento por defecto hasta sus fases.
+   */
+  competitionFormat?: string;
+  /**
    * Tabla por zona al momento de planear (opcional). Si viene, define el
    * orden de los cruces con la misma regla del generador manual; si no, el
    * orden de la zona hace de "tabla" (fixture nuevo = tabla vacía).
@@ -196,8 +203,15 @@ export function planFixture(input: PlanInput): PlannedFixture {
       }
     }
   } else {
-    const fixture =
-      input.mode === 'double' ? generateDoubleRoundRobin(input.teamIds) : generateRoundRobin(input.teamIds);
+    // Fase 11A: el formato de competencia manda sobre el mode del form.
+    // UNA_RUEDA = 1 vuelta; DOS_RUEDAS y TODOS_CONTRA_TODOS = ida y vuelta.
+    const singleWheel = input.competitionFormat === 'UNA_RUEDA';
+    const double = singleWheel
+      ? false
+      : input.competitionFormat === 'DOS_RUEDAS' || input.competitionFormat === 'TODOS_CONTRA_TODOS'
+        ? true
+        : input.mode === 'double';
+    const fixture = double ? generateDoubleRoundRobin(input.teamIds) : generateRoundRobin(input.teamIds);
     for (const pairs of fixture.rounds) {
       for (const p of pairs) {
         pool.push({ home: p.home, away: p.away, zone: '', kind: 'global', day: '', venue: '', kickoff: '', fixtureRound: 0 });

@@ -1799,3 +1799,105 @@ describe.skipIf(!has)('e2e: configuración de competencia (Fase 10)', () => {
     expect(del.status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: generador de fixture por formato (Fase 11A)', () => {
+  it('UNA_RUEDA: genera una sola vuelta; regenerar exige acción explícita; los jugados bloquean', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Torneo propio con 4 equipos participantes y formato UNA_RUEDA.
+    const alta = await admin.post('/admin/torneos', {
+      name: 'Fixture Rueda E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('Fixture Rueda E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    // 4 participantes (los primeros 4 equipos globales, por id real).
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+    expect(teamIds.length).toBe(4);
+    const partBody: Record<string, string> = {
+      name: 'Fixture Rueda E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    const part = await admin.post(`/admin/torneos/${tid}`, partBody);
+    expect(part.status).toBe(302);
+
+    // Vista previa: el generador muestra el formato definido en el torneo.
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'double' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'fixture-rueda-e2e' });
+    expect(conf.status).toBe(302);
+    const confLoc = decodeURIComponent(conf.headers.get('location') ?? '');
+    expect(confLoc).toContain('Fixture guardado');
+
+    // Con 4 equipos UNA_RUEDA: 6 partidos (sin doble vuelta). Cada partido
+    // se menciona varias veces en el HTML (link de planilla + eliminar), así
+    // que se cuenta por IDs únicos presentes en filas de la tabla del fixture.
+    const fx = await (await admin.get('/admin/fixture?t=fixture-rueda-e2e')).text();
+    const partidos = [...fx.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!);
+    expect(new Set(partidos).size).toBe(6);
+    // El generador muestra el formato definido en la config del torneo.
+    expect(fx).toContain('Todos contra todos (solo ida)');
+
+    // Regeneración explícita: preparar otra vista previa y confirmar pisa
+    // el fixture SIN jugados (acción explícita de dos pasos: previsualizar
+    // → confirmar con confirm() en la UI).
+    const gen2 = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'double' });
+    expect(gen2.status).toBe(302);
+    const conf2 = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'fixture-rueda-e2e' });
+    expect(conf2.status).toBe(302);
+    expect(decodeURIComponent(conf2.headers.get('location') ?? '')).toContain('Fixture guardado');
+
+    // Cargar un resultado: ahora la regeneración que borre partidos queda
+    // bloqueada en el servidor.
+    const fx2 = await (await admin.get('/admin/fixture?t=fixture-rueda-e2e')).text();
+    const mids = [...new Set([...fx2.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!))];
+    const guardar = await admin.post(`/admin/planilla/${mids[0]}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '2',
+      away_goals: '1',
+      hg1: 'none',
+      hg2: 'none',
+      ag1: 'none',
+      notes: '',
+    });
+    expect(guardar.status).toBe(302);
+    const gen3 = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen3.status).toBe(302);
+    const conf3 = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'fixture-rueda-e2e' });
+    expect(conf3.status).toBe(302);
+    const conf3Loc = decodeURIComponent(conf3.headers.get('location') ?? '');
+    expect(conf3Loc).toContain('jugado(s)'); // rechazo explícito: no borra históricos
+
+    // Limpieza.
+    const del = await admin.post(`/admin/torneos/${tid}/eliminar`, {});
+    expect(del.status).toBe(302);
+  });
+});

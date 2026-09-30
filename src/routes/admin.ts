@@ -608,12 +608,12 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
     return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
   }
   const tRow = await c.env.DB
-    .prepare('SELECT slug, config, status FROM tournaments WHERE id = ?1')
+    .prepare('SELECT slug, config, status, format FROM tournaments WHERE id = ?1')
     .bind(tournamentId)
-    .first<{ slug: string; config: string; status: string }>();
+    .first<{ slug: string; config: string; status: string; format: string }>();
   if (!tRow) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
   const dest = `/admin/fixture?t=${encodeURIComponent(tRow.slug)}`;
-  if (tRow.status === 'finished') {
+  if (tRow.status === 'finished' || tRow.status === 'archived') {
     return c.redirect(dest + '&err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.'));
   }
 
@@ -647,10 +647,14 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
 
   let plan;
   try {
+    // Fase 11A: el formato de competencia (Fase 10) define las ruedas; el
+    // mode del formulario queda solo como fallback para torneos legados.
+    const competitionFormat = parseCompetitionConfig(configJson, tRow.format).format;
     plan = planFixture({
       teamIds: ids,
       configJson,
       mode,
+      competitionFormat,
       schedule,
       crossoverRule: rule,
       crossoverCounts,
@@ -734,8 +738,8 @@ adminRoutes.post('/fixture/confirmar', async (c) => {
     .first<{ slug: string; status: string; config: string }>();
   if (!tRow) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
   const dest = `/admin/fixture?t=${encodeURIComponent(tRow.slug)}`;
-  if (tRow.status === 'finished') {
-    return c.redirect(dest + '&err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.'));
+  if (tRow.status === 'finished' || tRow.status === 'archived') {
+    return c.redirect(dest + '&err=' + encodeURIComponent('El torneo está finalizado o archivado: no se puede regenerar el fixture.'));
   }
 
   // Guardia crítica primero: con partidos jugados no se confirma nada, haya

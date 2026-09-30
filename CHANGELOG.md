@@ -13,6 +13,24 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.1] — 2026-09-30 — Generador de fixture por formato (Fase 11A)
+
+### Nuevo
+
+- El generador de fixture todos contra todos ahora respeta el formato definido en la configuración de competencia: UNA_RUEDA arma una sola vuelta, DOS_RUEDAS y TODOS_CONTRA_TODOS arman ida y vuelta invirtiendo la localía.
+- En el panel de fixture, el formato del torneo se muestra como dato informativo (definido en el torneo); para cambiarlo hay que editar el torneo.
+- Si el torneo ya tiene fixture, el botón de generación avisa con claridad que va a reemplazar todo y pide confirmación antes de preparar la vista previa.
+
+### Mejora
+
+- Los torneos finalizados o archivados ya no permiten generar ni regenerar fixture.
+
+### Arreglo
+
+- No se puede pisar por accidente un fixture con partidos jugados: la protección del servidor sigue firme y ahora también se explica mejor en la pantalla.
+
+---
+
 ## [0.3.0] — 2026-09-30 — Configuración de competencia (Fase 10)
 
 ### Nuevo

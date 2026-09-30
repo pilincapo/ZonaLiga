@@ -124,6 +124,9 @@ try {
       stdio: 'inherit',
     });
     failed = run.status !== 0;
+    if (process.env.E2E_KEEP_LOG) {
+      try { fs.copyFileSync(logPath, path.join(root, 'e2e-debug.log')); } catch {}
+    }
   } finally {
     killTree(child.pid);
     fs.closeSync(logStream);

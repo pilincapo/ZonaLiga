@@ -1358,6 +1358,13 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   const matches = view?.matches ?? [];
   const teams = view?.teams ?? [];
   const teamMap = new Map(teams.map((tm) => [tm.id, tm]));
+  // Fase 11A: formato de competencia (Fase 10). Si el torneo lo declara,
+  // las ruedas se toman de ahí y el selector del generador es informativo.
+  const compFormat = parseCompetitionConfig(t.config, t.format);
+  const compDrivesWheels =
+    compFormat.format === 'TODOS_CONTRA_TODOS' ||
+    compFormat.format === 'UNA_RUEDA' ||
+    compFormat.format === 'DOS_RUEDAS';
 
   const byRound = new Map<number, Match[]>();
   for (const m of matches) {
@@ -1601,10 +1608,17 @@ ${flash('success', msg)}${flash('error', errMsg)}${blockNote}${gapsNote}
     <input type="hidden" name="tournament_id" value="${t.id}">
     <div class="field grow">
       <label>Formato del torneo</label>
-      <select name="mode">
-        <option value="single">Ida (una vuelta)</option>
-        <option value="double">Ida y vuelta</option>
-      </select>
+      ${
+        compDrivesWheels
+          ? `<select name="mode" disabled>
+              <option value="single" ${compFormat.format === 'UNA_RUEDA' ? 'selected' : ''}>${esc(FORMAT_LABELS[compFormat.format])}</option>
+            </select>
+            <p class="hint">Definido en la configuración de competencia del torneo. Para cambiarlo, editá el torneo.</p>`
+          : `<select name="mode">
+              <option value="single">Ida (una vuelta)</option>
+              <option value="double">Ida y vuelta</option>
+            </select>`
+      }
     </div>
 ${
   twoZones
@@ -1630,7 +1644,7 @@ ${
 }
     <div class="field" style="align-self:flex-end">
       <span style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" type="submit" ${genBlocked ? 'disabled' : ''}>Preparar vista previa</button>
+        <button class="btn btn-primary" type="submit" ${genBlocked ? 'disabled' : ''} onclick="${matches.length > 0 ? "return confirm('Este torneo YA TIENE un fixture: al confirmar la vista previa se reemplaza TODO el actual (los partidos sin jugar se borran y se recrean; los jugados bloquean la confirmación). ¿Continuar?')" : ''}">${matches.length > 0 ? '↻ Regenerar fixture (reemplaza el actual)' : 'Preparar vista previa'}</button>
         <button class="btn btn-ghost" type="submit" formaction="/admin/fixture/regenerar" onclick="return confirm('Se rearman SOLO los cruces pendientes: los partidos jugados y sus resultados quedan intactos. ¿Continuar?')">↻ Regenerar cruce</button>
       </span>
     </div>
