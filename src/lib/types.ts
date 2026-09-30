@@ -1,7 +1,9 @@
 // Tipos de dominio y configuración de reglas.
 
 export type TournamentFormat = 'round_robin' | 'zonas_playoffs' | 'copa';
-export type TournamentStatus = 'draft' | 'active' | 'finished';
+// Fase 10: se agregan 'registrations' (inscripciones: cambios estructurales
+// limitados) y 'archived' (archivado: solo lectura).
+export type TournamentStatus = 'draft' | 'registrations' | 'active' | 'finished' | 'archived';
 export type MatchStatus = 'scheduled' | 'played' | 'postponed' | 'suspended' | 'walkover' | 'bye';
 export type EventType = 'goal' | 'own_goal' | 'yellow' | 'red';
 export type PlayerPosition = '' | 'AR' | 'DF' | 'MED' | 'DEL';

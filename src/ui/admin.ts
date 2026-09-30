@@ -16,6 +16,28 @@ import {
   type TournamentSchedule,
 } from '../lib/schedule.ts';
 import { BRACKET_LABELS } from '../lib/bracket.ts';
+import {
+  type CompetitionConfig,
+  type CompetitionFormat,
+  type TiebreakCriterion,
+  ALL_FORMATS,
+  DEFAULT_TIEBREAKERS,
+  FORMAT_LABELS,
+  LOCALIA_LABELS,
+  LOCALIA_MODES,
+  PLAYOFF_START_LABELS,
+  PLAYOFF_START_ROUNDS,
+  PLAYOFF_TIEBREAKS,
+  TIEBREAKER_KEYS,
+  TIEBREAKER_LABELS,
+  TIEBREAK_MODE_LABELS,
+  formatHasGroups,
+  formatHasPlayoffs,
+  formatHasTable,
+  isLegacyFormat,
+  legacyToCompetitionFormat,
+  parseCompetitionConfig,
+} from '../lib/competition.ts';
 import { formatDateShort } from '../lib/format.ts';
 import {
   getMatch,
@@ -760,14 +782,134 @@ ${flash('success', msg)}${flash('error', errMsg)}
   return adminLayout(db, { title: 'Torneos', active: 'torneos', body });
 }
 
+/**
+ * Fase 10C: sección "Configuración de competencia" del form de torneo.
+ * Los campos aparecen según el formato (grupos, playoffs, puntos) y el
+ * mini-script al pie muestra/oculta cada bloque cuando se cambia el formato.
+ * Solo lectura si el estado del torneo bloquea la estructura.
+ */
+function competitionFields(comp: CompetitionConfig, readOnly: boolean): string {
+  const withGroups = formatHasGroups(comp.format);
+  const withPlayoffs = formatHasPlayoffs(comp.format);
+  const withTable = formatHasTable(comp.format);
+  const dis = readOnly ? ' disabled' : '';
+
+  const formatOptions = ALL_FORMATS.map(
+    (f) => `<option value="${f}" ${comp.format === f ? 'selected' : ''}>${FORMAT_LABELS[f]}</option>`
+  ).join('');
+
+  const groupsBlock = withGroups
+    ? `
+    <div class="form-row">
+      <div class="field">
+        <label for="comp_groups">Cantidad de grupos</label>
+        <input type="number" min="2" max="8" id="comp_groups" name="comp_groups" value="${comp.groupStage.count}"${dis}>
+      </div>
+      <div class="field">
+        <label for="comp_qualifiers">Clasificados por grupo</label>
+        <input type="number" min="1" max="16" id="comp_qualifiers" name="comp_qualifiers" value="${comp.groupStage.qualifiersPerGroup}"${dis}>
+        <p class="hint">Cuántos avanzan de cada grupo a la fase siguiente.</p>
+      </div>
+    </div>`
+    : '';
+
+  const playoffsBlock = withPlayoffs
+    ? `
+    <div class="form-row">
+      <div class="field">
+        <label for="comp_playoff_start">Instancia inicial de playoffs</label>
+        <select id="comp_playoff_start" name="comp_playoff_start"${dis}>
+          ${PLAYOFF_START_ROUNDS.map(
+            (r) => `<option value="${r}" ${comp.playoffs.start === r ? 'selected' : ''}>${PLAYOFF_START_LABELS[r]}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label for="comp_playoff_tiebreak">Empate en playoffs</label>
+        <select id="comp_playoff_tiebreak" name="comp_playoff_tiebreak"${dis}>
+          ${PLAYOFF_TIEBREAKS.map(
+            (m) => `<option value="${m}" ${comp.playoffs.tiebreak === m ? 'selected' : ''}>${TIEBREAK_MODE_LABELS[m]}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="comp_playoff_single" name="comp_playoff_single" ${comp.playoffs.singleMatch ? 'checked' : ''}${dis} style="width:auto">
+        Partidos de ida y vuelta (desmarcado = partido único)
+      </label>
+    </div>
+    <div class="form-row">
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="comp_playoff_third" name="comp_playoff_third" ${comp.playoffs.thirdPlace ? 'checked' : ''}${dis} style="width:auto">
+        Partido por el tercer puesto
+      </label>
+    </div>`
+    : '';
+
+  const tbSelect = (pos: number, current: TiebreakCriterion) => {
+    const rest = [...TIEBREAKER_KEYS].filter((k) => k === current || !comp.tiebreakers.includes(k));
+    return `
+      <select id="comp_tb_${pos}" name="comp_tb_${pos}"${dis}>
+        <option value="">—</option>
+        ${rest.map((k) => `<option value="${k}" ${current === k ? 'selected' : ''}>${TIEBREAKER_LABELS[k]}</option>`).join('')}
+      </select>`;
+  };
+  const tiebreakersBlock = withTable
+    ? `
+    <div class="form-row">
+      <div class="field"><label>Desempate 1º</label>${tbSelect(1, comp.tiebreakers[0] ?? 'PUNTOS')}</div>
+      <div class="field"><label>Desempate 2º</label>${tbSelect(2, comp.tiebreakers[1] ?? 'DIFERENCIA_GOLES')}</div>
+      <div class="field"><label>Desempate 3º</label>${tbSelect(3, comp.tiebreakers[2] ?? 'GOLES_FAVOR')}</div>
+    </div>`
+    : '';
+
+  const pointsBlock = withTable
+    ? `
+    <div class="form-row">
+      <div class="field"><label for="comp_points_win">Puntos por victoria</label><input type="number" min="0" max="100" id="comp_points_win" name="comp_points_win" value="${comp.points.win}"${dis}></div>
+      <div class="field"><label for="comp_points_draw">Puntos por empate</label><input type="number" min="0" max="100" id="comp_points_draw" name="comp_points_draw" value="${comp.points.draw}"${dis}></div>
+      <div class="field"><label for="comp_points_loss">Puntos por derrota</label><input type="number" min="0" max="100" id="comp_points_loss" name="comp_points_loss" value="${comp.points.loss}"${dis}></div>
+    </div>`
+    : '';
+
+  return `
+  <h3 class="zone-title">Configuración de competencia</h3>
+  <div class="field">
+    <label for="comp_format">Formato</label>
+    <select id="comp_format" name="comp_format"${dis}>${formatOptions}</select>
+    <p class="hint">Define qué bloques se muestran abajo: grupos, playoffs y puntos aparecen solo si el formato los usa.</p>
+  </div>
+  <div data-comp="groups">${groupsBlock}</div>
+  <div data-comp="playoffs">${playoffsBlock}</div>
+  <div data-comp="table">${pointsBlock}${tiebreakersBlock}</div>
+  <div class="field">
+    <label for="comp_localia">Localía</label>
+    <select id="comp_localia" name="comp_localia"${dis}>
+      ${LOCALIA_MODES.map((m) => `<option value="${m}" ${comp.localia === m ? 'selected' : ''}>${LOCALIA_LABELS[m]}</option>`).join('')}
+    </select>
+    <p class="hint">Alternada: cada equipo va cambiando de local y visitante. Sorteada: se define al generar el fixture. Sin localía fija: todos juegan de visitante (cancha neutral).</p>
+  </div>`;
+}
+
 function badge(status: string): string {
-  const cls = status === 'active' ? 'green' : status === 'draft' ? 'amber' : 'ghost';
-  const label = status === 'active' ? 'En curso' : status === 'draft' ? 'Borrador' : 'Finalizado';
+  const cls = status === 'active' ? 'green' : status === 'draft' || status === 'registrations' ? 'amber' : 'ghost';
+  const label =
+    status === 'active'
+      ? 'En curso'
+      : status === 'draft'
+        ? 'Borrador'
+        : status === 'registrations'
+          ? 'Inscripciones'
+          : status === 'archived'
+            ? 'Archivado'
+            : 'Finalizado';
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
 function formatLabel(format: string): string {
-  return format === 'round_robin' ? 'Todos contra todos' : format === 'zonas_playoffs' ? 'Zonas + playoffs' : 'Copa';
+  if (isLegacyFormat(format)) return FORMAT_LABELS[legacyToCompetitionFormat(format)];
+  return FORMAT_LABELS[format as CompetitionFormat] ?? format;
 }
 
 export async function tournamentFormPage(db: D1Database, id?: number, error?: string): Promise<string> {
@@ -779,6 +921,15 @@ export async function tournamentFormPage(db: D1Database, id?: number, error?: st
   const rules = t ? parseRules(t.config) : DEFAULT_RULES;
   const schedule = t ? scheduleOf(t.config) : EMPTY_SCHEDULE;
   const zones = t ? zonesOf(t.config) : EMPTY_ZONES;
+  // Fase 10: configuración de competencia. Un torneo legado (formato viejo)
+  // se muestra con su equivalente nuevo.
+  const comp = t
+    ? parseCompetitionConfig(t.config, t.format)
+    : parseCompetitionConfig('{}', 'TODOS_CONTRA_TODOS');
+  // Estructura congelada: en curso, finalizado o archivado (en inscripciones
+  // se puede editar todo menos lo estructural, pero el form completo sigue
+  // habilitado: el servidor rechaza lo estructural).
+  const structureLocked = t != null && (t.status === 'active' || t.status === 'finished' || t.status === 'archived');
   const activeTeams = (await listTeams(db, true)).filter((tm) => tm.active);
   const savedParticipants = id != null ? await teamIdsOfTournament(db, id) : [];
   const participantSet = new Set([...savedParticipants, ...zones.zones.flatMap((z) => z.teamIds)]);
@@ -822,19 +973,21 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
         <label for="status">Estado</label>
         <select id="status" name="status">
           <option value="draft" ${t?.status === 'draft' ? 'selected' : ''}>Borrador</option>
+          <option value="registrations" ${t?.status === 'registrations' ? 'selected' : ''}>Inscripciones</option>
           <option value="active" ${t?.status === 'active' ? 'selected' : ''}>En curso</option>
           <option value="finished" ${t?.status === 'finished' ? 'selected' : ''}>Finalizado</option>
+          <option value="archived" ${t?.status === 'archived' ? 'selected' : ''}>Archivado</option>
         </select>
       </div>
-    </div>
-    <div class="field">
-      <label for="format">Formato</label>
-      <select id="format" name="format">
-        <option value="round_robin" ${t?.format === 'round_robin' ? 'selected' : ''}>Todos contra todos</option>
-        <option value="zonas_playoffs" ${t?.format === 'zonas_playoffs' ? 'selected' : ''}>Zonas + playoffs</option>
-        <option value="copa" ${t?.format === 'copa' ? 'selected' : ''}>Copa eliminatoria</option>
-      </select>
-    </div>
+    </div>      <div class="field">
+        <label for="format">Formato (base, legado)</label>
+        <select id="format" name="format" disabled>
+          <option value="round_robin" ${t?.format === 'round_robin' ? 'selected' : ''}>Todos contra todos (legado)</option>
+          <option value="zonas_playoffs" ${t?.format === 'zonas_playoffs' ? 'selected' : ''}>Zonas + playoffs (legado)</option>
+          <option value="copa" ${t?.format === 'copa' ? 'selected' : ''}>Copa eliminatoria (legado)</option>
+        </select>
+        <p class="hint">El formato actual se elige en "Configuración de competencia". Este campo solo queda como dato histórico de torneos anteriores.</p>
+      </div>
     <h3 class="zone-title">Zonas</h3>
     <div class="field">
       <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0">
@@ -856,6 +1009,7 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
     </div>
     <h3 class="zone-title">Canchas y horarios</h3>
     ${scheduleFields(schedule)}
+    ${competitionFields(comp, structureLocked)}
     <h3 class="zone-title">Reglas de puntuación y sanciones</h3>
     ${rulesFields(rules)}
     <button class="btn btn-primary" type="submit">Guardar</button>
@@ -863,6 +1017,21 @@ ${pageHead(isEdit ? `Editar: ${t!.name}` : 'Nuevo torneo')}
   </form>
   <script>
   (function () {
+    // Fase 10: muestra/oculta los bloques de competencia según el formato.
+    var fmtSel = document.getElementById('comp_format');
+    var WITH_GROUPS = ['FASE_DE_GRUPOS', 'GRUPOS_PLAYOFFS', 'LIGA_FASE_FINAL', 'FASE_REGULAR_PLAYOFFS'];
+    var WITH_PLAYOFFS = ['GRUPOS_PLAYOFFS', 'ELIMINACION_DIRECTA', 'LIGA_FASE_FINAL', 'FASE_REGULAR_PLAYOFFS'];
+    var WITH_TABLE = ['TODOS_CONTRA_TODOS', 'UNA_RUEDA', 'DOS_RUEDAS', 'FASE_DE_GRUPOS', 'GRUPOS_PLAYOFFS', 'LIGA_FASE_FINAL', 'FASE_REGULAR_PLAYOFFS'];
+    function syncComp() {
+      var v = fmtSel ? fmtSel.value : 'TODOS_CONTRA_TODOS';
+      var map = { groups: WITH_GROUPS.indexOf(v) >= 0, playoffs: WITH_PLAYOFFS.indexOf(v) >= 0, table: WITH_TABLE.indexOf(v) >= 0 };
+      Object.keys(map).forEach(function (key) {
+        var el = document.querySelector('[data-comp="' + key + '"]');
+        if (el) el.style.display = map[key] ? '' : 'none';
+      });
+    }
+    if (fmtSel) { fmtSel.addEventListener('change', syncComp); syncComp(); }
+
     var cb = document.getElementById('zones_enabled');
     var box = document.getElementById('zones-config');
     var ta = document.getElementById('zone_names');

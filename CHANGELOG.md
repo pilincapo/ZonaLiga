@@ -13,6 +13,24 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.0] — 2026-09-30 — Configuración de competencia (Fase 10)
+
+### Nuevo
+
+- Nuevo selector de formato de competencia con 8 opciones: todos contra todos (ida y vuelta), solo ida, dos ruedas, fase de grupos, grupos + playoffs, eliminación directa, liga + fase final y fase regular + playoffs.
+- Configuración por formato: grupos y clasificados por grupo; playoffs con instancia inicial, partido único o ida y vuelta, tercer puesto y resolución de empate; puntos por victoria/empate/derrota; desempates ordenados; localía alternada, sorteada o cancha neutral.
+- Los campos aparecen solos según el formato elegido: si el formato no usa grupos o playoffs, esos bloques se ocultan.
+- Validación en servidor con mensajes en español: mínimo de equipos, grupos y clasificados coherentes, playoffs compatibles con la cantidad de clasificados, puntos válidos y sin configuraciones imposibles.
+- Nuevos estados de torneo: Inscripciones (la estructura queda congelada, solo se ajustan puntos, desempates y localía), y Archivado (solo lectura). En curso congela la estructura competitiva; Borrador permite todo.
+- Los torneos anteriores se siguen viendo y editando: su formato viejo se muestra como el equivalente nuevo.
+
+### Importante
+
+- Este cambio actualiza la base de datos (migración 0008). El deploy automático ya la aplica sola; no hace falta hacer nada.
+- La generación de fixture, llaves y grupos según esta configuración llega en las próximas fases: por ahora la configuración se guarda y valida, pero el fixture sigue generándose como siempre.
+
+---
+
 ## [0.2.80] — 2026-09-30 — Cierre automático de sanciones cumplidas (Fase 8)
 
 ### Nuevo

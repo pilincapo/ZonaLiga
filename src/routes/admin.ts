@@ -27,6 +27,24 @@ import {
   scheduleCapacity,
 } from '../lib/schedule.ts';
 import { zonesFromForm, zonesOf, validateZones } from '../lib/zones.ts';
+import {
+  type CompetitionConfig,
+  type CompetitionFormat,
+  DEFAULT_TIEBREAKERS,
+  LOCALIA_MODES,
+  PLAYOFF_START_ROUNDS,
+  PLAYOFF_TIEBREAKS,
+  TIEBREAKER_KEYS,
+  ALL_FORMATS,
+  competitionConfigJson,
+  formatHasGroups,
+  formatHasPlayoffs,
+  formatHasTable,
+  isLegacyFormat,
+  legacyToCompetitionFormat,
+  parseCompetitionConfig,
+} from '../lib/competition.ts';
+import { validateCompetitionConfig } from '../lib/competitionRules.ts';
 import { buildZonedFixture, interleaveSlots, shuffled } from '../lib/fixture.ts';
 import {
   buildCrossoverPairs,
@@ -65,6 +83,7 @@ import {
 } from '../lib/sanctions.ts';
 import {
   fixturePoolOfTournament,
+  teamIdsOfTournament,
   participatingIdsFromForm,
   participantsOrAllTeams,
   participantsWithoutZone,
@@ -151,11 +170,23 @@ adminRoutes.post('/torneos', async (c) => {
   const existing = await c.env.DB.prepare('SELECT id FROM tournaments WHERE slug = ?1').bind(slug).first();
   if (existing) slug = `${slug}-${Date.now().toString(36)}`;
   const rules = readRules(f);
-  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f) };
+  // Fase 10: configuración de competencia + validación. En un torneo nuevo
+  // todavía no hay participantes guardados, así que el chequeo de "mínimo 2
+  // equipos" lo hace la validación estructural del formato.
+  const { comp, errors: compErrors } = competitionFromForm(f);
+  if (compErrors.length > 0) {
+    return c.html(
+      await admin.tournamentFormPage(c.env.DB, undefined, compErrors.join(' ')),
+      400
+    );
+  }
+  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f), competition: competitionConfigJson(comp) };
   const res = await c.env.DB.prepare(
     'INSERT INTO tournaments (name, slug, season, format, config, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
   )
-    .bind(name, slug, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'))
+    // El formato de la columna pasa a ser el de la configuración de
+    // competencia; también se guarda tal cual en config.competition.format.
+    .bind(name, slug, String(f['season'] ?? ''), comp.format, JSON.stringify(config), String(f['status'] ?? 'draft'))
     .run();
   // Participantes: los marcados "Participa" MÁS los que tienen zona elegida
   // (la zona conserva al equipo aunque su casilla venga desmarcada). Solo
@@ -181,14 +212,36 @@ adminRoutes.post('/torneos/:id', async (c) => {
   const rules = readRules(f);
   // Preserva las fechas de cruce ya generadas: se guardan en la misma config
   // y este form no las toca.
-  const prevRow = await c.env.DB.prepare('SELECT config FROM tournaments WHERE id = ?1').bind(id).first<{ config: string }>();
+  const prevRow = await c.env.DB.prepare('SELECT config, status, format FROM tournaments WHERE id = ?1').bind(id).first<{ config: string; status: string; format: string }>();
+  const prevConfigJson = prevRow?.config ?? '{}';
   const prevKeep = {
-    ...crossoverConfigJson(parseCrossoverConfig(prevRow?.config ?? '{}')),
-    ...playoffConfigJson(parsePlayoffConfig(prevRow?.config ?? '{}')),
+    ...crossoverConfigJson(parseCrossoverConfig(prevConfigJson)),
+    ...playoffConfigJson(parsePlayoffConfig(prevConfigJson)),
   };
-  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f), ...prevKeep };
+  // Fase 10: configuración de competencia + validación + bloqueos por estado.
+  // El form viejo (tests y flujos que aún no mandan comp_format) conserva la
+  // config que ya tenía el torneo: la estructura no cambia si no se toca.
+  const prevComp = parseCompetitionConfig(prevConfigJson, prevRow?.format ?? 'round_robin');
+  const formSendsCompetition = String(f['comp_format'] ?? '') !== '';
+  const teamCount = (await teamIdsOfTournament(c.env.DB, id)).length;
+  const { comp, errors: compErrors } = formSendsCompetition
+    ? competitionFromForm(f, teamCount)
+    : { comp: prevComp, errors: [] as string[] };
+  if (structureChangeBlocked(prevRow?.status ?? 'draft', prevComp, comp)) {
+    const estado = prevRow?.status === 'registrations' ? 'en inscripciones' : 'en curso';
+    return c.html(
+      await admin.tournamentFormPage(c.env.DB, id, `El torneo está ${estado}: la estructura competitiva (formato, grupos, playoffs) queda congelada. Podés ajustar puntos, desempates y localía.`),
+      400
+    );
+  }
+  if (compErrors.length > 0) {
+    return c.html(await admin.tournamentFormPage(c.env.DB, id, compErrors.join(' ')), 400);
+  }
+  const config = { ...rules, ...scheduleFromForm(f), zones: zonesFromForm(f), ...prevKeep, competition: competitionConfigJson(comp) };
   await c.env.DB.prepare('UPDATE tournaments SET name = ?1, season = ?2, format = ?3, config = ?4, status = ?5 WHERE id = ?6')
-    .bind(name, String(f['season'] ?? ''), String(f['format'] ?? 'round_robin'), JSON.stringify(config), String(f['status'] ?? 'draft'), id)
+    // El formato de la columna pasa a ser el de la configuración de
+    // competencia (el form viejo no manda comp_format y conserva el previo).
+    .bind(name, String(f['season'] ?? ''), comp.format, JSON.stringify(config), String(f['status'] ?? 'draft'), id)
     .run();
   // Participación al día en la misma edición: marcados "Participa" + los que
   // tienen zona (la zona conserva al equipo aunque su casilla esté apagada),
@@ -223,6 +276,112 @@ async function applyAdvancements(db: D1Database, tournamentId: number): Promise<
       .bind(a.teamId, a.matchId)
   );
   await db.batch(stmts);
+}
+
+/**
+ * Fase 10: lee la configuración de competencia del formulario y la valida.
+ * Devuelve la config normalizada (para guardar) y los errores (en español,
+ * listos para mostrar). teamCount = inscriptos actuales; en un torneo nuevo
+ * todavía no hay participantes guardados y se pasa undefined.
+ */
+function competitionFromForm(
+  f: Record<string, unknown>,
+  teamCount?: number
+): { comp: CompetitionConfig; errors: string[] } {
+  const rawFormat = String(f['comp_format'] ?? '');
+  const format: CompetitionFormat = (ALL_FORMATS as readonly string[]).includes(rawFormat)
+    ? (rawFormat as CompetitionFormat)
+    : 'TODOS_CONTRA_TODOS';
+  const withGroups = formatHasGroups(format);
+  const withPlayoffs = formatHasPlayoffs(format);
+  const withTable = formatHasTable(format);
+
+  const int = (k: string, fallback: number): number => {
+    const n = Math.round(Number(f[k]));
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  // Puntos: solo formatos con tabla. Aceptan 0 (reglas raras pero válidas);
+  // la validación de negocio vive en validateCompetitionConfig.
+  const points = withTable
+    ? {
+        win: Math.min(100, Math.max(0, int('comp_points_win', 3))),
+        draw: Math.min(100, Math.max(0, int('comp_points_draw', 1))),
+        loss: Math.min(100, Math.max(0, int('comp_points_loss', 0))),
+      }
+    : { win: 3, draw: 1, loss: 0 };
+
+  // Desempates: llegan como comp_tb=1..6 (orden de prioridad del form).
+  const tiebreakers: string[] = [];
+  if (withTable) {
+    for (let i = 1; i <= TIEBREAKER_KEYS.length; i++) {
+      const v = String(f[`comp_tb_${i}`] ?? '');
+      if ((TIEBREAKER_KEYS as readonly string[]).includes(v) && !tiebreakers.includes(v)) tiebreakers.push(v);
+    }
+  }
+
+  const rawStart = String(f['comp_playoff_start'] ?? '');
+  const rawTie = String(f['comp_playoff_tiebreak'] ?? '');
+  const comp: CompetitionConfig = {
+    format,
+    hasPlayoffs: withPlayoffs,
+    groupStage: withGroups
+      ? {
+          count: Math.min(8, Math.max(0, int('comp_groups', 2))),
+          qualifiersPerGroup: Math.min(16, Math.max(1, int('comp_qualifiers', 2))),
+        }
+      : { count: 0, qualifiersPerGroup: 0 },
+    playoffs: withPlayoffs
+      ? {
+          start: (PLAYOFF_START_ROUNDS as readonly string[]).includes(rawStart)
+            ? (rawStart as (typeof PLAYOFF_START_ROUNDS)[number])
+            : 'SF',
+          singleMatch: f['comp_playoff_single'] === 'on',
+          thirdPlace: f['comp_playoff_third'] === 'on',
+          tiebreak: (PLAYOFF_TIEBREAKS as readonly string[]).includes(rawTie)
+            ? (rawTie as (typeof PLAYOFF_TIEBREAKS)[number])
+            : 'PENALES',
+        }
+      : { start: 'SF', singleMatch: false, thirdPlace: false, tiebreak: 'PENALES' },
+    points,
+    tiebreakers: withTable && tiebreakers.length > 0 ? (tiebreakers as CompetitionConfig['tiebreakers']) : [...DEFAULT_TIEBREAKERS],
+    localia: (LOCALIA_MODES as readonly string[]).includes(String(f['comp_localia'] ?? ''))
+      ? (String(f['comp_localia']) as CompetitionConfig['localia'])
+      : 'ALTERNADA',
+  };
+
+  return { comp, errors: validateCompetitionConfig({ comp, teamCount }) };
+}
+
+/**
+ * Fase 10D: ¿el estado del torneo permite cambiar la estructura competitiva
+ * (formato, fases, grupos, playoffs)? BORRADOR: todo. INSCRIPCIONES: solo
+ * cambios no estructurales (puntos, desempates, localía, detalles de
+ * playoffs). ACTIVO y más: bloqueado.
+ */
+function structureChangeBlocked(status: string, prev: CompetitionConfig, next: CompetitionConfig): boolean {
+  if (status === 'draft' || status === 'registrations') {
+    if (status === 'draft') return false;
+    // En inscripciones la estructura queda congelada: solo se acepta si el
+    // esqueleto competitivo no cambió.
+    return (
+      prev.format !== next.format ||
+      prev.groupStage.count !== next.groupStage.count ||
+      prev.groupStage.qualifiersPerGroup !== next.groupStage.qualifiersPerGroup ||
+      prev.playoffs.start !== next.playoffs.start ||
+      prev.playoffs.singleMatch !== next.playoffs.singleMatch ||
+      prev.playoffs.thirdPlace !== next.playoffs.thirdPlace
+    );
+  }
+  // active / finished / archived: estructura congelada.
+  return (
+    prev.format !== next.format ||
+    prev.groupStage.count !== next.groupStage.count ||
+    prev.groupStage.qualifiersPerGroup !== next.groupStage.qualifiersPerGroup ||
+    prev.playoffs.start !== next.playoffs.start ||
+    prev.playoffs.singleMatch !== next.playoffs.singleMatch ||
+    prev.playoffs.thirdPlace !== next.playoffs.thirdPlace
+  );
 }
 
 function readRules(f: Record<string, unknown>) {

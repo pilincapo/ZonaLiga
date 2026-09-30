@@ -1668,3 +1668,134 @@ describe.skipIf(!has)('e2e: cierre automático de sanciones cumplidas (Fase 8)',
     expect(sheet).not.toContain('Incumplimiento reglamentario');
   });
 });
+
+describe.skipIf(!has)('e2e: configuración de competencia (Fase 10)', () => {
+  it('alta con formato de grupos + playoffs guarda la config; validaciones rechazan incompatibles; estados bloquean la estructura', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // 1) ALTA: grupos + playoffs válidos (4 grupos × 2 = 8, cuartos).
+    const alta = await admin.post('/admin/torneos', {
+      name: 'Competencia E2E',
+      season: '2026',
+      status: 'draft',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '4',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'QF',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_playoff_single: 'on',
+      comp_playoff_third: 'on',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+      comp_tb_1: 'PUNTOS',
+      comp_tb_2: 'DIFERENCIA_GOLES',
+      comp_tb_3: 'GOLES_FAVOR',
+      comp_localia: 'ALTERNADA',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('Competencia E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    // El form muestra la config guardada y el formato en el selector nuevo.
+    const form = await (await admin.get(`/admin/torneos/${tid}`)).text();
+    expect(form).toContain('value="GRUPOS_PLAYOFFS" selected');
+    expect(form).toContain('name="comp_groups" value="4"');
+    expect(form).toContain('name="comp_playoff_start"');
+    expect(form).toContain('Inscripciones');
+
+    // 2) VALIDACIÓN: cuartos (8) con 2 grupos × 2 clasificados (4) no pasa.
+    const mala = await admin.post(`/admin/torneos/${tid}`, {
+      name: 'Competencia E2E',
+      season: '2026',
+      status: 'draft',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'QF',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(mala.status).toBe(400);
+    const malaHtml = await mala.text();
+    expect(malaHtml).toContain('menos de los 8');
+
+    // 3) VALIDACIÓN: victoria <= empate no pasa.
+    const puntosMala = await admin.post(`/admin/torneos/${tid}`, {
+      name: 'Competencia E2E',
+      season: '2026',
+      status: 'draft',
+      comp_format: 'TODOS_CONTRA_TODOS',
+      comp_points_win: '1',
+      comp_points_draw: '3',
+      comp_points_loss: '0',
+    });
+    expect(puntosMala.status).toBe(400);
+    expect(await puntosMala.text()).toContain('mayores que los del empate');
+
+    // 4) BLOQUEO: torneo en activo no cambia su estructura. Primer POST lo
+    // pasa a activo (manteniendo estructura); segundo intenta cambiarla.
+    const aActivo = await admin.post(`/admin/torneos/${tid}`, {
+      name: 'Competencia E2E',
+      season: '2026',
+      status: 'active',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '4',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'QF',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_playoff_single: 'on',
+      comp_playoff_third: 'on',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(aActivo.status).toBe(302);
+    const bloqueo = await admin.post(`/admin/torneos/${tid}`, {
+      name: 'Competencia E2E',
+      season: '2026',
+      status: 'active',
+      comp_format: 'ELIMINACION_DIRECTA', // cambio estructural: rechazado
+      comp_playoff_start: 'F',
+      comp_playoff_tiebreak: 'PENALES',
+    });
+    expect(bloqueo.status).toBe(400);
+    expect(await bloqueo.text()).toContain('queda congelada');
+
+    // 5) NO estructural en activo: ajustar puntos sí pasa.
+    const puntos = await admin.post(`/admin/torneos/${tid}`, {
+      name: 'Competencia E2E',
+      season: '2026',
+      status: 'active',
+      comp_format: 'GRUPOS_PLAYOFFS', // misma estructura
+      comp_groups: '4',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'QF',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_playoff_single: 'on',
+      comp_playoff_third: 'on',
+      comp_points_win: '2',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(puntos.status).toBe(302);
+    const form2 = await (await admin.get(`/admin/torneos/${tid}`)).text();
+    expect(form2).toContain('name="comp_points_win" value="2"');
+
+    // 6) Limpieza: borrar el torneo de prueba.
+    const del = await admin.post(`/admin/torneos/${tid}/eliminar`, {});
+    expect(del.status).toBe(302);
+  });
+});
