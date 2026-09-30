@@ -10,8 +10,8 @@ import type { Sanction } from '../src/lib/sanctions.ts';
 import {
   autoToEntry,
   combineDiscipline,
-  eligibilityErrorMessage,
   hasHardBlock,
+  eligibilityErrorMessage,
   isPlayerDisciplined,
   isTeamDisciplined,
   manualToEntry,
@@ -19,6 +19,9 @@ import {
   type EligibilityInput,
   type ManualInput,
 } from '../src/lib/discipline.ts';
+import { teamEffects, isTeamExpelled, teamPointsDeducted } from '../src/lib/discipline.ts';
+import { sanctionEffectsOf } from '../src/lib/sanctionEffects.ts';
+import { SANCTION_MEASURE_LABELS } from '../src/lib/sanctions.ts';
 import type { Match } from '../src/lib/types.ts';
 
 let nextId = 1;
@@ -54,6 +57,7 @@ function manual(partial: Partial<Sanction> = {}): Sanction {
     notes: '',
     status: 'activa',
     annul_reason: '',
+    measure: null,
     created_at: '2026-09-21 10:00:00',
     updated_at: '2026-09-21 10:00:00',
     ...partial,
@@ -485,5 +489,116 @@ describe('elegibilidad: combinaciones y estados', () => {
     // este test documenta que el filtrado por torneo es responsabilidad del
     // llamador (disciplineForMatch), no de playerEligibility.
     expect(playerEligibility(eligInput([], match()), 50).eligible).toBe(true);
+  });
+});
+
+/* ============================== FASE 7B: MEDIDAS DE EQUIPO ============================== */
+
+/** Manual de equipo con medida, lista para combineDiscipline. */
+function teamMeasure(
+  measure: Sanction['measure'],
+  opts: { amount?: number | null; until_date?: string | null; category?: string; duration_kind?: Sanction['duration_kind'] } = {}
+) {
+  return manual(
+    measure === null
+      ? { scope: 'team', player_id: null }
+      : {
+          scope: 'team',
+          player_id: null,
+          measure,
+          amount: opts.amount ?? null,
+          until_date: opts.until_date ?? null,
+          duration_kind: opts.duration_kind ?? (opts.until_date ? 'hasta_fecha' : 'fechas'),
+          category: opts.category ?? 'Incumplimiento reglamentario',
+        }
+  );
+}
+
+describe('Fase 7B: teamEffects (efectos reales de medidas de equipo)', () => {
+  it('advertencia: solo deja constancia en warnings, sin efecto en tabla ni expulsión', () => {
+    const { active } = combineDiscipline([], [manualInput(teamMeasure('advertencia'))]);
+    const fx = teamEffects(active);
+    expect(fx.warnings.get(10)).toEqual(['Incumplimiento reglamentario']);
+    expect(fx.expelled.size).toBe(0);
+    expect(fx.pointsDeducted.size).toBe(0);
+    expect(fx.suspensions.size).toBe(0);
+    expect(isTeamExpelled(fx, 10)).toBe(false);
+    expect(teamPointsDeducted(fx, 10)).toBe(0);
+  });
+
+  it('perdida_puntos: restante en pointsDeducted y ajuste negativo individual', () => {
+    const a = manualInput(teamMeasure('perdida_puntos', { amount: 3, category: 'Agresión' }));
+    const b = manualInput(teamMeasure('perdida_puntos', { amount: 1, category: 'Pelea / desmanes' }));
+    const { active } = combineDiscipline([], [a, b]);
+    const fx = teamEffects(active);
+    expect(teamPointsDeducted(fx, 10)).toBe(4); // dos sanciones suman
+
+    const se = sanctionEffectsOf(active);
+    expect(se.adjustments).toHaveLength(2);
+    expect(se.adjustments[0]).toMatchObject({ teamId: 10, delta: -3 });
+    expect(se.adjustments[0]!.reason).toContain('Agresión');
+    expect(se.adjustments[1]!.delta).toBe(-1);
+  });
+
+  it('suspension_fechas: queda en suspensions con fechas restantes reales', () => {
+    const s = teamMeasure('suspension_fechas', { amount: 2 });
+    const { active } = combineDiscipline([], [manualInput(s, { incidentRound: 5, playedRounds: [5] })]);
+    const fx = teamEffects(active);
+    const list = fx.suspensions.get(10) ?? [];
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ remaining: 1, untilDate: null });
+  });
+
+  it('suspension_dias: queda en suspensions con fecha de fin (inclusive)', () => {
+    const s = teamMeasure('suspension_dias', { until_date: '2026-10-15' });
+    const { active } = combineDiscipline([], [manualInput(s)]);
+    const fx = teamEffects(active);
+    const list = fx.suspensions.get(10) ?? [];
+    expect(list[0]!.untilDate).toBe('2026-10-15');
+  });
+
+  it('expulsión: marca al equipo en expelled y el ajuste es consultable', () => {
+    const { active } = combineDiscipline([], [manualInput(teamMeasure('expulsion'))]);
+    const fx = teamEffects(active);
+    expect(isTeamExpelled(fx, 10)).toBe(true);
+    expect(sanctionEffectsOf(active).expelled).toEqual([10]);
+    // No afecta puntos ni a jugadores:
+    expect(teamPointsDeducted(fx, 10)).toBe(0);
+    expect(isPlayerDisciplined(active, 50)).toBe(false);
+  });
+
+  it('anulada y cumplida no generan efectos (ya salen de activas)', () => {
+    const anulada = manual({ scope: 'team', player_id: null, measure: 'expulsion', status: 'anulada', annul_reason: 'Reconsideración' });
+    const cumplida = manual({ scope: 'team', player_id: null, measure: 'perdida_puntos', amount: 5, duration_kind: 'dias', status: 'cumplida' });
+    const { active } = combineDiscipline([], [manualInput(anulada), manualInput(cumplida, { today: '2026-10-01' })]);
+    const fx = teamEffects(active);
+    expect(fx.expelled.size).toBe(0);
+    expect(fx.pointsDeducted.size).toBe(0);
+    expect(sanctionEffectsOf(active).adjustments).toEqual([]);
+  });
+
+  it('las medidas de equipo NO suspenden a los jugadores del plantel', () => {
+    const { active } = combineDiscipline(
+      [],
+      [manualInput(teamMeasure('expulsion')), manualInput(teamMeasure('suspension_fechas', { amount: 3 }))]
+    );
+    expect(playerEligibility(eligInput(active, match()), 50).eligible).toBe(true);
+  });
+
+  it('medidas pre-7B (measure null) se ignoran para efectos sin romper avisos', () => {
+    const vieja = manual({ scope: 'team', player_id: null, measure: null });
+    const { active } = combineDiscipline([], [manualInput(vieja)]);
+    const fx = teamEffects(active);
+    expect(fx.expelled.size).toBe(0);
+    expect(fx.pointsDeducted.size).toBe(0);
+    // El aviso de disciplina de equipo sigue funcionando vía isTeamDisciplined.
+    expect(isTeamDisciplined(active, 10)).toBe(true);
+  });
+
+  it('etiquetas de medida: redondean el detalle visible por medida', () => {
+    // Guardia de UI: los labels existen para las 5 medidas.
+    for (const m of ['advertencia', 'perdida_puntos', 'suspension_fechas', 'suspension_dias', 'expulsion'] as const) {
+      expect(typeof SANCTION_MEASURE_LABELS[m]).toBe('string');
+    }
   });
 });

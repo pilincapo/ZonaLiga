@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  SANCTION_MEASURE_LABELS,
   addDays,
   annulSanction,
   coversDate,
@@ -198,7 +199,7 @@ describe('CRUD D1', () => {
     const id = await insertSanction(db, parsed.value!);
     expect(id).toBe(0); // stub sin meta.last_row_id
     expect(runs[0]!.sql).toContain('INSERT INTO sanctions');
-    expect(runs[0]!.params).toEqual([1, 10, 77, 'player', 'fechas', 2, null, '2026-09-20', 'Inconducta', 'Incidente con el árbitro', '']);
+    expect(runs[0]!.params).toEqual([1, 10, 77, 'player', 'fechas', 2, null, '2026-09-20', 'Inconducta', 'Incidente con el árbitro', '', null]);
   });
 
   it('sanctionsForTournament trae nombres por LEFT JOIN', async () => {
@@ -221,5 +222,91 @@ describe('CRUD D1', () => {
     await annulSanction(db, 2, 'Falta de pruebas');
     expect(runs.at(-1)!.sql).toContain("status = 'anulada'");
     expect(runs.at(-1)!.params).toEqual([2, 'Falta de pruebas']);
+  });
+});
+
+describe('Fase 7B: medidas de equipo (parseo y espejo de duración)', () => {
+  const teamForm = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    tournament_id: '1',
+    team_id: '10',
+    scope: 'team',
+    incident_date: '2026-09-20',
+    category: 'Incidente con árbitro',
+    description: 'Agresión al juez',
+    notes: '',
+    ...overrides,
+  });
+
+  it('perdida_puntos: exige amount y viaja como fechas espejadas con measure', () => {
+    const bad = parseSanction(teamForm({ measure: 'perdida_puntos' }));
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toContain('puntos a restar');
+
+    const ok = parseSanction(teamForm({ measure: 'perdida_puntos', amount: '3' }));
+    expect(ok.ok).toBe(true);
+    expect(ok.value!.measure).toBe('perdida_puntos');
+    expect(ok.value!.amount).toBe(3);
+    expect(ok.value!.durationKind).toBe('fechas'); // espejo
+  });
+
+  it('suspension_fechas: exige cantidad; suspension_dias exige fecha fin', () => {
+    const fechas = parseSanction(teamForm({ measure: 'suspension_fechas', amount: '2' }));
+    expect(fechas.ok).toBe(true);
+    expect(fechas.value!.measure).toBe('suspension_fechas');
+    expect(fechas.value!.amount).toBe(2);
+
+    const diasMal = parseSanction(teamForm({ measure: 'suspension_dias' }));
+    expect(diasMal.ok).toBe(false);
+    expect(diasMal.error).toContain('fecha de finalización');
+
+    const diasOk = parseSanction(teamForm({ measure: 'suspension_dias', until_date: '2026-10-15' }));
+    expect(diasOk.ok).toBe(true);
+    expect(diasOk.value!.untilDate).toBe('2026-10-15');
+    // El espejo de duration_kind lo aplica insertSanction al persistir.
+    expect(diasOk.value!.durationKind).toBe('fechas'); // form default intacto
+  });
+
+  it('advertencia y expulsión no llevan campos extra', () => {
+    for (const measure of ['advertencia', 'expulsion'] as const) {
+      const r = parseSanction(teamForm({ measure }));
+      expect(r.ok).toBe(true);
+      expect(r.value!.amount).toBeNull();
+      expect(r.value!.untilDate).toBeNull();
+    }
+  });
+
+  it('medida en jugador se rechaza; medida desconocida también', () => {
+    const conJugador = parseSanction(validForm({ measure: 'expulsion' }));
+    expect(conJugador.ok).toBe(false);
+    expect(conJugador.error).toContain('solo a equipos');
+
+    const rara = parseSanction(teamForm({ measure: 'suspension_siglo' }));
+    expect(rara.ok).toBe(false);
+    expect(rara.error).toContain('Medida');
+  });
+
+  it('sin measure (sanción clásica de equipo o jugador) sigue funcionando', () => {
+    const clasico = parseSanction(teamForm({}));
+    expect(clasico.ok).toBe(false); // equipo sin measure ni duración: exige amount
+    const playerClassic = parseSanction(validForm());
+    expect(playerClassic.ok).toBe(true);
+    expect(playerClassic.value!.measure).toBeNull();
+  });
+
+  it('insertSanction persiste measure con espejo de duración en equipos', async () => {
+    const { db, runs } = dbStub();
+    const expulsada = parseSanction(teamForm({ measure: 'expulsion' }));
+    await insertSanction(db, expulsada.value!);
+    expect(runs[0]!.sql).toContain('measure');
+    expect(runs[0]!.params.at(-1)).toBe('expulsion');
+    // advertencia/expulsión: sin amount ni until_date espejados.
+    expect(runs[0]!.params[5]).toBeNull();
+    expect(runs[0]!.params[6]).toBeNull();
+  });
+
+  it('etiquetas de medidas completas para la UI', () => {
+    expect(SANCTION_MEASURE_LABELS.advertencia).toBe('Advertencia');
+    expect(SANCTION_MEASURE_LABELS.perdida_puntos).toBe('Pérdida de puntos');
+    expect(SANCTION_MEASURE_LABELS.expulsion).toBe('Expulsión del torneo');
   });
 });

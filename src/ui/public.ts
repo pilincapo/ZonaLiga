@@ -37,6 +37,9 @@ import {
 import { searchPlayers, searchTeams, searchTournaments } from '../lib/search.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { adjustmentsForTournament } from '../lib/adjustments.ts';
+import { sanctionsForTournament } from '../lib/sanctions.ts';
+import { combineDiscipline } from '../lib/discipline.ts';
+import { sanctionEffectsOf } from '../lib/sanctionEffects.ts';
 import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow, zoneBadge } from './match.ts';
 import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
@@ -456,7 +459,13 @@ export async function standingsPage(db: D1Database, slugParam?: string, origin =
   const rules = rulesOf(t);
   const teamRows = teams.map((tm) => ({ id: tm.id, name: tm.name }));
   // Los cruces marcados como "no cuentan" se excluyen de la tabla.
-  const standings = computeStandings(matchesForStandings(matches, t.config), teamRows, rules);
+  // Las sanciones de equipo con pérdida de puntos entran como ajustes
+  // (restan antes de ordenar); los expulsados se marcan al pie de la tabla.
+  const teamDiscipline = await sanctionsForTournament(db, t.id);
+  const teamFx = sanctionEffectsOf(
+    combineDiscipline([], teamDiscipline.map((s) => ({ sanction: s, incidentRound: null, playedRounds: [], today: leagueNow().date }))).active
+  );
+  const standings = computeStandings(matchesForStandings(matches, t.config), teamRows, rules, teamFx.adjustments);
 
   // Fair play y valla menos vencida (columna y líderes, según la regla).
   const showAdv = rules.showAdvanced;
@@ -499,9 +508,14 @@ export async function standingsPage(db: D1Database, slugParam?: string, origin =
         .map(({ row: r }, i) => {
           const tm = teamMap.get(r.teamId);
           const fp = fpByTeam.get(r.teamId);
-          return `<tr>
+          // Sanción de equipo: expulsado se marca en la fila; los puntos ya
+          // vienen restados por los ajustes de sanciones (computeStandings).
+          const expelledMark = teamFx.expelled.includes(r.teamId)
+            ? ' <span class="badge red" title="Expulsado del torneo por sanción disciplinaria">Expulsado</span>'
+            : '';
+          return `<tr${teamFx.expelled.includes(r.teamId) ? ' style="opacity:.55"' : ''}>
       <td class="pos-num">${i + 1}</td>
-      <td>${teamCell(tm)}</td>
+      <td>${teamCell(tm)}${expelledMark}</td>
       <td class="num">${r.played}</td><td class="num">${r.won}</td><td class="num">${r.drawn}</td><td class="num">${r.lost}</td>
       <td class="num">${r.goalsFor}</td><td class="num">${r.goalsAgainst}</td>
       <td class="num">${r.diff > 0 ? '+' + r.diff : r.diff}</td>

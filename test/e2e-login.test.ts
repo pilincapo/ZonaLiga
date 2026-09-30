@@ -1441,3 +1441,154 @@ describe.skipIf(!has)('e2e: elegibilidad por suspensiones', () => {
     expect(decodeURIComponent(evPostAnular.headers.get('location') ?? '')).not.toContain('err=');
   });
 });
+
+describe.skipIf(!has)('e2e: sanciones a equipos (Fase 7B)', () => {
+  it('medidas de equipo: pérdida de puntos descuenta en la tabla, expulsión marca al equipo, anulación revierte', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Torneo propio para no ensuciar las tablas del torneo principal.
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const ids = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!);
+    const teamA = ids[0]!;
+    const teamB = ids[1]!;
+    expect(teamA && teamB).toBeTruthy();
+
+    const creado = await admin.post('/admin/torneos', {
+      name: 'Sanciones Equipo E2E',
+      season: '2026',
+      format: 'round_robin',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+    });
+    expect(creado.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('Sanciones Equipo E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'double' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'sanciones-equipo-e2e' });
+    expect(conf.status).toBe(302);
+
+    // Fixture doble: Deportivo juega varios partidos. Se carga un ganado 2-0
+    // para que la pérdida de puntos sea visible en la tabla (3 pts → 0).
+    const fxHtml = await (await admin.get('/admin/fixture?t=sanciones-equipo-e2e')).text();
+    const matchIds = [...new Set([...fxHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!))];
+    expect(matchIds.length).toBeGreaterThan(0);
+    // Encontrar un partido donde el primer equipo sea local (la fila del
+    // fixture lo muestra como "<td>Nombre ... vs"). Usamos team_id del form
+    // de planilla en su lugar: el roster se resuelve server-side.
+    const fila = fxHtml.split('<tr>').find((f) => /planilla\/(\d+)/.test(f) && /<span class="faint">vs<\/span>/.test(f)) ?? '';
+    const mid = /planilla\/(\d+)/.exec(fila)?.[1] ?? '';
+    expect(mid).toBeTruthy();
+    const primerEquipo =
+      /<td class="num">\d+<\/td>\s*<td>([A-Za-zÁ-ú0-9 ]+) <span class="faint">vs<\/span>/.exec(fila)?.[1]?.trim() ?? '';
+    expect(primerEquipo).toBeTruthy();
+
+    const slugA = /href="\/equipos\/([a-z0-9-]+)"/.exec(
+      (await (await admin.get('/admin/equipos')).text()).split('<article').find((x) => x.includes(primerEquipo)) ?? ''
+    )?.[1] ?? '';
+    const pubA = await (await admin.get(`/equipos/${slugA}`)).text();
+    const teamAId = /href="\/admin\/equipos\/(\d+)">Editar/.exec(
+      (await (await admin.get('/admin/equipos')).text()).split('<article').find((x) => x.includes(primerEquipo)) ?? ''
+    )?.[1] ?? '';
+    void pubA;
+    void teamAId;
+    void teamA;
+    void teamB;
+
+    // Cargar el 2-0 a favor del primer equipo.
+    const guardar = await admin.post(`/admin/planilla/${mid}`, {
+      status: 'played',
+      played_on: '2026-10-10',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '2',
+      away_goals: '0',
+      notes: '',
+    });
+    expect(guardar.status).toBe(302);
+
+    // Puntos ANTES de la sanción: el ganador tiene 3.
+    const tablaAntes = await (await admin.get('/posiciones?t=sanciones-equipo-e2e')).text();
+    expect(tablaAntes).toMatch(/<strong>3<\/strong>/);
+
+    // Sanción de equipo: pérdida de 3 puntos.
+    const alta = await admin.post('/admin/sanciones', {
+      t: 'sanciones-equipo-e2e',
+      scope: 'team',
+      team_id: teamAId,
+      measure: 'perdida_puntos',
+      amount: '3',
+      incident_date: '2026-10-11',
+      category: 'Incumplimiento reglamentario',
+      description: 'Alineación indebida',
+    });
+    expect(alta.status).toBe(302);
+
+    // La tabla ahora muestra 0 puntos para ese equipo (3 - 3).
+    const tablaDespues = await (await admin.get('/posiciones?t=sanciones-equipo-e2e')).text();
+    expect(tablaDespues).not.toMatch(new RegExp(`${primerEquipo}[\\s\\S]{0,300}?<strong>3</strong>`));
+
+    // El panel de suspensiones muestra la medida con su detalle.
+    const suspPage = await (await admin.get('/admin/suspensiones?t=sanciones-equipo-e2e')).text();
+    expect(suspPage).toContain('Pérdida de puntos');
+    expect(suspPage).toContain('(3 pts)');
+    expect(suspPage).toContain('Equipo');
+
+    // EXPULSIÓN: segunda sanción al mismo equipo; la tabla lo marca.
+    const altaExp = await admin.post('/admin/sanciones', {
+      t: 'sanciones-equipo-e2e',
+      scope: 'team',
+      team_id: teamAId,
+      measure: 'expulsion',
+      incident_date: '2026-10-12',
+      category: 'Incidente grave',
+      description: 'Abandono de cancha',
+    });
+    expect(altaExp.status).toBe(302);
+    const tablaExp = await (await admin.get('/posiciones?t=sanciones-equipo-e2e')).text();
+    expect(tablaExp).toContain('Expulsado');
+
+    // ADVERTENCIA: aparece con su badge, sin efecto en puntos.
+    const altaAdv = await admin.post('/admin/sanciones', {
+      t: 'sanciones-equipo-e2e',
+      scope: 'team',
+      team_id: teamAId,
+      measure: 'advertencia',
+      incident_date: '2026-10-13',
+      category: 'Conducta antideportiva',
+      description: 'Cártel en el banco',
+    });
+    expect(altaAdv.status).toBe(302);
+    const suspAdv = await (await admin.get('/admin/suspensiones?t=sanciones-equipo-e2e')).text();
+    expect(suspAdv).toContain('Advertencia');
+
+    // ANULACIÓN de la expulsión: la marca desaparece de la tabla. Tomamos el
+    // id de la sanción de expulsión (segunda creada, fila con badge rojo) y
+    // no de la advertencia: buscamos la fila que contiene "Expulsión".
+    const filaExp = suspAdv
+      .split('<tr>')
+      .find((f) => f.includes('Expulsión del torneo') && /sanciones\/(\d+)\/anular/.test(f)) ?? '';
+    const sid = /sanciones\/(\d+)\/anular/.exec(filaExp)?.[1] ?? '';
+    expect(sid).toBeTruthy();
+    const anular = await admin.post(`/admin/sanciones/${sid}/anular`, {
+      t: 'sanciones-equipo-e2e',
+      annul_reason: 'Apelación favorable',
+    });
+    expect(anular.status).toBe(302);
+    const tablaPost = await (await admin.get('/posiciones?t=sanciones-equipo-e2e')).text();
+    expect(tablaPost).not.toContain('Expulsado');
+    // El historial conserva la sanción anulada con su motivo.
+    const suspPost = await (await admin.get('/admin/suspensiones?t=sanciones-equipo-e2e')).text();
+    expect(suspPost).toContain('Apelación favorable');
+  });
+});

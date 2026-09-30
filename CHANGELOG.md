@@ -13,6 +13,21 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.2.79] — 2026-09-30 — Sanciones disciplinarias a equipos (Fase 7B)
+
+### Nuevo
+
+- Medidas disciplinarias para equipos en el tribunal: advertencia, pérdida de puntos, suspensión por fechas, suspensión por días y expulsión del torneo.
+- La pérdida de puntos resta puntos reales en las tablas de posiciones (panel y sitio público), con la categoría de la sanción como motivo visible.
+- La expulsión marca al equipo como inhabilitado en la tabla del torneo; la anulación (con motivo) revierte la marca y la deja documentada en el historial.
+- Las suspensiones de equipo y las advertencias se ven como avisos en la planilla del administrador y en el panel del delegado, sin suspender jugadores individuales.
+
+### Mejora
+
+- El formulario de nueva sanción muestra campos distintos según la medida elegida: puntos a restar, cantidad de fechas o fecha de finalización.
+
+---
+
 ## [0.2.78] — 2026-09-30 — Elegibilidad por suspensiones (Fases 1–6)
 
 ### Nuevo

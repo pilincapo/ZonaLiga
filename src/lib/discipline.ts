@@ -19,7 +19,7 @@
 import type { Match } from './types.ts';
 import type { PlayerSuspension } from './suspensions.ts';
 import type { Sanction, SanctionStatus, SanctionScope, SanctionDuration } from './sanctions.ts';
-import { effectiveStatus, sanctionEndDate } from './sanctions.ts';
+import { effectiveStatus, sanctionEndDate, type SanctionMeasure } from './sanctions.ts';
 
 /** Origen de una entrada de disciplina. */
 export type DisciplineSource = 'auto' | 'manual';
@@ -63,6 +63,12 @@ export interface DisciplineEntry {
   remaining: number | null;
   /** Referencia a la fila origen (id de sanción manual; null en automáticas). */
   sanctionId: number | null;
+  /**
+   * Medida disciplinaria (Fase 7B). Null en automáticas y en manuales de
+   * JUGADOR (su medida es la suspensión misma). En EQUIPOS define el efecto:
+   * advertencia | perdida_puntos | suspension_fechas | suspension_dias | expulsion.
+   */
+  measure: SanctionMeasure | null;
 }
 
 /** Opciones de entrada para las manuales. */
@@ -153,6 +159,7 @@ export function manualToEntry(input: ManualInput): DisciplineEntry {
     originDate: s.incident_date,
     remaining,
     sanctionId: s.id,
+    measure: s.scope === 'team' ? (s.measure ?? null) : null,
   };
 }
 
@@ -176,6 +183,7 @@ export function autoToEntry(
     originDate: null,
     remaining: servedRemaining,
     sanctionId: null,
+    measure: null,
   };
 }
 
@@ -375,4 +383,95 @@ export function eligibilityErrorMessage(eligibility: PlayerEligibility): string 
     return `${origen}: ${r.reason}${rest}${rev}`;
   });
   return `El jugador está suspendido para este partido (${parts.join(' | ')}). El evento no se guardó.`;
+}
+
+/* ============================== EFECTOS DE EQUIPO (Fase 7B) ============================== */
+
+/**
+ * Efectos REALES de las medidas disciplinarias a equipos sobre un torneo.
+ * Se calculan solo con entradas ACTIVAS de equipos (combineDiscipline ya
+ * dejó fuera anuladas y cumplidas). Puro: entra disciplina, salen datos que
+ * el llamador aplica donde corresponda.
+ */
+export interface TeamEffects {
+  /** Equipos expulsados del torneo (inhabilitados). */
+  expelled: Set<number>;
+  /** Puntos a restar por equipo (suma de todas las medidas activas). */
+  pointsDeducted: Map<number, number>;
+  /**
+   * Detalle de suspensiones activas por equipo, para avisos en planilla y
+   * delegado: { reason, remaining, untilDate }. suspension_fechas usa
+   * remaining (fechas que faltan); suspension_dias usa untilDate.
+   */
+  suspensions: Map<number, { reason: string; remaining: number | null; untilDate: string | null }[]>;
+  /** Motivos de las advertencias activas (para mostrar el aviso). */
+  warnings: Map<number, string[]>;
+}
+
+/**
+ * Calcula los efectos de equipo a partir de la disciplina combinada.
+ * REGLAS:
+ *   - Solo medidas activas (las anuladas/cumplidas ya salieron en combine).
+ *   - perdida_puntos: suma los `amount` de todas las sanciones activas del
+ *     equipo (dos sanciones de -3 suman -6).
+ *   - suspension_fechas: requiere el round del incidente (originRound) para
+ *     contar fechas restantes reales; sin él, el aviso va igual pero sin
+ *     número (no se inventa).
+ *   - suspension_dias: vigente hasta until_date inclusive (effectiveStatus
+ *     ya la deriva a cumplida al vencer; acá llega activa => vigente).
+ *   - expulsion: inhabilita al equipo en el torneo.
+ *   - Jugadores NUNCA son tocados por medidas de equipo.
+ */
+export function teamEffects(entries: readonly DisciplineEntry[]): TeamEffects {
+  const effects: TeamEffects = {
+    expelled: new Set(),
+    pointsDeducted: new Map(),
+    suspensions: new Map(),
+    warnings: new Map(),
+  };
+
+  for (const e of entries) {
+    if (e.scope !== 'team' || e.teamId == null || e.measure == null) continue;
+    if (e.status !== 'activa') continue;
+
+    switch (e.measure) {
+      case 'expulsion':
+        effects.expelled.add(e.teamId);
+        break;
+
+      case 'perdida_puntos': {
+        const current = effects.pointsDeducted.get(e.teamId) ?? 0;
+        effects.pointsDeducted.set(e.teamId, current + (e.duration.amount ?? 0));
+        break;
+      }
+
+      case 'suspension_fechas':
+      case 'suspension_dias': {
+        const list = effects.suspensions.get(e.teamId) ?? [];
+        const untilDate = e.duration.kind === 'hasta_fecha' ? e.duration.untilDate : null;
+        list.push({ reason: e.reason, remaining: e.remaining, untilDate });
+        effects.suspensions.set(e.teamId, list);
+        break;
+      }
+
+      case 'advertencia': {
+        const list = effects.warnings.get(e.teamId) ?? [];
+        list.push(e.reason);
+        effects.warnings.set(e.teamId, list);
+        break;
+      }
+    }
+  }
+
+  return effects;
+}
+
+/** ¿Está este equipo expulsado del torneo? (medidas activas solamente). */
+export function isTeamExpelled(effects: TeamEffects, teamId: number): boolean {
+  return effects.expelled.has(teamId);
+}
+
+/** Puntos totales a restar a este equipo en el torneo (0 si no tiene). */
+export function teamPointsDeducted(effects: TeamEffects, teamId: number): number {
+  return effects.pointsDeducted.get(teamId) ?? 0;
 }

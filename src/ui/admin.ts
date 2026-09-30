@@ -35,7 +35,7 @@ import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
 import { teamIdsOfTournament, participantsOrAllTeams, participantsWithoutZone } from '../lib/participation.ts';
-import { sanctionsForTournament } from '../lib/sanctions.ts';
+import { sanctionsForTournament, SANCTION_MEASURES, SANCTION_MEASURE_LABELS } from '../lib/sanctions.ts';
 import type { SanctionRow, SanctionStatus } from '../lib/sanctions.ts';
 import { combineDiscipline, playerEligibility, hasHardBlock, type DisciplineEntry, type PlayerEligibility } from '../lib/discipline.ts';
 import type { PlayerSuspension } from '../lib/suspensions.ts';
@@ -77,6 +77,8 @@ import { planFixture, groupByFixtureRound, planSummary, type PlannedMatch } from
 import { orderMatchesForDisplay } from '../lib/order.ts';
 import { isCrossoverMatch } from '../lib/crossover.ts';
 import { isTeamDisciplined, type EligibilityInput } from '../lib/discipline.ts';
+import { sanctionEffectsOf } from '../lib/sanctionEffects.ts';
+import type { PointAdjustment } from '../lib/standings.ts';
 
 /* ============================== ELEGIBILIDAD (compartido) ============================== */
 
@@ -125,6 +127,22 @@ export async function disciplineForMatch(
     playedRounds,
     tournamentMatches: view.matches,
   };
+}
+
+/**
+ * Ajustes de puntos derivados de sanciones de equipo (Fase 7B): cada medida
+ * activa de pérdida de puntos se convierte en un ajuste negativo para las
+ * tablas. Solo aplica al torneo indicado; los expulsados se marcan aparte.
+ */
+export async function teamEffectsAdjustments(db: D1Database, tournamentId: number): Promise<PointAdjustment[]> {
+  const sanctions = await sanctionsForTournament(db, tournamentId);
+  if (sanctions.length === 0) return [];
+  const today = leagueNow().date;
+  const { active } = combineDiscipline(
+    [],
+    sanctions.map((s) => ({ sanction: s, incidentRound: null, playedRounds: [], today }))
+  );
+  return sanctionEffectsOf(active).adjustments;
 }
 
 /** Aviso de disciplina de EQUIPO (no suspende jugadores individuales). */
@@ -336,10 +354,13 @@ ${pageHead('Resumen', { href: '/admin/torneos/nuevo', label: '+ Nuevo torneo' })
   }
 
   /* ----- Datos de las secciones (mismas consultas que las otras páginas) ----- */
+  // Sanciones de equipo con pérdida de puntos: entran en las tablas del panel.
+  const dashFx = active ? await teamEffectsAdjustments(db, active.id) : [];
   const standings = computeStandings(
     matchesForStandings(matches, active.config),
     (activeView?.teams ?? []).filter((tm) => tm.active).map((tm) => ({ id: tm.id, name: tm.name })),
-    rulesOf(active)
+    rulesOf(active),
+    dashFx
   );
   const zonesCfg = zonesOf(active.config);
   const zoneOfTeam = new Map<number, string>();
@@ -1285,7 +1306,8 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   const standings = computeStandings(
     matchesForStandings(matches, t.config),
     activeTeamRows.map((x) => ({ id: x.id, name: x.name })),
-    rulesOf(t)
+    rulesOf(t),
+    await teamEffectsAdjustments(db, t.id)
   );
   const twoZones = zones.enabled && zones.zones.length === 2;
   // Playoff (llave opcional entre zonas): se habilita con todo jugado.
@@ -2258,6 +2280,18 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
     if (d.kind === 'dias') return `<span class="badge ghost">${d.amount} día${d.amount === 1 ? '' : 's'}</span>`;
     return `<span class="badge ghost">Hasta el ${esc(d.untilDate ?? '—')}</span>`;
   };
+  // Medida disciplinaria: solo equipos (7B). Para jugador: vacío.
+  const measureBadge = (e: DisciplineEntry): string => {
+    if (e.measure == null) return '';
+    const label = SANCTION_MEASURE_LABELS[e.measure];
+    const detail =
+      e.measure === 'perdida_puntos' ? ` (${e.duration.amount ?? 0} pt${e.duration.amount === 1 ? '' : 's'})`
+      : e.measure === 'suspension_fechas' ? ` (${e.duration.amount ?? 0} fecha${(e.duration.amount ?? 0) === 1 ? '' : 's'})`
+      : e.measure === 'suspension_dias' && e.duration.untilDate ? ` (hasta el ${esc(e.duration.untilDate)})`
+      : '';
+    const tone = e.measure === 'expulsion' ? 'red' : e.measure === 'advertencia' ? 'ghost' : 'amber';
+    return `<span class="badge ${tone}">${esc(label)}${detail}</span>`;
+  };
   const statusBadge = (status: SanctionStatus, annulReason?: string): string => {
     if (status === 'activa') return '<span class="badge red">Activa</span>';
     if (status === 'cumplida') return '<span class="badge green">Cumplida</span>';
@@ -2274,7 +2308,7 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
       <td>${scopeBadge(e.scope)}${esc(name)}${annulCell}</td>
       <td>${esc(teamMap.get(e.teamId ?? -1)?.name ?? '—')}</td>
       <td>${esc(e.reason)}</td>
-      <td>${durationBadge(e.duration)}</td>
+      <td>${e.measure != null ? measureBadge(e) : durationBadge(e.duration)}</td>
       <td>${esc(e.originDate ?? '—')}</td>
       <td>${statusBadge(e.status)}</td>
       <td><span class="badge amber">Manual</span></td>
@@ -2379,10 +2413,12 @@ ${flash('error', errMsg)}
       <div class="field"><label>Fecha del incidente</label><input type="date" name="incident_date" value="${today}"></div>
     </div>
     <div class="form-row">
-      <div class="field"><label>Duración</label><select name="duration_kind" id="skDuration"><option value="fechas">Fechas</option><option value="dias">Días</option><option value="hasta_fecha">Hasta fecha</option></select></div>
+      <div class="field" id="skMeasureField" style="display:none"><label>Medida</label><select name="measure" id="skMeasure"><option value="">Elegí…</option>${SANCTION_MEASURES.map((m) => `<option value="${m.value}">${esc(m.label)}</option>`).join('')}</select></div>
+      <div class="field" id="skDurationField"><label>Duración</label><select name="duration_kind" id="skDuration"><option value="fechas">Fechas</option><option value="dias">Días</option><option value="hasta_fecha">Hasta fecha</option></select></div>
       <div class="field" id="skAmountField"><label>Cantidad</label><input type="number" name="amount" min="1" max="100" placeholder="Ej: 2"></div>
       <div class="field" id="skUntilField" style="display:none"><label>Hasta (inclusive)</label><input type="date" name="until_date"></div>
     </div>
+    <p class="hint" id="skMeasureHint" style="display:none;margin:0"></p>
     <div class="field"><label>Descripción</label><input type="text" name="description" placeholder="Qué pasó (visible en el sitio)"></div>
     <div class="field"><label>Observaciones</label><input type="text" name="notes" placeholder="Notas internas (no se publican)"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
@@ -2396,15 +2432,37 @@ ${flash('error', errMsg)}
     if (!dlg) return;
     var scope = dlg.querySelector('#skScope');
     var playerField = dlg.querySelector('#skPlayerField');
+    var measureField = dlg.querySelector('#skMeasureField');
+    var measure = dlg.querySelector('#skMeasure');
+    var measureHint = dlg.querySelector('#skMeasureHint');
+    var durationField = dlg.querySelector('#skDurationField');
     var duration = dlg.querySelector('#skDuration');
     var amountField = dlg.querySelector('#skAmountField');
     var untilField = dlg.querySelector('#skUntilField');
+    var hints = ${JSON.stringify(Object.fromEntries(SANCTION_MEASURES.map((m) => [m.value, m.hint])))};
     function sync() {
-      playerField.style.display = scope.value === 'player' ? '' : 'none';
-      amountField.style.display = duration.value === 'hasta_fecha' ? 'none' : '';
-      untilField.style.display = duration.value === 'hasta_fecha' ? '' : 'none';
+      var isTeam = scope.value === 'team';
+      var m = measure ? measure.value : '';
+      playerField.style.display = isTeam ? 'none' : '';
+      measureField.style.display = isTeam ? '' : 'none';
+      measureHint.style.display = isTeam && m && hints[m] ? '' : 'none';
+      if (isTeam && m && hints[m]) measureHint.textContent = hints[m];
+      if (!isTeam) {
+        durationField.style.display = '';
+        amountField.style.display = duration.value === 'hasta_fecha' ? 'none' : '';
+        untilField.style.display = duration.value === 'hasta_fecha' ? '' : 'none';
+        return;
+      }
+      // En equipos los campos dependen de la medida elegida.
+      durationField.style.display = 'none';
+      amountField.style.display = m === 'perdida_puntos' || m === 'suspension_fechas' ? '' : 'none';
+      untilField.style.display = m === 'suspension_dias' ? '' : 'none';
+      if (m === 'perdida_puntos') amountField.querySelector('label').textContent = 'Puntos a restar';
+      else if (m === 'suspension_fechas') amountField.querySelector('label').textContent = 'Fechas de suspensión';
+      else amountField.querySelector('label').textContent = 'Cantidad';
     }
     scope.addEventListener('change', sync);
+    if (measure) measure.addEventListener('change', sync);
     duration.addEventListener('change', sync);
     sync();
   })();

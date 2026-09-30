@@ -18,6 +18,36 @@ export type SanctionScope = 'player' | 'team';
 export type SanctionDuration = 'fechas' | 'dias' | 'hasta_fecha';
 export type SanctionStatus = 'activa' | 'cumplida' | 'anulada';
 
+/**
+ * Medida disciplinaria (Fase 7B). Para JUGADORES queda null (la medida es
+ * siempre la suspensión, modelada por duration_kind). Para EQUIPOS define
+ * qué pasa realmente:
+ *   - advertencia:         solo deja constancia, sin efecto.
+ *   - perdida_puntos:      resta `amount` puntos en la tabla del torneo.
+ *   - suspension_fechas:   deja al equipo sin jugar `amount` fechas (aviso
+ *                          operativo; el resultado/walkover no cambia aún).
+ *   - suspension_dias:     igual, con hasta `until_date` (inclusive).
+ *   - expulsion:           inhabilita al equipo en ese torneo.
+ */
+export type SanctionMeasure =
+  | 'advertencia'
+  | 'perdida_puntos'
+  | 'suspension_fechas'
+  | 'suspension_dias'
+  | 'expulsion';
+
+export const SANCTION_MEASURES: { value: SanctionMeasure; label: string; hint: string }[] = [
+  { value: 'advertencia', label: 'Advertencia', hint: 'Solo deja constancia, sin efecto en la tabla.' },
+  { value: 'perdida_puntos', label: 'Pérdida de puntos', hint: 'Resta puntos en la tabla del torneo.' },
+  { value: 'suspension_fechas', label: 'Suspensión por fechas', hint: 'Equipo sin jugar por N fechas (aviso operativo).' },
+  { value: 'suspension_dias', label: 'Suspensión por días', hint: 'Equipo suspendido hasta una fecha (inclusive).' },
+  { value: 'expulsion', label: 'Expulsión del torneo', hint: 'El equipo queda inhabilitado en este torneo.' },
+];
+
+export const SANCTION_MEASURE_LABELS: Record<SanctionMeasure, string> = Object.fromEntries(
+  SANCTION_MEASURES.map((m) => [m.value, m.label])
+) as Record<SanctionMeasure, string>;
+
 export interface Sanction {
   id: number;
   tournament_id: number;
@@ -33,6 +63,8 @@ export interface Sanction {
   notes: string;
   status: SanctionStatus;
   annul_reason: string;
+  /** Medida disciplinaria (Fase 7B). NULL = sanción pre-7B (o de jugador). */
+  measure: SanctionMeasure | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +82,8 @@ export interface SanctionValue {
   category: string;
   description: string;
   notes: string;
+  /** Medida disciplinaria (Fase 7B). Para jugador: null. */
+  measure: SanctionMeasure | null;
 }
 
 /* ---------- Constantes y etiquetas ---------- */
@@ -139,6 +173,19 @@ export function parseSanction(form: Record<string, unknown>): ParseSanctionResul
     return { ok: false, error: 'Una sanción de equipo no lleva jugador' };
   }
 
+  // Medida disciplinaria (Fase 7B). En equipos define el efecto real; en
+  // jugadores queda null y la duración es la de siempre.
+  const measureRaw = String(form['measure'] ?? '').trim();
+  let measure: SanctionMeasure | null = null;
+  if (measureRaw !== '') {
+    const valid = SANCTION_MEASURES.some((m) => m.value === measureRaw);
+    if (!valid) return { ok: false, error: 'Medida disciplinaria inválida' };
+    if (scopeRaw === 'player') {
+      return { ok: false, error: 'La medida disciplinaria aplica solo a equipos' };
+    }
+    measure = measureRaw as SanctionMeasure;
+  }
+
   const durationRaw = String(form['duration_kind'] ?? 'fechas');
   if (durationRaw !== 'fechas' && durationRaw !== 'dias' && durationRaw !== 'hasta_fecha') {
     return { ok: false, error: 'Duración inválida' };
@@ -147,7 +194,26 @@ export function parseSanction(form: Record<string, unknown>): ParseSanctionResul
   let amount: number | null = null;
   let untilDate: string | null = null;
 
-  if (durationRaw === 'fechas' || durationRaw === 'dias') {
+  if (measure != null) {
+    // EQUIPO: los campos exigidos dependen de la medida, no de duration_kind
+    // (que viaja como espejo para compatibilidad con la capa unificada).
+    if (measure === 'perdida_puntos' || measure === 'suspension_fechas') {
+      const raw = String(form['amount'] ?? '').trim();
+      const n = Number(raw);
+      if (!raw || !Number.isInteger(n) || n < 1 || n > MAX_AMOUNT) {
+        const what = measure === 'perdida_puntos' ? 'los puntos a restar' : 'la cantidad de fechas';
+        return { ok: false, error: `Escribí ${what}: un número entre 1 y ${MAX_AMOUNT}` };
+      }
+      amount = n;
+    } else if (measure === 'suspension_dias') {
+      const raw = String(form['until_date'] ?? '').trim();
+      if (!isValidIsoDate(raw)) {
+        return { ok: false, error: 'Elegí la fecha de finalización de la suspensión' };
+      }
+      untilDate = raw;
+    }
+    // advertencia y expulsion no llevan campos extra.
+  } else if (durationRaw === 'fechas' || durationRaw === 'dias') {
     const raw = String(form['amount'] ?? '').trim();
     const n = Number(raw);
     if (!raw || !Number.isInteger(n) || n < 1 || n > MAX_AMOUNT) {
@@ -190,6 +256,7 @@ export function parseSanction(form: Record<string, unknown>): ParseSanctionResul
       category,
       description: String(form['description'] ?? '').trim().slice(0, MAX_TEXT_LENGTH),
       notes: String(form['notes'] ?? '').trim().slice(0, MAX_TEXT_LENGTH),
+      measure,
     },
   };
 }
@@ -256,25 +323,42 @@ export function effectiveStatus(
 /* ---------- Acceso a datos (D1) ---------- */
 
 export async function insertSanction(db: D1Database, v: SanctionValue): Promise<number> {
+  // En equipos, duration_kind viaja como espejo de la medida (misma semántica:
+  // 'fechas' ↔ suspension_fechas, 'dias'/'hasta_fecha' ↔ suspension_dias);
+  // la medida real va en `measure`. Jugadores: measure NULL, duración pura.
+  let durationKind = v.durationKind;
+  let amount = v.amount;
+  let untilDate = v.untilDate;
+  if (v.scope === 'team' && v.measure != null) {
+    if (v.measure === 'perdida_puntos') durationKind = 'fechas';
+    else if (v.measure === 'suspension_fechas') durationKind = 'fechas';
+    else if (v.measure === 'suspension_dias') durationKind = 'hasta_fecha';
+    else {
+      durationKind = 'fechas';
+      amount = null;
+      untilDate = null;
+    }
+  }
   const res = await db
     .prepare(
       `INSERT INTO sanctions
         (tournament_id, team_id, player_id, scope, duration_kind, amount, until_date,
-         incident_date, category, description, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
+         incident_date, category, description, notes, measure)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
     )
     .bind(
       v.tournamentId,
       v.teamId,
       v.playerId,
       v.scope,
-      v.durationKind,
-      v.amount,
-      v.untilDate,
+      durationKind,
+      amount,
+      untilDate,
       v.incidentDate,
       v.category,
       v.description,
-      v.notes
+      v.notes,
+      v.measure
     )
     .run();
   return Number(res.meta.last_row_id ?? 0);
