@@ -16,6 +16,7 @@
 //
 // Dominio puro: todo lo que el llamador necesita entra por parámetro.
 
+import type { Match } from './types.ts';
 import type { PlayerSuspension } from './suspensions.ts';
 import type { Sanction, SanctionStatus, SanctionScope, SanctionDuration } from './sanctions.ts';
 import { effectiveStatus, sanctionEndDate } from './sanctions.ts';
@@ -214,4 +215,164 @@ export function isPlayerDisciplined(entries: readonly DisciplineEntry[], playerI
 /** ¿Tiene este equipo una sanción de equipo activa? (no toca a los jugadores). */
 export function isTeamDisciplined(entries: readonly DisciplineEntry[], teamId: number): boolean {
   return entries.some((e) => e.scope === 'team' && e.teamId === teamId);
+}
+
+/* ============================== ELEGIBILIDAD ============================== */
+
+/** Motivo de bloqueo de un jugador para un partido, ya formateado. */
+export interface EligibilityReason {
+  source: DisciplineSource;
+  /** Motivo legible (regla para auto, categoría para manual). */
+  reason: string;
+  /** Fechas/días restantes. null = no se puede calcular (o no aplica). */
+  remaining: number | null;
+  /**
+   * true si el bloqueo probable existe pero no se pudo confirmar con datos
+   * reales (p. ej. automática sin jornada conocible). No se inventa nada.
+   */
+  needsReview: boolean;
+}
+
+/** Evaluación de elegibilidad de UN jugador para UN partido. */
+export interface PlayerEligibility {
+  playerId: number;
+  /** true = puede participar; false = suspendido para ese partido. */
+  eligible: boolean;
+  /** Motivos de bloqueo (uno por sanción que lo afecta; puede haber varios). */
+  reasons: EligibilityReason[];
+}
+
+/** Datos que el llamador necesita recolectar (todo real, sin inventar). */
+export interface EligibilityInput {
+  /** Entradas ACTIVAS de combineDiscipline del torneo del partido. */
+  active: readonly DisciplineEntry[];
+  /** El partido a evaluar. */
+  match: Pick<Match, 'id' | 'round' | 'played_on' | 'status' | 'home_team_id' | 'away_team_id'>;
+  /** Rounds del torneo con partidos ya jugados/walkover. */
+  playedRounds: readonly number[];
+  /** Todos los partidos del torneo (para contar servidas de la automática). */
+  tournamentMatches: readonly Match[];
+}
+
+/**
+ * Conteo de automática PARA ESTE PARTIDO: partidos jugados/walkover del
+ * equipo de la sanción entre la jornada del incidente y la del partido.
+ * Devuelve las fechas aún sin servir (0 = ya la cumplió para acá). Si falta
+ * la jornada del incidente o la del partido, null: no se inventa.
+ */
+function autoRemainingForMatchFromEntry(e: DisciplineEntry, input: EligibilityInput): number | null {
+  if (e.originRound == null || input.match.round == null) return null;
+  const amount = e.duration.amount ?? 0;
+  const served = input.tournamentMatches.filter(
+    (m) =>
+      (m.status === 'played' || m.status === 'walkover') &&
+      (m.home_team_id === e.teamId || m.away_team_id === e.teamId) &&
+      m.round != null &&
+      m.round > e.originRound! &&
+      m.round <= input.match.round!
+  ).length;
+  return Math.max(0, amount - served);
+}
+
+/** Fin de vigencia de una entrada manual por calendario (dias/hasta_fecha). */
+function sanctionEndDateFromEntry(e: DisciplineEntry): string | null {
+  if (e.duration.kind === 'hasta_fecha') return e.duration.untilDate;
+  if (e.duration.kind === 'dias' && e.originDate != null) {
+    const d = new Date(`${e.originDate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + (e.duration.amount ?? 0));
+    return d.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+/**
+ * Evaluación pura: ¿puede este jugador participar de este partido?
+ * Reutiliza las entradas combinadas (NO recalcula suspensiones ni toca
+ * computeSuspensions). Reglas, en orden:
+ *   - Las de EQUIPO nunca bloquean a un jugador individual.
+ *   - Anuladas y cumplidas no llegan acá: solo entradas ACTIVAS.
+ *   - Automática: sigue suspendido mientras no haya servido los partidos
+ *     entre su jornada de origen y la del partido. Sin jornada conocible →
+ *     bloqueo marcado needsReview (no se inventa el restante).
+ *   - Manual por 'fechas': cubre si la jornada del partido cae dentro del
+ *     rango contado desde la jornada del incidente. Si alguna de las dos
+ *     jornadas no puede determinarse, esta vía no bloquea (no se inventa).
+ *   - Manual por 'dias'/'hasta_fecha': calendario contra la FECHA DEL
+ *     PARTIDO (límite inclusive). Sin fecha de partido → needsReview.
+ *   - Auto y manual nunca se fusionan: cada sanción aporta su motivo.
+ */
+export function playerEligibility(input: EligibilityInput, playerId: number): PlayerEligibility {
+  const reasons: EligibilityReason[] = [];
+
+  for (const e of input.active) {
+    if (e.scope === 'team' || e.playerId !== playerId) continue;
+
+    if (e.source === 'auto') {
+      const remaining = autoRemainingForMatchFromEntry(e, input);
+      if (remaining == null) {
+        reasons.push({ source: 'auto', reason: e.reason, remaining: null, needsReview: true });
+      } else if (remaining > 0) {
+        reasons.push({ source: 'auto', reason: e.reason, remaining, needsReview: false });
+      }
+      continue;
+    }
+
+    if (e.duration.kind === 'fechas') {
+      if (e.originRound == null || input.match.round == null) continue; // sin jornadas: no se inventa
+      const covered =
+        input.match.round >= e.originRound && input.match.round < e.originRound + (e.duration.amount ?? 0);
+      if (!covered) continue;
+      const alreadyPlayed = input.playedRounds.filter(
+        (r) => r >= e.originRound! && r < e.originRound! + (e.duration.amount ?? 0)
+      ).length;
+      const pending = Math.max(0, (e.duration.amount ?? 0) - alreadyPlayed);
+      if (pending > 0) {
+        reasons.push({ source: 'manual', reason: e.reason, remaining: pending, needsReview: false });
+      }
+      continue;
+    }
+
+    // 'dias' y 'hasta_fecha': calendario contra la fecha real del partido.
+    if (input.match.played_on === '') {
+      reasons.push({ source: 'manual', reason: e.reason, remaining: null, needsReview: true });
+      continue;
+    }
+    const endDate = sanctionEndDateFromEntry(e);
+    if (
+      endDate != null &&
+      e.originDate != null &&
+      input.match.played_on >= e.originDate &&
+      input.match.played_on <= endDate
+    ) {
+      const remaining = Math.max(
+        0,
+        Math.round((new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${input.match.played_on}T00:00:00Z`).getTime()) / 86_400_000)
+      );
+      reasons.push({ source: 'manual', reason: e.reason, remaining, needsReview: false });
+    }
+  }
+
+  return { playerId, eligible: reasons.length === 0, reasons };
+}
+
+/**
+ * ¿Hay ALGÚN motivo firme de bloqueo para este jugador? Las entradas en
+ * revisión (datos insuficientes) NO bloquean solas: el llamador decide.
+ */
+export function hasHardBlock(eligibility: PlayerEligibility): boolean {
+  return eligibility.reasons.some((r) => !r.needsReview);
+}
+
+/**
+ * Mensaje claro de rechazo para un evento de un jugador no elegible:
+ * incluye origen, motivo y fechas restantes cuando se puedan calcular.
+ */
+export function eligibilityErrorMessage(eligibility: PlayerEligibility): string {
+  const parts = eligibility.reasons.map((r) => {
+    const origen = r.source === 'auto' ? 'suspensión automática' : 'sanción disciplinaria';
+    const rest = r.remaining != null ? ` — le quedan ${r.remaining} fecha${r.remaining === 1 ? '' : 's'}` : '';
+    const rev = r.needsReview ? ' (caso a revisar: faltan datos del partido)' : '';
+    return `${origen}: ${r.reason}${rest}${rev}`;
+  });
+  return `El jugador está suspendido para este partido (${parts.join(' | ')}). El evento no se guardó.`;
 }

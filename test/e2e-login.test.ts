@@ -1318,3 +1318,126 @@ describe.skipIf(!has)('e2e: cruce solo desde el generador de fixture', () => {
     expect(page2).toContain('Sancionado E2E');
   });
 });
+
+describe.skipIf(!has)('e2e: elegibilidad por suspensiones', () => {
+  it('suspendido marcado en planilla y delegado; evento rechazado en ambos; elegible continúa; anulación habilita', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Deportivo E2E + jugador sancionado + jugador control (elegible).
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const chunk = teamsHtml.split('<article').find((x) => x.includes('Deportivo E2E')) ?? '';
+    const teamA = /href="\/admin\/equipos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '';
+    expect(teamA).toBeTruthy();
+
+    await admin.post('/admin/jugadores', { team_id: teamA, name: 'Inhabilitado E2E', number: '4' });
+    await admin.post('/admin/jugadores', { team_id: teamA, name: 'Habilitado E2E', number: '5' });
+    const equiposHtml = await (await admin.get('/admin/equipos')).text();
+    const chunkA = equiposHtml.split('<article').find((x) => x.includes('Deportivo E2E')) ?? '';
+    const teamSlug = /href="\/equipos\/([a-z0-9-]+)"/.exec(chunkA)?.[1] ?? '';
+    const teamPublic = await (await admin.get(`/equipos/${teamSlug}`)).text();
+    const pidSus = /href="\/jugador\/(\d+)">Inhabilitado E2E/.exec(teamPublic)?.[1] ?? '';
+    const pidOk = /href="\/jugador\/(\d+)">Habilitado E2E/.exec(teamPublic)?.[1] ?? '';
+    expect(pidSus && pidOk).toBeTruthy();
+
+    // Sanción manual HASTA FECHA al Inhabilitado, con límite lejano: cubre
+    // cualquier partido del torneo sin importar su jornada (el fixture fue
+    // rearmando por el test de regeneración, así que no dependemos de fechas
+    // ni jornadas concretas). El partido evaluado tiene fecha programada, así
+    // que el bloqueo por calendario es firme (no "revisar").
+    const alta = await admin.post('/admin/sanciones', {
+      t: 'copa-e2e',
+      scope: 'player',
+      team_id: teamA,
+      player_id: pidSus,
+      duration_kind: 'hasta_fecha',
+      until_date: '2027-12-31',
+      incident_date: '2026-10-01',
+      category: 'Pelea / desmanes',
+      description: 'Pelea después del partido',
+    });
+    expect(alta.status).toBe(302);
+
+    // PLANILLA ADMIN: el suspendido aparece marcado (visible, no disabled)
+    // y hay un resumen con su nombre y origen manual.
+    const sheet = await (await admin.get(`/admin/planilla/${matchId}`)).text();
+    expect(sheet).toContain('🚫 Suspendido');
+    expect(sheet).toContain('Inhabilitado E2E');
+    expect(sheet).toContain('data-suspended-notice');
+    expect(sheet).toContain('Manual: Pelea / desmanes');
+    const optSus = new RegExp(`<option value="${pidSus}"[^>]*>[^<]*Inhabilitado E2E[^<]*🚫 Suspendido`).test(sheet);
+    expect(optSus, 'el suspendido queda visible y marcado en el select').toBe(true);
+    expect(sheet).not.toMatch(new RegExp(`<option value="${pidSus}"[^>]*disabled`));
+
+    // BLOQUEO DURO admin: evento del suspendido rechazado y no insertado.
+    const evSus = await admin.post(`/admin/planilla/${matchId}/evento`, {
+      team_id: teamA,
+      player_id: pidSus,
+      type: 'yellow',
+    });
+    expect(evSus.status).toBe(302);
+    expect(decodeURIComponent(/err=([^&]+)/.exec(evSus.headers.get('location') ?? '')?.[1] ?? '')).toContain('suspendido');
+
+    // El jugador ELEGIBLE continúa funcionando: su evento se inserta.
+    const evOk = await admin.post(`/admin/planilla/${matchId}/evento`, {
+      team_id: teamA,
+      player_id: pidOk,
+      type: 'goal',
+    });
+    expect(evOk.status).toBe(302);
+    expect(decodeURIComponent(evOk.headers.get('location') ?? '')).not.toContain('err=');
+    const sheetAfter = await (await admin.get(`/admin/planilla/${matchId}`)).text();
+    expect(sheetAfter).toContain('Habilitado E2E');
+
+    // DELEGADO: login, guarda el resultado (paso 1, crea el envío pendiente
+    // que habilita el form de eventos) y recién ahí ve la marca en el select.
+    const delegate = client();
+    await delegate.loginDelegate(delegateCode);
+    const dSubmit = await delegate.post(`/delegado/partido/${matchId}`, {
+      status: 'played',
+      home_goals: '1',
+      away_goals: '0',
+    });
+    expect(dSubmit.status).toBe(302);
+    const dPage = await (await delegate.get(`/delegado/partido/${matchId}`)).text();
+    expect(dPage).toContain('🚫 Suspendido');
+    expect(dPage).toContain('Inhabilitado E2E');
+    expect(dPage).toContain('data-suspended-notice');
+
+    const dEvSus = await delegate.post(`/delegado/partido/${matchId}/evento`, {
+      type: 'yellow',
+      player_id: pidSus,
+    });
+    expect(dEvSus.status).toBe(302);
+    expect(decodeURIComponent(/err=([^&]+)/.exec(dEvSus.headers.get('location') ?? '')?.[1] ?? '')).toContain('suspendido');
+
+    // El delegado con el jugador elegible sí carga eventos.
+    const dEvOk = await delegate.post(`/delegado/partido/${matchId}/evento`, {
+      type: 'goal',
+      player_id: pidOk,
+    });
+    expect(dEvOk.status).toBe(302);
+    expect(decodeURIComponent(dEvOk.headers.get('location') ?? '')).toContain('Evento agregado');
+
+    // Cancelar el envío del delegado para no dejar estado pendiente.
+    await delegate.post(`/delegado/partido/${matchId}/retirar`, {});
+
+    // ANULACIÓN: sin sanción activa, el jugador vuelve a ser elegible y el
+    // mismo evento que antes era rechazado ahora se guarda.
+    const suspPage = await (await admin.get('/admin/suspensiones?t=copa-e2e')).text();
+    const sid = /sanciones\/(\d+)\/anular/.exec(suspPage)?.[1] ?? '';
+    expect(sid, 'debe haber una sanción activa con acción Anular').toBeTruthy();
+    const anular = await admin.post(`/admin/sanciones/${sid}/anular`, {
+      t: 'copa-e2e',
+      annul_reason: 'Descargo aceptado por el tribunal',
+    });
+    expect(anular.status).toBe(302);
+    const evPostAnular = await admin.post(`/admin/planilla/${matchId}/evento`, {
+      team_id: teamA,
+      player_id: pidSus,
+      type: 'yellow',
+    });
+    expect(evPostAnular.status).toBe(302);
+    expect(decodeURIComponent(evPostAnular.headers.get('location') ?? '')).not.toContain('err=');
+  });
+});

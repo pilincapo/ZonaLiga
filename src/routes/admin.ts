@@ -53,6 +53,7 @@ import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
 import { getMatch, getPlayer, getTeam } from '../lib/queries.ts';
+import { playerEligibility, eligibilityErrorMessage, type PlayerEligibility } from '../lib/discipline.ts';
 import { getSubmission } from '../lib/submissions.ts';
 import { deleteAdjustment, insertAdjustment, parseAdjustment } from '../lib/adjustments.ts';
 import {
@@ -1248,6 +1249,17 @@ adminRoutes.post('/planilla/:id/evento', async (c) => {
   const minuteRaw = String(f['minute'] ?? '').trim();
   if (!Number.isFinite(playerId)) {
     return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent('Elegí un jugador'));
+  }
+  // Guardia de elegibilidad: un jugador suspendido para este partido no
+  // genera eventos acá. Bloqueo duro, con motivo y origen en el mensaje.
+  const mRow = await getMatch(c.env.DB, id);
+  if (!mRow) return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
+  const discipline = await admin.disciplineForMatch(c.env.DB, mRow);
+  if (discipline) {
+    const el = playerEligibility(discipline, playerId);
+    if (!el.eligible) {
+      return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(eligibilityErrorMessage(el)));
+    }
   }
   await c.env.DB.prepare('INSERT INTO events (match_id, team_id, player_id, type, minute) VALUES (?1, ?2, ?3, ?4, ?5)')
     .bind(id, Number.isFinite(teamId) ? teamId : null, playerId, type, minuteRaw ? Number(minuteRaw) : null)

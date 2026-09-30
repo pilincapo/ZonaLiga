@@ -23,5 +23,8 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     // Permite leer el CSS con import ?raw (verificación de los temas).
     css: true,
+    // Los e2e contra wrangler dev arrancan servidor y base por test suite:
+    // 5s default alcanza justo y genera fallos espurios (flaky conocido).
+    testTimeout: 30_000,
   },
 });

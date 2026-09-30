@@ -16,6 +16,8 @@ import {
 } from '../lib/auth.ts';
 import { canSubmitFor, maxEvents, normalizeCode, parseEvent, parseSubmission } from '../lib/delegates.ts';
 import { getMatch, getTeam, listPlayers, listTeams } from '../lib/queries.ts';
+import { playerEligibility, eligibilityErrorMessage, type PlayerEligibility } from '../lib/discipline.ts';
+import { disciplineForMatch } from '../ui/admin.ts';
 import {
   getTeamByDelegateCode,
   listSubmissionsForMatch,
@@ -130,11 +132,23 @@ delegateRoutes.get('/partido/:id', async (c) => {
   if ('error' in loaded) return c.redirect(redirect('/delegado', undefined, loaded.error));
 
   const { team, match } = loaded;
-  const [teams, roster, subs] = await Promise.all([
+  const [teams, roster, subs, discipline] = await Promise.all([
     listTeams(c.env.DB, true),
     listPlayers(c.env.DB, team.id, true),
     listSubmissionsForMatch(c.env.DB, match.id),
+    disciplineForMatch(c.env.DB, match),
   ]);
+  // Elegibilidad por jugador para ESTE partido (suspendido = no elegible).
+  const suspendedPlayers = new Map<number, PlayerEligibility>();
+  if (discipline) {
+    for (const p of roster) {
+      const el = playerEligibility(discipline, p.id);
+      if (!el.eligible) suspendedPlayers.set(p.id, el);
+    }
+  }
+  const teamDiscipline = discipline
+    ? discipline.active.filter((e) => e.scope === 'team' && e.teamId === team.id).map((e) => e.reason)
+    : [];
   const teamMap = new Map(teams.map((t) => [t.id, t]));
   const mine = subs.filter((s) => s.team_id === team.id);
   const pending = mine.find((s) => s.review === 'pending') ?? null;
@@ -147,6 +161,8 @@ delegateRoutes.get('/partido/:id', async (c) => {
       match,
       teamMap,
       roster,
+      suspendedPlayers,
+      teamDisciplineReasons: teamDiscipline,
       pending: pending ? { submission: pending, events } : null,
       lastReviewed,
       msg: c.req.query('msg'),
@@ -209,6 +225,15 @@ delegateRoutes.post('/partido/:id/evento', async (c) => {
   const parsed = parseEvent(fd, allowed);
   if (!parsed.ok) {
     return c.redirect(redirect(`/delegado/partido/${match.id}`, undefined, parsed.error));
+  }
+
+  // Guardia de elegibilidad: bloqueo duro con motivo y origen visibles.
+  const discipline = await disciplineForMatch(c.env.DB, match);
+  if (discipline) {
+    const el = playerEligibility(discipline, parsed.value.playerId);
+    if (!el.eligible) {
+      return c.redirect(redirect(`/delegado/partido/${match.id}`, undefined, eligibilityErrorMessage(el)));
+    }
   }
 
   await c.env.DB.prepare(

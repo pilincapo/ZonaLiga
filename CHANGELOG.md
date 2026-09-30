@@ -13,6 +13,24 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.2.78] — 2026-09-30 — Elegibilidad por suspensiones (Fases 1–6)
+
+### Nuevo
+
+- Sanciones disciplinarias manuales: el tribunal de la liga registra sanciones a un jugador o a un equipo, con duración por fechas, por días o hasta una fecha, categoría, descripción y observaciones.
+- Lectura unificada de disciplina: en una sola vista se ven las suspensiones automáticas por tarjetas junto a las sanciones del tribunal, sin fusionarse — cada sanción mantiene su origen (Automática o Manual).
+- Nueva pantalla Administración → Suspensiones, con métricas, listado combinado, historial de cumplidas y anuladas, y formulario de alta.
+- Alta de sanciones y anulación con motivo obligatorio; la anulación conserva el registro y queda documentada en el historial.
+- Elegibilidad por partido: para cada partido se evalúa si cada jugador está suspendido, considerando la jornada y la fecha reales del encuentro. Las sanciones anuladas o cumplidas no bloquean y las de otro torneo no aplican; si falta algún dato, se muestra “revisar” sin inventar fechas restantes.
+- Bloqueo de eventos de jugadores suspendidos en la planilla del administrador y en la carga del delegado: el jugador queda visible y marcado con “🚫 Suspendido” (con motivo, origen y fechas restantes cuando se puedan calcular), y si se intenta cargarle un evento, el sistema rechaza el guardado explicando el motivo.
+- Sanciones a equipo: aparecen como aviso de disciplina del equipo en las pantallas de carga, sin convertir automáticamente a sus jugadores en suspendidos.
+
+### Mejora
+
+- Los tests e2e contra el servidor de desarrollo usan un tiempo máximo de 30 segundos por prueba, para eliminar los fallos espurios que a veces aparecían por tiempos de arranque del servidor.
+
+---
+
 ## [0.2.77] — 2026-09-29 — Sanciones disciplinarias del tribunal
 
 ### Nuevo

@@ -37,7 +37,7 @@ import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
 import { teamIdsOfTournament, participantsOrAllTeams, participantsWithoutZone } from '../lib/participation.ts';
 import { sanctionsForTournament } from '../lib/sanctions.ts';
 import type { SanctionRow, SanctionStatus } from '../lib/sanctions.ts';
-import { combineDiscipline, type DisciplineEntry } from '../lib/discipline.ts';
+import { combineDiscipline, playerEligibility, hasHardBlock, type DisciplineEntry, type PlayerEligibility } from '../lib/discipline.ts';
 import type { PlayerSuspension } from '../lib/suspensions.ts';
 import { remainingSuspensionMatches } from '../lib/suspensions.ts';
 import { leagueNow } from '../lib/live.ts';
@@ -76,6 +76,65 @@ import {
 import { planFixture, groupByFixtureRound, planSummary, type PlannedMatch } from '../lib/planifier.ts';
 import { orderMatchesForDisplay } from '../lib/order.ts';
 import { isCrossoverMatch } from '../lib/crossover.ts';
+import { isTeamDisciplined, type EligibilityInput } from '../lib/discipline.ts';
+
+/* ============================== ELEGIBILIDAD (compartido) ============================== */
+
+/**
+ * Arma el paquete de disciplina activa de un partido, listo para
+ * playerEligibility(): suspensiones automáticas + sanciones manuales del
+ * torneo, con las jornadas jugadas reales. Devuelve null si el partido no
+ * tiene torneo (nada que evaluar, no se inventa).
+ */
+export async function disciplineForMatch(
+  db: D1Database,
+  match: Match
+): Promise<EligibilityInput | null> {
+  const view = await loadTournamentView(db, {
+    id: match.tournament_id,
+    includeInactiveTeams: true,
+    events: true,
+  });
+  if (!view) return null;
+  const rules = rulesOf(view.tournament);
+  const maxRound = view.matches.reduce((acc, mm) => Math.max(acc, mm.round ?? 0), 0);
+  const autos = computeSuspensions(view.events, view.matches, rules, maxRound);
+  const allSanctions = await sanctionsForTournament(db, view.tournament.id);
+  const today = leagueNow().date;
+  const playedRounds = view.matches
+    .filter((mm) => mm.status === 'played' || mm.status === 'walkover')
+    .map((mm) => mm.round ?? 0)
+    .filter((r) => r > 0);
+  // Round del incidente de cada manual: el último round con partido del
+  // equipo en la fecha del incidente (mismo criterio que suspensionsAdminPage).
+  const incidentRoundOf = (s: SanctionRow): number | null => {
+    if (!s.team_id) return null;
+    const rounds = view.matches
+      .filter((mm) => (mm.home_team_id === s.team_id || mm.away_team_id === s.team_id) && mm.played_on === s.incident_date)
+      .map((mm) => mm.round)
+      .filter((r): r is number => r != null);
+    return rounds.length ? Math.max(...rounds) : null;
+  };
+  const { active } = combineDiscipline(
+    autos.map((s) => ({ tournamentId: view.tournament.id, suspension: s, servedRemaining: null })),
+    allSanctions.map((s) => ({ sanction: s, incidentRound: incidentRoundOf(s), playedRounds, today }))
+  );
+  return {
+    active,
+    match,
+    playedRounds,
+    tournamentMatches: view.matches,
+  };
+}
+
+/** Aviso de disciplina de EQUIPO (no suspende jugadores individuales). */
+export function teamDisciplineNotice(input: EligibilityInput | null, teamId: number | null): string {
+  if (!input || teamId == null) return '';
+  if (!isTeamDisciplined(input.active, teamId)) return '';
+  const entries = input.active.filter((e) => e.scope === 'team' && e.teamId === teamId);
+  const detail = entries.map((e) => esc(e.reason)).join(' · ');
+  return `<div class="error-box" data-team-discipline>⚠ <strong>Disciplina de equipo:</strong> el equipo tiene una sanción activa (${detail}). No suspende a los jugadores, pero el partido queda sujeto a lo que resuelva el tribunal.</div>`;
+}
 
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Resumen', match: 'admin' },
@@ -1579,9 +1638,41 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
     away ? listPlayers(db, away.id, true) : Promise.resolve([]),
   ]);
 
+  // Elegibilidad: disciplina combinada del torneo evaluada para este partido.
+  const eligibility = await disciplineForMatch(db, m);
+  const suspended = new Map<number, PlayerEligibility>();
+  if (eligibility) {
+    for (const p of [...homePlayers, ...awayPlayers]) {
+      const el = playerEligibility(eligibility, p.id);
+      if (!el.eligible) suspended.set(p.id, el);
+    }
+  }
+  const suspendedBadge = (playerId: number): string => {
+    const el = suspended.get(playerId);
+    if (!el) return '';
+    const parts = el.reasons.map((r) => {
+      const origen = r.source === 'auto' ? 'Automática' : 'Manual';
+      const rest = r.remaining != null ? ` · ${r.remaining} fecha${r.remaining === 1 ? '' : 's'}` : '';
+      const rev = r.needsReview ? ' · revisar' : '';
+      return `${origen}: ${esc(r.reason)}${rest}${rev}`;
+    });
+    return ` 🚫 Suspendido (${parts.join(' | ')})`;
+  };
+  const suspendedNotice = (sidePlayers: typeof homePlayers, sideName: string): string => {
+    const list = sidePlayers.filter((p) => suspended.has(p.id));
+    if (list.length === 0) return '';
+    const rows = list
+      .map((p) => `<li><strong>${esc(p.name)}</strong> — ${suspendedBadge(p.id).replace(' 🚫 Suspendido ', '')}</li>`)
+      .join('');
+    return `<div class="error-box" data-suspended-notice><strong>Jugadores suspendidos · ${esc(sideName)}:</strong><ul>${rows}</ul><p class="hint" style="margin:0">No pueden ser incluidos en eventos de este partido.</p></div>`;
+  };
+
   const playerOptions = (list: typeof homePlayers) =>
     list
-      .map((p) => `<option value="${p.id}">${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}</option>`)
+      .map(
+        (p) =>
+          `<option value="${p.id}">${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}${suspendedBadge(p.id)}</option>`
+      )
       .join('');
 
   const evRows = (side: 'home' | 'away') => {
@@ -1624,7 +1715,11 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
     const goalSelect = (i: number) => {
       const sel = pre[i] ?? '';
       const opts = scorerOptions({ index: i, teamName: label, players })
-        .map((o) => `<option value="${o.value}"${o.value !== '' && o.value === sel ? ' selected' : ''}>${esc(o.label)}</option>`)
+        .map((o) => {
+          const pid = Number(o.value);
+          const extra = Number.isInteger(pid) && pid > 0 ? suspendedBadge(pid) : '';
+          return `<option value="${o.value}"${o.value !== '' && o.value === sel ? ' selected' : ''}>${esc(o.label)}${extra}</option>`;
+        })
         .join('');
       return `<div class="field" data-pick><label>Gol ${i + 1} · ${esc(label)}</label><select name="${prefix}${i + 1}">${opts}</select></div>`;
     };
@@ -1634,8 +1729,11 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   const evBlock = (side: 'home' | 'away') => {
     const teamId = side === 'home' ? m.home_team_id : m.away_team_id;
     const players = side === 'home' ? homePlayers : awayPlayers;
+    const sideName = side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante');
     return `<div class="dash-card">
-  <div class="dash-card-head"><h2>${icon('card', 16)} Eventos · ${esc(side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante'))}</h2></div>
+  <div class="dash-card-head"><h2>${icon('card', 16)} Eventos · ${esc(sideName)}</h2></div>
+  ${suspendedNotice(players, sideName)}
+  ${teamDisciplineNotice(eligibility, teamId)}
   <form method="post" action="/admin/planilla/${m.id}/evento">
     <input type="hidden" name="team_id" value="${teamId ?? ''}">
     <div class="form-row">

@@ -13,6 +13,7 @@ import {
   type SubmissionRow,
 } from '../lib/delegates.ts';
 import type { Match, Player, Team } from '../lib/types.ts';
+import type { PlayerEligibility } from '../lib/discipline.ts';
 import type { MatchWithTournament, OwnSubmission } from '../lib/submissions.ts';
 import { crest } from './match.ts';
 import { emptyNote, layout, type NavItem } from './components.ts';
@@ -184,6 +185,10 @@ export function delegateMatchPage(opts: {
   match: Match;
   teamMap: Map<number, Team>;
   roster: Player[];
+  /** Jugadores no elegibles para este partido, con motivo y origen. */
+  suspendedPlayers?: Map<number, PlayerEligibility>;
+  /** Razones de sanción de EQUIPO activa (aviso; no suspende jugadores). */
+  teamDisciplineReasons?: string[];
   pending?: { submission: SubmissionRow; events: SubmissionEventRow[] } | null;
   lastReviewed?: SubmissionRow | null;
   msg?: string;
@@ -195,8 +200,39 @@ export function delegateMatchPage(opts: {
   const official = hasOfficialResult(match);
   const values = pending?.submission ?? null;
 
+  // Marcas de suspensión: el jugador sigue visible y elegible en el select
+  // (no se deshabilita), pero queda claro que está suspendido y por qué.
+  const suspended = opts.suspendedPlayers ?? new Map<number, PlayerEligibility>();
+  const suspendedBadge = (playerId: number): string => {
+    const el = suspended.get(playerId);
+    if (!el) return '';
+    const parts = el.reasons.map((r) => {
+      const origen = r.source === 'auto' ? 'Automática' : 'Manual';
+      const rest = r.remaining != null ? ` · ${r.remaining} fecha${r.remaining === 1 ? '' : 's'}` : '';
+      const rev = r.needsReview ? ' · revisar' : '';
+      return `${origen}: ${esc(r.reason)}${rest}${rev}`;
+    });
+    return ` 🚫 Suspendido (${parts.join(' | ')})`;
+  };
+  const suspendedBox =
+    suspended.size > 0
+      ? `<div class="error-box" data-suspended-notice><strong>Jugadores suspendidos para este partido:</strong><ul>${[...suspended.values()]
+          .map((el) => {
+            const p = roster.find((x) => x.id === el.playerId);
+            return `<li><strong>${esc(p?.name ?? `#${el.playerId}`)}</strong> — ${suspendedBadge(el.playerId).replace(' 🚫 Suspendido ', '')}</li>`;
+          })
+          .join('')}</ul><p class="hint" style="margin:0">Si lo incluís, el administrador va a rechazar el evento.</p></div>`
+      : '';
+  const teamBox =
+    (opts.teamDisciplineReasons?.length ?? 0) > 0
+      ? `<div class="error-box" data-team-discipline>⚠ <strong>Disciplina de equipo:</strong> ${esc(opts.teamDisciplineReasons!.join(' · '))}. No suspende a los jugadores, pero queda sujeto a lo que resuelva el tribunal.</div>`
+      : '';
+
   const playerOptions = roster
-    .map((p) => `<option value="${p.id}">${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}</option>`)
+    .map(
+      (p) =>
+        `<option value="${p.id}">${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}${suspendedBadge(p.id)}</option>`
+    )
     .join('');
 
   const eventsRows = (pending?.events ?? [])
@@ -239,6 +275,8 @@ ${opts.lastReviewed && opts.lastReviewed.review === 'rejected'
 ${pending
       ? `<section class="block"><div class="success-box">Envío pendiente de aprobación (${pending.submission.home_goals} - ${pending.submission.away_goals}). Podés corregirlo mientras el administrador no lo publique.</div></section>`
       : ''}
+${teamBox}
+${suspendedBox}
 
 <section class="block"><div class="card"><div class="card-body">
   <div class="uppercase mb-2">Paso 1 · ${pending ? 'Resultado enviado' : 'Resultado'}</div>
