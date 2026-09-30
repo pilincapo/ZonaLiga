@@ -1501,11 +1501,13 @@ describe.skipIf(!has)('e2e: sanciones a equipos (Fase 7B)', () => {
       (await (await admin.get('/admin/equipos')).text()).split('<article').find((x) => x.includes(primerEquipo)) ?? ''
     )?.[1] ?? '';
     void pubA;
-    void teamAId;
     void teamA;
     void teamB;
+    expect(teamAId).toBeTruthy();
 
-    // Cargar el 2-0 a favor del primer equipo.
+    // Cargar el 2-0 a favor del primer equipo. Los autores van como "Sin
+    // autor": si el equipo tiene plantilla y no se envían, el guardado
+    // redirige con err= y el partido queda sin cargar (fallo silencioso).
     const guardar = await admin.post(`/admin/planilla/${mid}`, {
       status: 'played',
       played_on: '2026-10-10',
@@ -1513,9 +1515,13 @@ describe.skipIf(!has)('e2e: sanciones a equipos (Fase 7B)', () => {
       venue: 'Cancha Norte',
       home_goals: '2',
       away_goals: '0',
+      hg1: 'none',
+      hg2: 'none',
       notes: '',
     });
     expect(guardar.status).toBe(302);
+    const guardarLoc = decodeURIComponent(guardar.headers.get('location') ?? '');
+    expect(guardarLoc).toContain('Planilla guardada');
 
     // Puntos ANTES de la sanción: el ganador tiene 3.
     const tablaAntes = await (await admin.get('/posiciones?t=sanciones-equipo-e2e')).text();
@@ -1590,5 +1596,75 @@ describe.skipIf(!has)('e2e: sanciones a equipos (Fase 7B)', () => {
     // El historial conserva la sanción anulada con su motivo.
     const suspPost = await (await admin.get('/admin/suspensiones?t=sanciones-equipo-e2e')).text();
     expect(suspPost).toContain('Apelación favorable');
+  });
+});
+
+describe.skipIf(!has)('e2e: cierre automático de sanciones cumplidas (Fase 8)', () => {
+  it('suspension_dias vencida se marca cumplida sola; advertencia sigue activa; historial intacto', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const chunk = teamsHtml.split('<article').find((x) => x.includes('Deportivo E2E')) ?? '';
+    const teamA = /href="\/admin\/equipos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '';
+    expect(teamA).toBeTruthy();
+
+    // 1) Suspension por DÍAS con fecha de fin claramente vencida: la próxima
+    //    consulta del panel debe cerrarla sola (hoy de la liga > fin).
+    const altaDias = await admin.post('/admin/sanciones', {
+      t: 'copa-e2e',
+      scope: 'team',
+      team_id: teamA,
+      measure: 'suspension_dias',
+      until_date: '2026-09-01',
+      incident_date: '2026-08-15',
+      category: 'Incumplimiento reglamentario',
+      description: 'Sanción ya vencida al crearla',
+    });
+    expect(altaDias.status).toBe(302);
+
+    // 2) Advertencia: NO expira, tiene que seguir activa.
+    const altaAdv = await admin.post('/admin/sanciones', {
+      t: 'copa-e2e',
+      scope: 'team',
+      team_id: teamA,
+      measure: 'advertencia',
+      incident_date: '2026-09-20',
+      category: 'Conducta antideportiva',
+      description: 'Aviso formal del tribunal',
+    });
+    expect(altaAdv.status).toBe(302);
+
+    // La consulta del panel dispara el cierre automático (Fase 8).
+    const page = await (await admin.get('/admin/suspensiones?t=copa-e2e')).text();
+
+    // La de días vencida ya NO figura como activa (pasó a cumplida/historial).
+    const filaDias = page.split('<tr>').find((f) => f.includes('Suspensión por días') && f.includes('Deportivo E2E')) ?? '';
+    expect(filaDias).toBeTruthy();
+    expect(filaDias).toContain('Cumplida');
+    expect(filaDias).not.toContain('>Activa<');
+
+    // La advertencia SIGUE activa (no expira).
+    const filaAdv = page.split('<tr>').find((f) => f.includes('Advertencia') && f.includes('Deportivo E2E')) ?? '';
+    expect(filaAdv).toBeTruthy();
+    expect(filaAdv).toContain('>Activa<');
+
+    // Idempotencia: re-consultar no cambia nada ni duplica historial.
+    const page2 = await (await admin.get('/admin/suspensiones?t=copa-e2e')).text();
+    expect(page2.split('<tr>').filter((f) => f.includes('Suspensión por días')).length).toBe(
+      page.split('<tr>').filter((f) => f.includes('Suspensión por días')).length
+    );
+
+    // El historial conserva el registro cerrado (nunca se borra): la fila
+    // de la sanción de días sigue presente, ahora con estado Cumplida.
+    const filaDias2 = page2.split('<tr>').find((f) => f.includes('Suspensión por días') && f.includes('Deportivo E2E')) ?? '';
+    expect(filaDias2).toBeTruthy();
+    expect(filaDias2).toContain('Cumplida');
+
+    // La elegibilidad no cambia: la sanción de equipo vencida ya no genera
+    // aviso de disciplina en la planilla (solo quedan la advertencia, que
+    // no se consulta por equipo aquí, y nada activo que bloquee).
+    const sheet = await (await admin.get(`/admin/planilla/${matchId}`)).text();
+    expect(sheet).not.toContain('Incumplimiento reglamentario');
   });
 });

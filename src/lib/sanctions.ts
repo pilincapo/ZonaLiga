@@ -320,6 +320,83 @@ export function effectiveStatus(
   return 'activa';
 }
 
+/* ---------- Cierre automático de sanciones cumplidas (Fase 8) ---------- */
+
+/**
+ * ¿Esta sanción ACTIVA ya terminó y puede marcarse cumplida? Puro.
+ * Reglas:
+ *   - suspension_dias: cumplida cuando hoy > fecha de finalización. El día
+ *     del límite sigue activo (misma semántica inclusive que coversDate).
+ *   - suspension_fechas: cumplida cuando todas las fechas del rango cubierto
+ *     ya se jugaron. Requiere incidentRound; sin él no se puede saber y NO
+ *     se cierra (no se inventa).
+ *   - advertencia, perdida_puntos y expulsión: sin cierre automático (no
+ *     expiran); la expulsión solo se levanta anulando.
+ *   - Anuladas y cumplidas: ya resueltas, siempre false.
+ */
+export function isFulfilledSanction(
+  s: Pick<Sanction, 'status' | 'duration_kind' | 'measure' | 'amount' | 'until_date' | 'incident_date'>,
+  incidentRound: number | null,
+  playedRounds: readonly number[],
+  today: string
+): boolean {
+  if (s.status !== 'activa') return false;
+  if (s.duration_kind === 'hasta_fecha') {
+    // suspension_dias (y manuales 'hasta_fecha' pre-7B): calendario.
+    const end = s.until_date;
+    return end != null && today > end;
+  }
+  if (s.duration_kind === 'fechas') {
+    // suspension_fechas (y 'fechas' de jugador): jornadas cubiertas jugadas.
+    const amount = s.amount ?? 0;
+    if (amount <= 0 || incidentRound == null) return false;
+    const played = new Set(playedRounds);
+    for (let r = incidentRound; r < incidentRound + amount; r++) {
+      if (!played.has(r)) return false;
+    }
+    return true;
+  }
+  // duration_kind 'dias' (pre-7B, jugadores): días corridos desde incidente.
+  if (s.duration_kind === 'dias') {
+    const end = sanctionEndDate(s);
+    return end != null && today > end;
+  }
+  return false;
+}
+
+/**
+ * Cierra como cumplidas las sanciones ACTIVAS del torneo que ya terminaron.
+ * Idempotente: revisa solo las activas, actualiza en un batch las que
+ * correspondan y no toca anuladas ni ya cumplidas. Devuelve cuántas cerró.
+ * El llamador decide dónde invocarla (puntos de consulta de sanciones);
+ * usa la misma resolución de incidentRound que la capa de elegibilidad.
+ */
+export async function closeFulfilledSanctions(
+  db: D1Database,
+  tournamentId: number,
+  opts: {
+    /** Rounds del torneo con partidos jugados/walkover. */
+    playedRounds: readonly number[];
+    /** Fecha de hoy de la liga (leagueNow().date). */
+    today: string;
+    /** Round del incidente por sanción (solo si el llamador puede saberlo). */
+    incidentRoundOf: (s: SanctionRow) => number | null;
+  }
+): Promise<number> {
+  const all = await sanctionsForTournament(db, tournamentId);
+  const toClose = all.filter((s) =>
+    isFulfilledSanction(s, opts.incidentRoundOf(s), opts.playedRounds, opts.today)
+  );
+  if (toClose.length === 0) return 0;
+  const stmts = toClose.map((s) =>
+    db
+      .prepare("UPDATE sanctions SET status = 'cumplida', updated_at = datetime('now') WHERE id = ?1 AND status = 'activa'")
+      .bind(s.id)
+  );
+  await db.batch(stmts);
+  return toClose.length;
+}
+
 /* ---------- Acceso a datos (D1) ---------- */
 
 export async function insertSanction(db: D1Database, v: SanctionValue): Promise<number> {

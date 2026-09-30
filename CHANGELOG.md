@@ -13,6 +13,20 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.2.80] — 2026-09-30 — Cierre automático de sanciones cumplidas (Fase 8)
+
+### Nuevo
+
+- Las sanciones con suspension por días pasan solas a "Cumplida" cuando la fecha actual supera la fecha de finalización.
+- Las sanciones con suspension por fechas pasan solas a "Cumplida" cuando ya se jugaron todas las fechas que cubrían (requiere poder ubicar la jornada del incidente; sin ese dato no se cierra, no se inventa).
+- El cierre corre al consultar Suspensiones y al evaluar elegibilidad en la planilla: idempotente, sin procesos extra, y el historial conserva todo.
+
+### Importante
+
+- Advertencias, pérdidas de puntos y expulsiones no se cierran solas (no expiran): la expulsión solo se levanta anulando. Anuladas e historial intactos.
+
+---
+
 ## [0.2.79] — 2026-09-30 — Sanciones disciplinarias a equipos (Fase 7B)
 
 ### Nuevo

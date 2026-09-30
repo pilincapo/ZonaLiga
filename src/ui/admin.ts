@@ -35,7 +35,7 @@ import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
 import { teamIdsOfTournament, participantsOrAllTeams, participantsWithoutZone } from '../lib/participation.ts';
-import { sanctionsForTournament, SANCTION_MEASURES, SANCTION_MEASURE_LABELS } from '../lib/sanctions.ts';
+import { sanctionsForTournament, SANCTION_MEASURES, SANCTION_MEASURE_LABELS, closeFulfilledSanctions } from '../lib/sanctions.ts';
 import type { SanctionRow, SanctionStatus } from '../lib/sanctions.ts';
 import { combineDiscipline, playerEligibility, hasHardBlock, type DisciplineEntry, type PlayerEligibility } from '../lib/discipline.ts';
 import type { PlayerSuspension } from '../lib/suspensions.ts';
@@ -101,7 +101,6 @@ export async function disciplineForMatch(
   const rules = rulesOf(view.tournament);
   const maxRound = view.matches.reduce((acc, mm) => Math.max(acc, mm.round ?? 0), 0);
   const autos = computeSuspensions(view.events, view.matches, rules, maxRound);
-  const allSanctions = await sanctionsForTournament(db, view.tournament.id);
   const today = leagueNow().date;
   const playedRounds = view.matches
     .filter((mm) => mm.status === 'played' || mm.status === 'walkover')
@@ -117,6 +116,15 @@ export async function disciplineForMatch(
       .filter((r): r is number => r != null);
     return rounds.length ? Math.max(...rounds) : null;
   };
+  // Fase 8: cierre automático de sanciones cumplidas. Se ejecuta en este
+  // punto de consulta (idempotente, solo si hay algo que cerrar) para que
+  // la elegibilidad siempre lea estados reales.
+  await closeFulfilledSanctions(db, view.tournament.id, {
+    playedRounds,
+    today,
+    incidentRoundOf,
+  });
+  const allSanctions = await sanctionsForTournament(db, view.tournament.id);
   const { active } = combineDiscipline(
     autos.map((s) => ({ tournamentId: view.tournament.id, suspension: s, servedRemaining: null })),
     allSanctions.map((s) => ({ sanction: s, incidentRound: incidentRoundOf(s), playedRounds, today }))
@@ -2207,7 +2215,6 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
 
   // Disciplina unificada: automáticas + manuales (origen conservado, sin fusión).
   const today = leagueNow().date;
-  const allSanctions = await sanctionsForTournament(db, t.id);
   const playedRounds = matches
     .filter((m) => m.status === 'played' || m.status === 'walkover')
     .map((m) => m.round ?? 0)
@@ -2230,6 +2237,10 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
       .filter((r): r is number => r != null);
     return rounds.length ? Math.max(...rounds) : null;
   };
+  // Fase 8: cierre automático de sanciones cumplidas, en el punto donde el
+  // tribunal consulta el estado. Idempotente; no toca anuladas ni historial.
+  await closeFulfilledSanctions(db, t.id, { playedRounds, today, incidentRoundOf });
+  const allSanctions = await sanctionsForTournament(db, t.id);
   const { active: discipline, archive: disciplineArchive } = combineDiscipline(
     suspensions.map((s) => ({ tournamentId: t.id, suspension: s, servedRemaining: servedRemaining(s) })),
     allSanctions.map((s) => ({

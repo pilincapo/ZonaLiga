@@ -21,7 +21,7 @@ import {
 } from '../src/lib/discipline.ts';
 import { teamEffects, isTeamExpelled, teamPointsDeducted } from '../src/lib/discipline.ts';
 import { sanctionEffectsOf } from '../src/lib/sanctionEffects.ts';
-import { SANCTION_MEASURE_LABELS } from '../src/lib/sanctions.ts';
+import { SANCTION_MEASURE_LABELS, isFulfilledSanction } from '../src/lib/sanctions.ts';
 import type { Match } from '../src/lib/types.ts';
 
 let nextId = 1;
@@ -600,5 +600,56 @@ describe('Fase 7B: teamEffects (efectos reales de medidas de equipo)', () => {
     for (const m of ['advertencia', 'perdida_puntos', 'suspension_fechas', 'suspension_dias', 'expulsion'] as const) {
       expect(typeof SANCTION_MEASURE_LABELS[m]).toBe('string');
     }
+  });
+});
+
+/* ============================== FASE 8: CIERRE AUTOMÁTICO ============================== */
+
+describe('Fase 8: isFulfilledSanction (puro, por duración y medida)', () => {
+  it('suspension_dias: se cumple el día posterior a la fecha de fin (inclusive hasta entonces)', () => {
+    const s = teamMeasure('suspension_dias', { until_date: '2026-10-15' });
+    expect(isFulfilledSanction(s, null, [], '2026-10-15')).toBe(false); // el día límite sigue activa
+    expect(isFulfilledSanction(s, null, [], '2026-10-16')).toBe(true);
+  });
+
+  it('suspension_fechas: se cumple cuando todas las fechas del rango ya se jugaron', () => {
+    // 2 fechas desde la ronda 5: cubre 5 y 6.
+    const s = teamMeasure('suspension_fechas', { amount: 2 });
+    expect(isFulfilledSanction(s, 5, [5], '2026-10-01')).toBe(false); // falta la 6
+    expect(isFulfilledSanction(s, 5, [5, 6], '2026-10-01')).toBe(true);
+    expect(isFulfilledSanction(s, 5, [5, 6, 7], '2026-10-01')).toBe(true);
+  });
+
+  it('suspension_fechas sin round de incidente: NO se cierra (no se inventa)', () => {
+    const s = teamMeasure('suspension_fechas', { amount: 2 });
+    expect(isFulfilledSanction(s, null, [5, 6, 7], '2026-10-01')).toBe(false);
+  });
+
+  it('advertencia, perdida_puntos y expulsión: nunca se cierran solas', () => {
+    expect(isFulfilledSanction(teamMeasure('advertencia'), null, [], '2027-12-31')).toBe(false);
+    expect(isFulfilledSanction(teamMeasure('perdida_puntos', { amount: 3 }), null, [], '2027-12-31')).toBe(false);
+    expect(isFulfilledSanction(teamMeasure('expulsion'), null, [], '2027-12-31')).toBe(false);
+  });
+
+  it('anulada y cumplida: ya resueltas, siempre false', () => {
+    const anulada = teamMeasure('suspension_dias', { until_date: '2026-09-01' });
+    anulada.status = 'anulada';
+    expect(isFulfilledSanction(anulada, null, [], '2026-12-01')).toBe(false);
+
+    const cumplida = teamMeasure('suspension_dias', { until_date: '2026-09-01' });
+    cumplida.status = 'cumplida';
+    expect(isFulfilledSanction(cumplida, null, [], '2026-12-01')).toBe(false);
+  });
+
+  it('fechas de JUGADOR: mismo criterio (amount cubierto por rounds jugados)', () => {
+    const s = manual({ duration_kind: 'fechas', amount: 2 }); // incidente ronda 5
+    expect(isFulfilledSanction(s, 5, [5], '2026-10-01')).toBe(false);
+    expect(isFulfilledSanction(s, 5, [5, 6], '2026-10-01')).toBe(true);
+  });
+
+  it('dias de JUGADOR (pre-7B): calendario desde el incidente', () => {
+    const s = manual({ duration_kind: 'dias', amount: 10 }); // fin 2026-09-30
+    expect(isFulfilledSanction(s, null, [], '2026-09-30')).toBe(false);
+    expect(isFulfilledSanction(s, null, [], '2026-10-01')).toBe(true);
   });
 });
