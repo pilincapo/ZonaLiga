@@ -13,6 +13,23 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.3] — 2026-10-01 — Llaves de playoffs (Fase 11C)
+
+### Nuevo
+
+- Playoffs para los formatos Eliminación directa, Grupos + Playoffs, Liga + Fase final y Fase regular + Playoffs: se generan las llaves completas (octavos, cuartos, semifinales y final según la instancia inicial configurada) con sus partidos en el fixture.
+- En Grupos + Playoffs, la llave arma los cruces clásicos entre clasificados: 1.ºA vs 2.ºB y 1.ºB vs 2.ºA (con más clasificados por grupo, se agregan los pares siguientes).
+- Cada llave puede ser a partido único o de ida y vuelta, con la localía invertida en la revancha; el partido por el tercer puesto se genera si está configurado.
+- Los equipos "Por definir" de las rondas siguientes se completan solos cuando se cargan los resultados de la ronda anterior (ganadores avanzan; en semis, los perdedores van al tercer puesto).
+- La llave se muestra en el panel de fixture (sección Llaves / Playoffs, mismas columnas que el sitio público) y sus partidos no cuentan para la tabla de posiciones.
+
+### Importante
+
+- Validación estricta de la instancia inicial: Octavos necesita 16 equipos, Cuartos 8, Semifinales 4 y la Final 2. Si no alcanzan, la generación se rechaza explicando cuántos faltan.
+- Protecciones: no se puede generar dos veces sin confirmar la regeneración; si la llave ya tiene algún partido con resultado, la regeneración queda prohibida en el servidor (los datos históricos no se borran); los torneos finalizados o archivados no generan llaves.
+
+---
+
 ## [0.3.2] — 2026-09-30 — Fixture por grupos (Fase 11B)
 
 ### Nuevo

@@ -44,6 +44,8 @@ import {
   isLegacyFormat,
   legacyToCompetitionFormat,
   parseCompetitionConfig,
+  PLAYOFF_START_LABELS,
+  PLAYOFF_START_SIZE,
 } from '../lib/competition.ts';
 import { validateCompetitionConfig } from '../lib/competitionRules.ts';
 import { buildZonedFixture, interleaveSlots, shuffled } from '../lib/fixture.ts';
@@ -66,6 +68,15 @@ import {
   resolveAdvancements,
 } from '../lib/playoff.ts';
 import { buildMakeUpPlan, postponedMatches, overflowOfRound, pickDeferred, splitOverflowByZone } from '../lib/oversub.ts';
+import {
+  buildBracketPlan,
+  bracketConfigJson,
+  bracketHasPlayed,
+  entrantsFromGroupTables,
+  entrantsFromTable,
+  parseBracketConfig,
+  type GroupTable,
+} from '../lib/playoffsBracket.ts';
 import { planFixture, planSummary } from '../lib/planifier.ts';
 import { CROSSOVER_NOTE, CROSSOVER_NOTE_COUNTS } from '../lib/crossover.ts';
 import { computeStandings } from '../lib/standings.ts';
@@ -1096,6 +1107,183 @@ adminRoutes.post('/fixture/playoff', async (c) => {
     `${dest}&msg=` +
       encodeURIComponent(
         `Playoff generado en la fecha ${round} (${playoffFormatLabel(format)}). Se ve en Llaves / Playoffs del fixture.`
+      )
+  );
+});
+
+/**
+ * Fase 11C: genera las llaves de playoffs para los formatos de la Fase 10
+ * (ELIMINACION_DIRECTA, GRUPOS_PLAYOFFS, LIGA_FASE_FINAL y
+ * FASE_REGULAR_PLAYOFFS). Valida la instancia inicial contra los clasificados
+ * disponibles y registra la llave en la config del torneo.
+ */
+adminRoutes.post('/fixture/llaves', async (c) => {
+  const f = await c.req.parseBody();
+  const tournamentId = Number(f['tournament_id']);
+  if (!Number.isFinite(tournamentId)) {
+    return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  }
+  const t = await resolveTournament(c.env.DB, undefined, tournamentId);
+  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(t.slug)}`;
+  const fail = (msg: string) => c.redirect(`${dest}&err=` + encodeURIComponent(msg));
+
+  // Estados finales: solo lectura.
+  if (t.status === 'finished' || t.status === 'archived') {
+    return fail('El torneo está finalizado o archivado: no se pueden generar llaves');
+  }
+  const comp = parseCompetitionConfig(t.config, t.format);
+  if (!formatHasPlayoffs(comp.format)) {
+    return fail('El formato del torneo no tiene playoffs');
+  }
+  // Una sola llave por torneo: no se pisa silenciosamente. La regeneración
+  // es una acción explícita (checkbox del form) y solo si no hay resultados.
+  const prevBracket = parseBracketConfig(t.config);
+
+  const [teamRows, matchRows] = await Promise.all([
+    c.env.DB.prepare('SELECT id, name, active FROM teams ORDER BY id').all<{ id: number; name: string; active: number }>(),
+    c.env.DB.prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY id').bind(tournamentId).all<Match>(),
+  ]);
+  const matches = matchRows.results ?? [];
+
+  // Regeneración con resultados: prohibida SIEMPRE, incluso con la acción
+  // explícita de regeneración (no se borran datos históricos jamás).
+  if (bracketHasPlayed(matches)) {
+    return fail('La llave ya tiene partidos con resultado: no se puede regenerar sin borrar datos históricos');
+  }
+  if (prevBracket) {
+    if (f['regenerar'] !== '1') {
+      return fail('Las llaves ya fueron generadas. Para reemplazarlas, marcá “Regenerar llaves” y confirmá.');
+    }
+    // Regeneración explícita (solo llaves sin resultado: la guardia de arriba
+    // lo garantiza): borra SOLO los partidos de llave pendientes (su events
+    // y entregas cascan por cascade) y rearma desde cero.
+    const bracketIds = matches.filter((m) => m.bracket_round !== '').map((m) => m.id);
+    if (bracketIds.length > 0) {
+      await c.env.DB.prepare(`DELETE FROM matches WHERE id IN (${bracketIds.map((_, i) => `?${i + 1}`).join(',')})`)
+        .bind(...bracketIds)
+        .run();
+    }
+  }
+
+  const pool = await fixturePoolOfTournament(c.env.DB, tournamentId);
+  const activeIds = new Set(pool ? pool.ids : []);
+  if (matches.length === 0 && comp.format !== 'ELIMINACION_DIRECTA') {
+    return fail('Primero generá el fixture');
+  }
+
+  // Fase previa completa: la llave necesita saber quiénes clasifican.
+  const pending = pendingLeagueCount(matches);
+  if (matches.length > 0 && pending > 0) {
+    return fail(`Faltan ${pending} partido(s) por jugar para armar las llaves`);
+  }
+
+  const teamNamesRows = (teamRows.results ?? []).filter((r) => activeIds.has(r.id));
+  const standings = computeStandings(
+    matchesForStandings(matches, t.config),
+    teamNamesRows.map((r) => ({ id: r.id, name: r.name })),
+    rulesOf(t)
+  );
+
+  // Entrantes según el formato:
+  // - GRUPOS_PLAYOFFS: los primeros N de cada grupo con cruce cruzado
+  //   (1.ºA vs 2.ºB, 1.ºB vs 2.ºA).
+  // - LIGA_FASE_FINAL / FASE_REGULAR_PLAYOFFS: los primeros de la tabla.
+  // - ELIMINACION_DIRECTA: todos los participantes, ordenados por nombre
+  //   (el emparejamiento espejo queda determinista; sin tabla previa es la
+  //   convención más clara).
+  const need = PLAYOFF_START_SIZE[comp.playoffs.start];
+  let entrants: number[];
+  if (comp.format === 'GRUPOS_PLAYOFFS') {
+    const zonesCfg = zonesOf(t.config);
+    if (!zonesCfg.enabled || zonesCfg.zones.length < 2) {
+      return fail('Este torneo no tiene grupos: generá primero el fixture de grupos');
+    }
+    const tables: GroupTable[] = zonesCfg.zones.map((z) => ({
+      name: z.name,
+      rows: standings.filter((r) => z.teamIds.includes(r.teamId) && activeIds.has(r.teamId)),
+    }));
+    try {
+      entrants = entrantsFromGroupTables(tables, comp.groupStage.qualifiersPerGroup);
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : 'No se pudieron determinar los clasificados');
+    }
+  } else if (comp.format === 'ELIMINACION_DIRECTA') {
+    entrants = teamNamesRows.map((r) => r.id).sort((a, b) => a - b);
+  } else {
+    entrants = entrantsFromTable(standings, need);
+  }
+
+  if (entrants.length < need) {
+    return fail(`La instancia inicial (${PLAYOFF_START_LABELS[comp.playoffs.start]}) necesita ${need} equipo(s) y hay ${entrants.length}`);
+  }
+  entrants = entrants.slice(0, need);
+
+  // La llave empieza en la fecha siguiente a la última del fixture.
+  const maxRound = matches.reduce((mx, m) => Math.max(mx, m.round ?? 0), 0);
+  const startRound = maxRound + 1;
+  const schedule = scheduleOf(t.config);
+
+  let slots;
+  try {
+    slots = buildBracketPlan({
+      start: comp.playoffs.start,
+      entrants,
+      startRound,
+      singleMatch: comp.playoffs.singleMatch,
+      thirdPlace: comp.playoffs.thirdPlace,
+    });
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : 'No se pudo armar la llave');
+  }
+
+  // Slots (cancha × hora) del torneo, por fecha de la llave.
+  const roundsOfLlave = [...new Set(slots.map((s) => s.round))].sort((a, b) => a - b);
+  const stmts: D1PreparedStatement[] = [];
+  for (const r of roundsOfLlave) {
+    const day = plannedRoundDate(schedule, r);
+    const rs = roundSlots(slots.filter((s) => s.round === r).length, schedule);
+    const ofRound = slots.filter((s) => s.round === r);
+    for (const [i, s] of ofRound.entries()) {
+      stmts.push(
+        c.env.DB.prepare(
+          'INSERT INTO matches (tournament_id, round, bracket_round, home_team_id, away_team_id, home_source, away_source, status, played_on, kickoff_time, venue) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)'
+        ).bind(
+          tournamentId,
+          s.round,
+          s.bracket_round,
+          s.home,
+          s.away,
+          s.home_source,
+          s.away_source,
+          'scheduled',
+          day,
+          rs[i]?.kickoff ?? '',
+          rs[i]?.venue ?? ''
+        )
+      );
+    }
+  }
+  await c.env.DB.batch(stmts);
+
+  // Registrar la llave en la config: así no se puede generar dos veces y
+  // "Regenerar cruce" no la toca.
+  await c.env.DB
+    .prepare('UPDATE tournaments SET config = ?1 WHERE id = ?2')
+    .bind(
+      JSON.stringify({
+        ...JSON.parse(t.config || '{}'),
+        ...bracketConfigJson({ format: comp.format, startRound, singleMatch: comp.playoffs.singleMatch, thirdPlace: comp.playoffs.thirdPlace }),
+      }),
+      tournamentId
+    )
+    .run();
+
+  const total = slots.length;
+  return c.redirect(
+    `${dest}&msg=` +
+      encodeURIComponent(
+        `Llaves generadas: ${total} partido(s) desde la fecha ${startRound} (${PLAYOFF_START_LABELS[comp.playoffs.start]}). Se ven en Llaves / Playoffs del fixture.`
       )
   );
 });

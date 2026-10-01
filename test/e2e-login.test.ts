@@ -1984,3 +1984,194 @@ describe.skipIf(!has)('e2e: generador de fixture por grupos (Fase 11B)', () => {
     expect(del.status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: llaves de playoffs (Fase 11C)', () => {
+  it('GRUPOS_PLAYOFFS: juega la fase de grupos, genera llaves SF y protege resultados', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Torneo Grupos + Playoffs: 4 equipos, 2 grupos × 2 clasificados, semis.
+    const alta = await admin.post('/admin/torneos', {
+      name: 'Llaves E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('Llaves E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    // 4 participantes (los primeros 4 equipos globales).
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+    expect(teamIds.length).toBe(4);
+    const partBody: Record<string, string> = {
+      name: 'Llaves E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    const part = await admin.post(`/admin/torneos/${tid}`, partBody);
+    expect(part.status).toBe(302);
+
+    // Fixture de grupos (1 rueda: 2 partidos, 1 por grupo).
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: 'llaves-e2e' });
+    expect(conf.status).toBe(302);
+
+    // Sin jugar la fase de grupos, las llaves están bloqueadas.
+    const bloqueado = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(bloqueado.status).toBe(302);
+    expect(decodeURIComponent(bloqueado.headers.get('location') ?? '')).toContain('Faltan');
+
+    // Juega los 2 partidos de grupos: el local siempre gana (posiciones claras).
+    const fx = await (await admin.get('/admin/fixture?t=llaves-e2e')).text();
+    const mids = [...new Set([...fx.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!))];
+    expect(mids.length).toBe(2);
+    for (const mid of mids) {
+      const guardar = await admin.post(`/admin/planilla/${mid}`, {
+        status: 'played',
+        played_on: '2026-10-05',
+        kickoff_time: '10:00',
+        venue: 'Cancha Norte',
+        home_goals: '2',
+        away_goals: '0',
+        hg1: 'none',
+        hg2: 'none',
+        ag1: 'none',
+        notes: '',
+      });
+      expect(guardar.status).toBe(302);
+    }
+
+    // Genera las llaves: 2 semis (con los 4 clasificados) + final "Por definir".
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(llaves.status).toBe(302);
+    const llavesLoc = decodeURIComponent(llaves.headers.get('location') ?? '');
+    expect(llavesLoc).toContain('Llaves generadas');
+
+    const fx2 = await (await admin.get('/admin/fixture?t=llaves-e2e')).text();
+    const bracketIds = [
+      ...new Set([...fx2.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!)),
+    ].filter((id) => !mids.includes(id));
+    expect(bracketIds.length).toBe(3); // 2 SF + 1 F
+    expect(fx2).toContain('Llaves / Playoffs');
+    expect(fx2).toContain('Semifinales');
+    expect(fx2).toContain('Ganador SF');
+
+    // No se puede generar de nuevo sin la acción explícita de regeneración.
+    const duplicado = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(duplicado.status).toBe(302);
+    expect(decodeURIComponent(duplicado.headers.get('location') ?? '')).toContain('ya fueron generadas');
+
+    // Se juega una semi: con resultado en la llave, regenerar queda prohibido.
+    const sfId = bracketIds[0]!;
+    const jugada = await admin.post(`/admin/planilla/${sfId}`, {
+      status: 'played',
+      played_on: '2026-10-12',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '2',
+      away_goals: '0',
+      hg1: 'none',
+      hg2: 'none',
+      notes: '',
+    });
+    expect(jugada.status).toBe(302);
+    expect(decodeURIComponent(jugada.headers.get('location') ?? '')).toContain('Planilla guardada');
+
+    const regen = await admin.post('/admin/fixture/llaves', { tournament_id: tid, regenerar: '1' });
+    expect(regen.status).toBe(302);
+    expect(decodeURIComponent(regen.headers.get('location') ?? '')).toContain('no se puede regenerar');
+
+    // Limpieza.
+    const del = await admin.post(`/admin/torneos/${tid}/eliminar`, {});
+    expect(del.status).toBe(302);
+  });
+
+  it('ELIMINACION_DIRECTA: llave directa con 4 equipos, partido único y tercer puesto', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Copa con 4 equipos y arranque en SEMIFINALES (necesita exactamente 4).
+    const alta = await admin.post('/admin/torneos', {
+      name: 'Copa Llaves E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'ELIMINACION_DIRECTA',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+      comp_playoff_third: 'on',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('Copa Llaves E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+    expect(teamIds.length).toBe(4);
+    const partBody: Record<string, string> = {
+      name: 'Copa Llaves E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'ELIMINACION_DIRECTA',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    await admin.post(`/admin/torneos/${tid}`, partBody);
+
+    // Sin fixture previo: la copa genera las llaves directo.
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(llaves.status).toBe(302);
+    const loc = decodeURIComponent(llaves.headers.get('location') ?? '');
+    expect(loc).toContain('Llaves generadas: 4 partido(s)'); // 2 SF + final + 3er puesto
+
+    const fx = await (await admin.get('/admin/fixture?t=copa-llaves-e2e')).text();
+    expect(fx).toContain('Llaves / Playoffs');
+    expect(fx).toContain('Tercer puesto');
+    expect(fx).toContain('Ganador SF');
+
+    // Limpieza.
+    const del = await admin.post(`/admin/torneos/${tid}/eliminar`, {});
+    expect(del.status).toBe(302);
+  });
+});

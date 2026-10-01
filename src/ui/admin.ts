@@ -15,7 +15,9 @@ import {
   scheduleOf,
   type TournamentSchedule,
 } from '../lib/schedule.ts';
-import { BRACKET_LABELS } from '../lib/bracket.ts';
+import { BRACKET_LABELS, buildBracketColumns } from '../lib/bracket.ts';
+import { bracketColumn } from './match.ts';
+import { parseBracketConfig, bracketHasPlayed } from '../lib/playoffsBracket.ts';
 import {
   type CompetitionConfig,
   type CompetitionFormat,
@@ -27,6 +29,7 @@ import {
   LOCALIA_MODES,
   PLAYOFF_START_LABELS,
   PLAYOFF_START_ROUNDS,
+  PLAYOFF_START_SIZE,
   PLAYOFF_TIEBREAKS,
   TIEBREAKER_KEYS,
   TIEBREAKER_LABELS,
@@ -1369,6 +1372,9 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
     compFormat.format === 'FASE_DE_GRUPOS' ||
     compFormat.format === 'GRUPOS_PLAYOFFS';
   const compWithGroups = compFormat.format === 'FASE_DE_GRUPOS' || compFormat.format === 'GRUPOS_PLAYOFFS';
+  // Fase 11C: bloque de llaves de playoffs para los formatos con playoffs.
+  const withPlayoffs = formatHasPlayoffs(compFormat.format);
+  const bracketCfg = parseBracketConfig(t.config);
 
   const byRound = new Map<number, Match[]>();
   for (const m of matches) {
@@ -1542,6 +1548,68 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   // finalizado), "Generar" queda deshabilitado y se explica por qué.
   const jugados = playedCount(matches);
   const genBlocked = jugados > 0 || t.status === 'finished';
+
+  // Fase 11C: bloque de llaves de playoffs (formatos con playoffs de la Fase 10).
+  // Reutiliza el render de columnas de llave del sitio público. Con la llave
+  // ya generada muestra las columnas; sin ella, el botón de generar (o de
+  // regenerar, con confirmación explícita) según corresponda.
+  let bracketBlock = '';
+  if (withPlayoffs && !twoZones) {
+    const bracketMatches = matches.filter((m) => m.bracket_round !== '');
+    if (bracketCfg) {
+      const cols = buildBracketColumns(matches);
+      bracketBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <div class="dash-card-head"><h2>${icon('trophy', 16)} Llaves / Playoffs</h2></div>
+  <p class="hint">${esc(FORMAT_LABELS[compFormat.format])} · ${PLAYOFF_START_LABELS[compFormat.playoffs.start]} · ${bracketCfg.singleMatch ? 'partido único' : 'ida y vuelta'}${bracketCfg.thirdPlace ? ' · tercer puesto' : ''} · desde la fecha ${bracketCfg.startRound}.</p>
+  ${cols.length ? `<div class="bracket">${cols.map((c) => bracketColumn(c, teamMap)).join('')}</div>` : '<div class="warning-box">La llave está registrada pero no tiene partidos: revisá el fixture.</div>'}
+  <p class="hint">Los equipos “Por definir” se completan solos cuando se cargan los resultados de la ronda anterior. Para rearmar la fase regular usá “Regenerar cruce”: la llave no se toca.</p>
+  ${
+    bracketHasPlayed(matches)
+      ? ''
+      : `<form method="post" action="/admin/fixture/llaves" class="form-row" style="margin-top:10px">
+          <input type="hidden" name="tournament_id" value="${t.id}">
+          <input type="hidden" name="regenerar" value="1">
+          <div class="field" style="align-self:flex-end">
+            <button class="btn btn-ghost" type="submit" ${t.status === 'finished' || t.status === 'archived' ? 'disabled' : ''} onclick="return confirm('Se reemplazan TODAS las llaves pendientes (no hay resultados cargados, así que no se pierde nada). ¿Continuar?')">↻ Regenerar llaves</button>
+          </div>
+        </form>`
+  }
+</div></div></section>`;
+    } else {
+      const pending = pendingLeagueCount(matches);
+      const noFixture = matches.length === 0 && compFormat.format !== 'ELIMINACION_DIRECTA';
+      const llavesBlocked = jugados > 0 || t.status === 'finished' || t.status === 'archived';
+      const statusNote = noFixture
+        ? '<div class="warning-box">Primero generá el fixture.</div>'
+        : pending > 0
+          ? `<div class="warning-box">Faltan ${pending} partido(s) por jugar para armar las llaves.</div>`
+          : `<p class="hint">✓ Listo para generar: ${PLAYOFF_START_SIZE[compFormat.playoffs.start]} equipo(s) (${PLAYOFF_START_LABELS[compFormat.playoffs.start]}), ${compFormat.playoffs.singleMatch ? 'partido único' : 'ida y vuelta'}${compFormat.playoffs.thirdPlace ? ', con tercer puesto' : ''}.</p>`;
+      bracketBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <div class="dash-card-head"><h2>${icon('trophy', 16)} Llaves / Playoffs</h2></div>
+  <p class="hint">${esc(FORMAT_LABELS[compFormat.format])}: la llave arranca cuando termina la fase previa y el campeón sale de la final. Los partidos de llave no cuentan para la tabla.</p>
+  ${statusNote}
+  <form method="post" action="/admin/fixture/llaves" class="form-row">
+    <input type="hidden" name="tournament_id" value="${t.id}">
+    <div class="field" style="align-self:flex-end">
+      <button class="btn btn-primary" type="submit" ${llavesBlocked || noFixture || pending > 0 ? 'disabled' : ''} onclick="return confirm('Se generan las llaves según la fase regular terminada. ¿Continuar?')">Generar llaves</button>
+    </div>
+  </form>
+</div></div></section>`;
+    }
+  } else if (withPlayoffs && bracketCfg) {
+    // Formato con playoffs Y playoff viejo de 2 zonas: mismo render de columnas.
+    const cols = buildBracketColumns(matches);
+    if (cols.length) {
+      bracketBlock = `
+<section class="block"><div class="card"><div class="card-body">
+  <div class="dash-card-head"><h2>${icon('trophy', 16)} Llaves / Playoffs</h2></div>
+  <div class="bracket">${cols.map((c) => bracketColumn(c, teamMap)).join('')}</div>
+</div></div></section>`;
+    }
+  }
+
   const blockNote =
     jugados > 0
       ? `<div class="warning-box">Hay ${jugados} partido(s) con resultado cargado: “Generar” está deshabilitado para no pisarlos. Usá “Regenerar cruce” para rearmar solo los pendientes.</div>`
@@ -1666,6 +1734,7 @@ ${
       : ''
   }
 </div></section>
+${bracketBlock}
 ${playoffBlock}
 ${freeDatesBlock}
 ${roundSections || '<section class="block"><div class="card"><div class="card-body">Fixture vacío. Generá uno automático o agregá partidos.</div></div></section>'}`;
