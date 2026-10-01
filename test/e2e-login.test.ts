@@ -2496,3 +2496,286 @@ describe.skipIf(!has)('e2e: flujo completo de competencia (Fase 12A)', () => {
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: cierre del motor de playoffs (Fase 12B)', () => {
+  /** Guarda un resultado jugado (goles "sin autor" y penales opcionales como puntos manuales). */
+  async function jugar(admin: ReturnType<typeof client>, mid: string, homeGoals: string, awayGoals: string, day: string, homePen = '', awayPen = ''): Promise<void> {
+    const raws: Record<string, string> = {
+      status: 'played',
+      played_on: day,
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: homeGoals,
+      away_goals: awayGoals,
+      notes: '',
+    };
+    if (homePen) raws['home_points'] = homePen;
+    if (awayPen) raws['away_points'] = awayPen;
+    for (let i = 1; i <= Number(homeGoals); i++) raws[`hg${i}`] = 'none';
+    for (let i = 1; i <= Number(awayGoals); i++) raws[`ag${i}`] = 'none';
+    const res = await admin.post(`/admin/planilla/${mid}`, raws);
+    expect(res.status).toBe(302);
+    const loc = decodeURIComponent(res.headers.get('location') ?? '');
+    expect(loc, `planilla ${mid}: ${loc}`).toContain('Planilla guardada');
+  }
+
+  /** IDs únicos de partidos en el HTML del fixture. */
+  function matchIds(html: string): string[] {
+    return [...new Set([...html.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!))];
+  }
+
+  /** Fila HTML de un partido del fixture (o ''). */
+  function filaDe(html: string, id: string): string {
+    return html.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '';
+  }
+
+  /** Nombres (texto) de los dos equipos de una fila de fixture. */
+  function equiposDe(fila: string): string[] {
+    const m = /<td>([^<]+) <span class="faint">vs<\/span> ([^<]+)</.exec(fila);
+    return m ? [m[1]!.trim(), m[2]!.trim()] : [];
+  }
+
+  /** Alta de torneo + participantes. Devuelve el id del torneo. */
+  async function crearTorneo(
+    admin: ReturnType<typeof client>,
+    nombre: string,
+    extra: Record<string, string>,
+    teamIds: string[]
+  ): Promise<string> {
+    const alta = await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      ...extra,
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes(nombre))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      ...extra,
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    const part = await admin.post(`/admin/torneos/${tid}`, partBody);
+    expect(part.status).toBe(302);
+    return tid;
+  }
+
+  it('varias rondas: QF → SF → F con propagación de ganadores verificada por nombre', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml0 = await (await admin.get('/admin/equipos')).text();
+    let teamIds = [...teamsHtml0.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!);
+    // Cuartos necesita 8 equipos: crea los que falten (el entorno base tiene 4
+    // y otros tests agregan algunos; este test garantiza los suyos).
+    for (const nombreExtra of ['Zonda 12B', 'Yerbal 12B']) {
+      if (teamIds.length < 8) {
+        await admin.post('/admin/equipos', { name: nombreExtra, short_name: nombreExtra.slice(0, 3).toUpperCase(), color: '#8b5cf6', active: 'on' });
+        const html = await (await admin.get('/admin/equipos')).text();
+        teamIds = [...html.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!);
+      }
+    }
+    expect(teamIds.length).toBeGreaterThanOrEqual(8);
+    const ocho = teamIds.slice(0, 8);
+
+    const tid = await crearTorneo(admin, '12B Cuartos E2E', {
+      comp_format: 'ELIMINACION_DIRECTA',
+      comp_playoff_start: 'QF',
+      comp_playoff_single: 'on',
+      comp_playoff_tiebreak: 'PENALES',
+    }, ocho);
+
+    // La copa genera llaves directo: 4 QF + 2 SF + 1 F = 7 partidos.
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(decodeURIComponent(llaves.headers.get('location') ?? '')).toContain('Llaves generadas');
+
+    const fx = await (await admin.get('/admin/fixture?t=12b-cuartos-e2e')).text();
+    const qf = matchIds(fx).filter((id) => filaDe(fx, id).includes('Cuartos'));
+    const sf = matchIds(fx).filter((id) => filaDe(fx, id).includes('Semifinales'));
+    const fin = matchIds(fx).filter((id) => filaDe(fx, id).includes('Final') && !filaDe(fx, id).includes('Tercer'));
+    expect(qf.length).toBe(4);
+    expect(sf.length).toBe(2);
+    expect(fin.length).toBe(1);
+
+    // Antes de jugar, las rondas siguientes esperan sus ganadores (→ WQF1…).
+    for (const id of [...sf, ...fin]) expect(filaDe(fx, id)).toContain('→ W');
+
+    // QF1 y QF2: gana el local. QF3 y QF4: gana el visitante.
+    await jugar(admin, qf[0]!, '2', '0', '2026-10-05');
+    await jugar(admin, qf[1]!, '2', '0', '2026-10-05');
+    await jugar(admin, qf[2]!, '0', '1', '2026-10-05');
+    await jugar(admin, qf[3]!, '0', '2', '2026-10-05');
+
+    // La semifinal 1 (alimentada por QF1/QF2) ya tiene equipos; la 2 también.
+    const fx2 = await (await admin.get('/admin/fixture?t=12b-cuartos-e2e')).text();
+    for (const id of sf) expect(filaDe(fx2, id)).not.toContain('→ W');
+    expect(filaDe(fx2, fin[0]!)).toContain('→ W'); // la final espera
+
+    // La final recibe exactamente a los ganadores: SF1 = ganador QF1 vs ganador QF2.
+    const ganadorQf1 = equiposDe(filaDe(fx, qf[0]!))[Number('0') === 0 ? 0 : 0]; // local de QF1
+    const ganadorQf2 = equiposDe(filaDe(fx, qf[1]!))[0]; // local de QF2
+    const ganadorQf3 = equiposDe(filaDe(fx, qf[2]!))[1]; // visitante de QF3
+    const ganadorQf4 = equiposDe(filaDe(fx, qf[3]!))[1]; // visitante de QF4
+    const [sf1Eq, sf2Eq] = sf.map((id) => equiposDe(filaDe(fx2, id)));
+    expect(sf1Eq).toEqual(expect.arrayContaining([ganadorQf1]));
+    expect(sf1Eq).toEqual(expect.arrayContaining([ganadorQf2]));
+    expect(sf2Eq).toEqual(expect.arrayContaining([ganadorQf3]));
+    expect(sf2Eq).toEqual(expect.arrayContaining([ganadorQf4]));
+
+    // Juega las semis: gana el local de cada una → la final queda completa.
+    await jugar(admin, sf[0]!, '3', '1', '2026-10-12');
+    await jugar(admin, sf[1]!, '1', '0', '2026-10-12');
+    const fx3 = await (await admin.get('/admin/fixture?t=12b-cuartos-e2e')).text();
+    expect(filaDe(fx3, fin[0]!)).not.toContain('→ W');
+    const finalEq = equiposDe(filaDe(fx3, fin[0]!));
+    expect(finalEq).toEqual(expect.arrayContaining([equiposDe(filaDe(fx3, sf[0]!))[0]])); // ganador SF1 (local)
+    expect(finalEq).toEqual(expect.arrayContaining([equiposDe(filaDe(fx3, sf[1]!))[0]])); // ganador SF2 (local)
+
+    // Identidades reales: los dos lados de la final son equipos existentes.
+    for (const n of finalEq) expect(n).toBeTruthy();
+
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('ida/vuelta con empate global: la revancha con penales decide el avance', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const tid = await crearTorneo(admin, '12B Penales E2E', {
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    }, teamIds);
+
+    // Grupos jugados + llaves ida/vuelta (2 SF × 2 + final × 2 = 6 partidos).
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12b-penales-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    for (const mid of matchIds(await (await admin.get('/admin/fixture?t=12b-penales-e2e')).text())) {
+      await jugar(admin, mid, '1', '0', '2026-10-05');
+    }
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(decodeURIComponent(llaves.headers.get('location') ?? '')).toContain('Llaves generadas');
+
+    const fx = await (await admin.get('/admin/fixture?t=12b-penales-e2e')).text();
+    const sfLegs = matchIds(fx).filter((id) => filaDe(fx, id).includes('Semifinales'));
+    expect(sfLegs.length).toBe(4);
+
+    // Cruz A (SF1): ida 1-1, vuelta 1-1 → global 2-2. La vuelta con penales
+    // 5-4 para el visitante de la vuelta → avanza el visitante de la vuelta.
+    // Cruz B (SF2): ida 2-0 local, vuelta 0-1 → global 2-1, avanza el local ida.
+    const [idaA, idaB] = sfLegs.slice(0, 2);
+    const [vueltaA, vueltaB] = sfLegs.slice(2);
+    await jugar(admin, idaA!, '1', '1', '2026-10-12');
+    await jugar(admin, vueltaA!, '1', '1', '2026-10-19', '4', '5'); // penales: visitante
+    await jugar(admin, idaB!, '2', '0', '2026-10-12');
+    await jugar(admin, vueltaB!, '0', '1', '2026-10-19');
+
+    // Ambas idas de la final quedan completadas por el avance automático.
+    const fx2 = await (await admin.get('/admin/fixture?t=12b-penales-e2e')).text();
+    const finalLegs = matchIds(fx2).filter((id) => filaDe(fx2, id).includes('Final') && !filaDe(fx2, id).includes('Tercer'));
+    expect(finalLegs.length).toBe(2);
+    for (const id of finalLegs) expect(filaDe(fx2, id)).not.toContain('Por definir');
+
+    // Identidad: el finalista A es el visitante de la vuelta del cruz A
+    // (quien ganó los penales), NO el local.
+    const finalistaA = equiposDe(filaDe(fx2, finalLegs[0]!));
+    const visitaVueltaA = equiposDe(filaDe(fx, vueltaA!))[1];
+    expect(finalistaA).toContain(visitaVueltaA);
+
+    // Juega la final ida/vuelta: la tabla de la fase regular no cambia.
+    const tablaAntes = await (await admin.get('/posiciones?t=12b-penales-e2e')).text();
+    const totalAntes = [...tablaAntes.matchAll(/<strong>(\d+)<\/strong>/g)].reduce((a, m) => a + Number(m[1]), 0);
+    await jugar(admin, finalLegs[0]!, '2', '1', '2026-10-26');
+    await jugar(admin, finalLegs[1]!, '0', '1', '2026-11-02');
+    const tablaDespues = await (await admin.get('/posiciones?t=12b-penales-e2e')).text();
+    const totalDespues = [...tablaDespues.matchAll(/<strong>(\d+)<\/strong>/g)].reduce((a, m) => a + Number(m[1]), 0);
+    expect(totalDespues).toBe(totalAntes);
+
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('tercer puesto: los perdedores reales de las semis van al 3P (identidades verificadas)', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const tid = await crearTorneo(admin, '12B Tercero E2E', {
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+      comp_playoff_third: 'on',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    }, teamIds);
+
+    // Grupos + llaves: 2 SF + 3P + F = 4 partidos de llave.
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12b-tercero-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    for (const mid of matchIds(await (await admin.get('/admin/fixture?t=12b-tercero-e2e')).text())) {
+      await jugar(admin, mid, '1', '0', '2026-10-05');
+    }
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(decodeURIComponent(llaves.headers.get('location') ?? '')).toContain('Llaves generadas');
+
+    const fx = await (await admin.get('/admin/fixture?t=12b-tercero-e2e')).text();
+    const sf = matchIds(fx).filter((id) => filaDe(fx, id).includes('Semifinales'));
+    const tercer = matchIds(fx).filter((id) => filaDe(fx, id).includes('Tercer puesto'));
+    const fin = matchIds(fx).filter((id) => filaDe(fx, id).includes('Final') && !filaDe(fx, id).includes('Tercer'));
+    expect(sf.length).toBe(2);
+    expect(tercer.length).toBe(1);
+    expect(fin.length).toBe(1);
+
+    // SF1: gana el local. SF2: gana el visitante.
+    const perdedorSf1 = equiposDe(filaDe(fx, sf[0]!))[1];
+    const ganadorSf1 = equiposDe(filaDe(fx, sf[0]!))[0];
+    const perdedorSf2 = equiposDe(filaDe(fx, sf[1]!))[0];
+    const ganadorSf2 = equiposDe(filaDe(fx, sf[1]!))[1];
+    await jugar(admin, sf[0]!, '2', '0', '2026-10-12');
+    await jugar(admin, sf[1]!, '0', '3', '2026-10-12');
+
+    // 3P = perdedor SF1 vs perdedor SF2 (identidades exactas).
+    const fx2 = await (await admin.get('/admin/fixture?t=12b-tercero-e2e')).text();
+    const tercerEq = equiposDe(filaDe(fx2, tercer[0]!));
+    expect(tercerEq).toEqual(expect.arrayContaining([perdedorSf1]));
+    expect(tercerEq).toEqual(expect.arrayContaining([perdedorSf2]));
+    expect(tercerEq).not.toContain(ganadorSf1);
+    expect(tercerEq).not.toContain(ganadorSf2);
+    // Final = ganadores.
+    const finalEq = equiposDe(filaDe(fx2, fin[0]!));
+    expect(finalEq).toEqual(expect.arrayContaining([ganadorSf1]));
+    expect(finalEq).toEqual(expect.arrayContaining([ganadorSf2]));
+
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+});

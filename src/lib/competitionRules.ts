@@ -91,13 +91,13 @@ export function validateCompetitionConfig(input: CompetitionValidationInput): st
       errors.push('La instancia inicial de playoffs no es válida.');
     } else {
       // Con grupos: grupos × clasificados. Sin grupos (eliminación directa
-      // o fase regular): la cantidad de inscriptos; si todavía no se puede
-      // saber (torneo nuevo sin participantes guardados), no se rechaza por
-      // cantidad — cuando la haya, el chequeo de inscriptos lo cubre.
+      // o fase regular): la cantidad de inscriptos; con 0 inscriptos guardados
+      // (torneo recién creado: la participación viaja en ESTE mismo guardado)
+      // no se rechaza por cantidad — igual que la regla del mínimo de 2.
       const entrants = withGroups
         ? comp.groupStage.count * comp.groupStage.qualifiersPerGroup
         : input.teamCount;
-      if (entrants != null && entrants < startSize) {
+      if (entrants != null && entrants > 0 && entrants < startSize) {
         const minFmt = withGroups
           ? `Con ${comp.groupStage.count} grupo(s) y ${comp.groupStage.qualifiersPerGroup} clasificado(s) por grupo llegan ${entrants} a la llave`
           : `Con los equipos inscriptos llegan ${entrants} a la llave`;

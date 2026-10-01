@@ -13,6 +13,24 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.5] — 2026-10-01 — Cierre del motor de playoffs (Fase 12B)
+
+### Arreglo
+
+- Un torneo recién creado (sin equipos guardados todavía) ya no queda bloqueado al elegir eliminación directa o fase regular + playoffs en el alta: la validación de playoffs ignoraba el caso de 0 inscriptos y rechazaba el guardado aunque la participación viajara en el mismo formulario.
+- El motor no resuelve un cruce si falta alguno de sus partidos en el listado (serie incompleta por definición).
+
+### Importante
+
+- Reglas de avance consolidadas (sin cambios de comportamiento salvo el arreglo de arriba): partido único por resultado y penales si empata; ida y vuelta por goles globales (sin gol de visitante) y penales si el global empata; ganadores a la siguiente ronda y, en semis, perdedores al tercer puesto; los playoffs siguen fuera de la tabla de la fase regular; no se regeneran llaves con resultados y FINALIZADO/ARCHIVADO quedan bloqueados.
+
+### Cobertura de pruebas
+
+- Unitarios nuevos: partido único empatado con y sin penales; ida/vuelta con global empatado (penales a favor, en contra y empatados); serie incompleta (revancha pendiente) y lados con origen sin resolver.
+- E2E nuevos: cuadro completo de cuartos → semis → final con propagación verificada por nombre; ida/vuelta con empate global resuelto por penales; tercer puesto con identidades exactas (perdedores al 3P, ganadores a la final).
+
+---
+
 ## [0.3.4] — 2026-10-01 — Resultado global en llaves de ida y vuelta (Fase 12A)
 
 ### Arreglo

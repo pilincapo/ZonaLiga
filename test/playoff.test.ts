@@ -285,3 +285,93 @@ describe('tabla y regeneración con llave', () => {
     expect(plan.create.every((m) => m.round !== 4)).toBe(true); // ni en el cruce ni en la llave
   });
 });
+
+describe('Fase 12B: penales y series incompletas', () => {
+  it('partido único empatado: sin penales cargados nadie avanza', () => {
+    const matches = [
+      mk({ id: 30, round: 5, bracket_round: 'SF', home_team_id: 1, away_team_id: 2, status: 'played', home_goals: 1, away_goals: 1 }),
+      mk({ id: 32, round: 6, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    expect(resolveAdvancements(matches)).toEqual([]);
+  });
+
+  it('partido único empatado + penales: avanza el de más puntos y la final se completa', () => {
+    const matches = [
+      mk({ id: 30, round: 5, bracket_round: 'SF', home_team_id: 1, away_team_id: 2, status: 'played', home_goals: 1, away_goals: 1, home_points: 5, away_points: 4 }),
+      mk({ id: 31, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 4, status: 'played', home_goals: 0, away_goals: 0, home_points: 2, away_points: 4 }),
+      mk({ id: 32, round: 6, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    // SF1: gana 1 (5-4). SF2: gana 4 (4-2, de visitante).
+    expect(resolveAdvancements(matches)).toEqual([
+      { matchId: 32, side: 'home', teamId: 1 },
+      { matchId: 32, side: 'away', teamId: 4 },
+    ]);
+  });
+
+  it('ida/vuelta con global empatado + penales: avanza el de más puntos acumulados', () => {
+    const matches = [
+      // Ida: 1-1, penales 4-3 para el local (3). Vuelta: 0-0 → global 1-1.
+      mk({ id: 40, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 1, away_goals: 1, home_points: 4, away_points: 3 }),
+      mk({ id: 41, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 0, away_goals: 0 }),
+      mk({ id: 42, round: 7, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    const tie = bracketTies(matches, 'SF')[0]!;
+    expect(tieWinnerLoser(matches, tie)).toEqual({ winner: 3, loser: 1 });
+    expect(resolveAdvancements(matches)).toEqual([{ matchId: 42, side: 'home', teamId: 3 }]);
+  });
+
+  it('ida/vuelta con global empatado y penales empatados: nadie avanza', () => {
+    const matches = [
+      // Ida: 1-1, penales 4-3 (gana 3). Vuelta: 1-1, penales 4-3 (gana 1, local).
+      // Suma de penales: +1 y -1 → empate total: nadie avanza.
+      mk({ id: 40, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 1, away_goals: 1, home_points: 4, away_points: 3 }),
+      mk({ id: 41, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 1, away_goals: 1, home_points: 4, away_points: 3 }),
+      mk({ id: 42, round: 7, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    expect(resolveAdvancements(matches)).toEqual([]);
+  });
+
+  it('ida/vuelta con global empatado: la suma de penales decide quién avanza', () => {
+    const matches = [
+      // Ida: 1-1, penales 4-3 (gana 3). Vuelta: 1-1, penales 5-4 (gana 3 de visitante).
+      // Suma para 3: +2 → avanza 3.
+      mk({ id: 40, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 1, away_goals: 1, home_points: 4, away_points: 3 }),
+      mk({ id: 41, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 1, away_goals: 1, home_points: 4, away_points: 5 }),
+      mk({ id: 42, round: 7, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    expect(resolveAdvancements(matches)).toEqual([{ matchId: 42, side: 'home', teamId: 3 }]);
+  });
+
+  it('participantes sin determinar: el lado con origen sin resolver no se completa', () => {
+    // La revancha con un equipo null no se agrupa al cruce (no se adivinan
+    // rivales); la SF1 decidida avanza su ganador, pero el lado que depende
+    // de la SF2 (inexistente/sin resolver) queda "Por definir".
+    const matches = [
+      mk({ id: 50, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 3, away_goals: 0 }),
+      mk({ id: 51, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: null, status: 'scheduled' }),
+      mk({ id: 52, round: 7, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    expect(resolveAdvancements(matches)).toEqual([{ matchId: 52, side: 'home', teamId: 3 }]);
+  });
+
+  it('cruce con un solo partido en el listado: se resuelve como partido único', () => {
+    // La ida 3-0 con la revancha ausente del listado es indistinguible de un
+    // cruce de partido único: se resuelve por ese resultado.
+    const matches = [
+      mk({ id: 50, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 3, away_goals: 0 }),
+      mk({ id: 52, round: 7, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    const tie = bracketTies(matches, 'SF')[0]!;
+    expect(tie.matchIds.length).toBe(1);
+    expect(tieWinnerLoser(matches, tie)).toEqual({ winner: 3, loser: 1 });
+  });
+
+  it('serie incompleta: con la revancha pendiente (scheduled) nadie avanza', () => {
+    const matches = [
+      mk({ id: 50, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 3, away_goals: 0 }),
+      mk({ id: 51, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'scheduled' }),
+      mk({ id: 52, round: 7, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+    ];
+    expect(resolveAdvancements(matches)).toEqual([]);
+  });
+});

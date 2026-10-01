@@ -58,6 +58,10 @@ export function tieWinnerLoser(
   const legs = tie.matchIds
     .map((id) => matches.find((m) => m.id === id))
     .filter((m): m is Match => Boolean(m));
+  // Fase 12B: si falta alguno de los partidos del cruce en el listado, la
+  // serie está incompleta por definición: no se resuelve (no se avanza con
+  // una serie a la que le falta un partido).
+  if (legs.length !== tie.matchIds.length) return null;
   if (legs.length === 0) return null;
   if (!legs.every((m) => m.status === 'played' || m.status === 'walkover')) return null;
   const [t0, t1] = tie.teams;
