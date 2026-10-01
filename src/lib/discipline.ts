@@ -311,6 +311,10 @@ function sanctionEndDateFromEntry(e: DisciplineEntry): string | null {
  */
 export function playerEligibility(input: EligibilityInput, playerId: number): PlayerEligibility {
   const reasons: EligibilityReason[] = [];
+  // Fechas jugadas como CONJUNTO: el llamador puede pasar un round repetido
+  // por cada partido de la fecha (5 partidos = 5 copias de la misma ronda),
+  // y contar copias inflaría "fechas ya servidas" anulando el bloqueo.
+  const played = new Set(input.playedRounds);
 
   for (const e of input.active) {
     if (e.scope === 'team' || e.playerId !== playerId) continue;
@@ -330,9 +334,10 @@ export function playerEligibility(input: EligibilityInput, playerId: number): Pl
       const covered =
         input.match.round >= e.originRound && input.match.round < e.originRound + (e.duration.amount ?? 0);
       if (!covered) continue;
-      const alreadyPlayed = input.playedRounds.filter(
-        (r) => r >= e.originRound! && r < e.originRound! + (e.duration.amount ?? 0)
-      ).length;
+      let alreadyPlayed = 0;
+      for (let r = e.originRound; r < e.originRound + (e.duration.amount ?? 0); r++) {
+        if (played.has(r)) alreadyPlayed += 1;
+      }
       const pending = Math.max(0, (e.duration.amount ?? 0) - alreadyPlayed);
       if (pending > 0) {
         reasons.push({ source: 'manual', reason: e.reason, remaining: pending, needsReview: false });

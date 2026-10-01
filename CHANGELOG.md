@@ -13,6 +13,16 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.10] — 2026-10-01 — Arreglos de sanciones en pantallas públicas
+
+### Arreglo
+
+- La ficha de un partido ya muestra a los jugadores que quedan **no habilitados** por una sanción manual del tribunal: antes el bloque salía vacío ("Sin jugadores afectados") porque se contaban fechas de más y la sanción parecía ya cumplida.
+- La columna de fechas restantes en Suspensiones ahora muestra el número real (ej.: "1 fecha restante"); antes marcaba 0 para todas las suspensiones automáticas, incluso las que todavía faltaba cumplir.
+- El motivo de anulación de una sanción ya no aparece repetido dos veces en la misma fila del historial: se muestra una sola vez, junto al estado "Anulada".
+
+---
+
 ## [0.3.9] — 2026-10-01 — Suspensiones y elegibilidad a la vista (Fase 14)
 
 ### Nuevo

@@ -1330,7 +1330,9 @@ export async function suspensionsPage(db: D1Database, slugParam?: string): Promi
     .map((m) => m.round ?? 0)
     .filter((r) => r > 0);
   const servedRemaining = (s: PlayerSuspension): number | null => {
-    const rest = remainingSuspensionMatches(s, matches, maxRound);
+    // throughRound = fecha de origen de la sanción (no la última del fixture:
+    // con la última nunca hay partidos "después" y siempre daría 0).
+    const rest = remainingSuspensionMatches(s, matches, s.asOfRound ?? maxRound);
     return rest.length > 0 ? rest.length : 0;
   };
   const incidentRoundOf = (s: SanctionRow): number | null => {
@@ -1408,12 +1410,9 @@ export async function suspensionsPage(db: D1Database, slugParam?: string): Promi
       e.remaining != null && e.status === 'activa' && e.duration.kind !== 'hasta_fecha'
         ? `<div class="small muted">${e.remaining} ${e.duration.kind === 'fechas' ? 'fecha(s) restante(s)' : 'día(s) restante(s)'}</div>`
         : '';
-    const annul =
-      e.status === 'anulada' && orig?.annul_reason
-        ? `<div class="small muted">Motivo de anulación: ${esc(orig.annul_reason)}</div>`
-        : '';
+    // El motivo de anulación se muestra una sola vez: en la columna Estado.
     return `<tr>
-      <td>${scopeBadge(e.scope)}${afflicted}${annul}</td>
+      <td>${scopeBadge(e.scope)}${afflicted}</td>
       <td>${teamName}</td>
       <td>${motivo}</td>
       <td>${periodo}${restante}</td>
