@@ -77,6 +77,7 @@ import {
   statusTransitionBlocked,
   transitionBlockedReason,
 } from '../lib/status.ts';
+import { planReschedule, type RescheduleRecord } from '../lib/reschedule.ts';
 import {
   buildBracketPlan,
   bracketConfigJson,
@@ -1439,6 +1440,64 @@ adminRoutes.post('/fixture/reposicion', async (c) => {
 
 adminRoutes.get('/fixture/:id/editar', async (c) => {
   return c.html(await admin.matchFormPage(c.env.DB, c.req.query('t'), Number(c.req.param('id'))));
+});
+
+/**
+ * Fase 13: reprograma un partido (día, hora y/o cancha) dejando registro del
+ * motivo en match_reschedules. Solo cambia esos tres datos: torneo, jornada,
+ * equipos, resultado, eventos y llave quedan intactos.
+ */
+adminRoutes.post('/fixture/:id/reprogramar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const f = await c.req.parseBody();
+  const m = await getMatch(c.env.DB, id);
+  if (!m) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Partido inexistente'));
+  const t = await resolveTournament(c.env.DB, undefined, m.tournament_id);
+  if (!t) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
+  const dest = `/admin/fixture?t=${encodeURIComponent(t.slug)}`;
+  const fail = (msg: string) => c.redirect(`${dest}&err=` + encodeURIComponent(msg));
+
+  const plan = planReschedule({
+    match: m,
+    tournamentStatus: t.status,
+    playedOn: String(f['played_on'] ?? ''),
+    kickoffTime: String(f['kickoff_time'] ?? ''),
+    venue: String(f['venue'] ?? ''),
+    reason: String(f['reason'] ?? ''),
+  });
+  if (!plan.ok) return fail(plan.error);
+
+  await c.env.DB.batch([
+    c.env.DB
+      .prepare('UPDATE matches SET played_on = ?1, kickoff_time = ?2, venue = ?3 WHERE id = ?4')
+      .bind(plan.playedOn, plan.kickoffTime, plan.venue, id),
+    c.env.DB
+      .prepare(
+        'INSERT INTO match_reschedules (match_id, old_played_on, old_kickoff_time, old_venue, new_played_on, new_kickoff_time, new_venue, reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
+      )
+      .bind(
+        id,
+        m.played_on,
+        m.kickoff_time,
+        m.venue,
+        plan.playedOn,
+        plan.kickoffTime,
+        plan.venue,
+        String(f['reason'] ?? '').trim()
+      ),
+  ]);
+  const que = plan.venueOnly ? 'cancha actualizada' : 'reprogramado';
+  return c.redirect(`${dest}&msg=` + encodeURIComponent(`Partido ${que}: nuevo día ${plan.playedOn || 'a definir'} ${plan.kickoffTime}`.trim() + '. El motivo quedó registrado.'));
+});
+
+/** Historial de reprogramaciones de un partido (para la planilla). */
+adminRoutes.get('/fixture/:id/reprogramaciones', async (c) => {
+  const id = Number(c.req.param('id'));
+  const { results } = await c.env.DB
+    .prepare('SELECT * FROM match_reschedules WHERE match_id = ?1 ORDER BY id DESC')
+    .bind(id)
+    .all<RescheduleRecord>();
+  return c.json(results ?? []);
 });
 
 adminRoutes.post('/fixture/:id', async (c) => {

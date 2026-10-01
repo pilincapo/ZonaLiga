@@ -19,6 +19,7 @@ import { BRACKET_LABELS, buildBracketColumns } from '../lib/bracket.ts';
 import { bracketColumn } from './match.ts';
 import { parseBracketConfig, bracketHasPlayed } from '../lib/playoffsBracket.ts';
 import { statusBlocksFixtureEdits, statusIsReadOnly } from '../lib/status.ts';
+import type { RescheduleRecord } from '../lib/reschedule.ts';
 import {
   type CompetitionConfig,
   type CompetitionFormat,
@@ -1935,6 +1936,14 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
     home ? listPlayers(db, home.id, true) : Promise.resolve([]),
     away ? listPlayers(db, away.id, true) : Promise.resolve([]),
   ]);
+  // Fase 13: estado del torneo e historial de reprogramaciones del partido.
+  const tStatusRow = await db.prepare('SELECT status FROM tournaments WHERE id = ?1').bind(m.tournament_id).first<{ status: string }>();
+  const tStatus = tStatusRow?.status ?? 'draft';
+  const reschedules = (
+    await db.prepare('SELECT * FROM match_reschedules WHERE match_id = ?1 ORDER BY id DESC').bind(m.id).all<RescheduleRecord>()
+  ).results ?? [];
+  const readOnlyStatus = statusIsReadOnly(tStatus);
+  const matchLocked = m.status === 'played' || m.status === 'walkover';
 
   // Elegibilidad: disciplina combinada del torneo evaluada para este partido.
   const eligibility = await disciplineForMatch(db, m);
@@ -1972,6 +1981,52 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
           `<option value="${p.id}">${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}${suspendedBadge(p.id)}</option>`
       )
       .join('');
+
+  // Fase 13: bloque "Reprogramar" — formulario con los datos actuales y el
+  // historial de cambios del partido. Bloqueado si el partido se jugó o el
+  // torneo está finalizado/archivado (mismo criterio que el servidor).
+  const fmtDay = (d: string): string => d || 'sin fecha';
+  const rescheduleRows = (list: RescheduleRecord[]): string =>
+    list.length === 0
+      ? ''
+      : `<div class="dash-sub">Historial de reprogramaciones</div>
+  <div class="table-wrap"><table class="data">
+    <thead><tr><th>Cuándo</th><th>Antes</th><th>Después</th><th>Motivo</th></tr></thead>
+    <tbody>${list
+      .map(
+        (r) => `<tr>
+      <td>${esc(formatDateShort(r.created_at.slice(0, 10)))}</td>
+      <td>${esc(fmtDay(r.old_played_on))} ${esc(r.old_kickoff_time || '')} ${esc(r.old_venue || '')}</td>
+      <td>${esc(fmtDay(r.new_played_on))} ${esc(r.new_kickoff_time || '')} ${esc(r.new_venue || '')}</td>
+      <td>${esc(r.reason)}</td>
+    </tr>`
+      )
+      .join('')}</tbody>
+  </table></div>`;
+  const rescheduleBlock = matchLocked
+    ? `<section class="block"><div class="card"><div class="card-body">
+  <strong>Reprogramar</strong>
+  <p class="hint">Este partido ya se jugó: su fecha y resultado son parte del historial y no se pueden cambiar.</p>
+  ${rescheduleRows(reschedules)}
+</div></div></section>`
+    : readOnlyStatus
+      ? `<section class="block"><div class="card"><div class="card-body">
+  <strong>Reprogramar</strong>
+  <p class="hint">Torneo ${tStatus === 'archived' ? 'archivado' : 'finalizado'}: solo lectura, sus partidos no se pueden reprogramar.</p>
+  ${rescheduleRows(reschedules)}
+</div></div></section>`
+      : `<section class="block"><form method="post" action="/admin/fixture/${m.id}/reprogramar"><div class="card"><div class="card-body">
+  <div class="dash-card-head"><h2>${icon('calendar', 16)} Reprogramar partido</h2></div>
+  <p class="hint">Actual: <strong>${fmtDay(m.played_on)}</strong> ${esc(m.kickoff_time || 'sin hora')} · ${esc(m.venue || 'sin cancha')}. Dejá en blanco lo que no cambie; el motivo queda registrado en el historial.</p>
+  <div class="form-row">
+    <div class="field"><label>Nueva fecha</label><input type="date" name="played_on" value="${esc(m.played_on ?? '')}"></div>
+    <div class="field"><label>Nueva hora</label><input type="time" name="kickoff_time" value="${esc(m.kickoff_time ?? '')}"></div>
+    <div class="field"><label>Nueva cancha</label><input type="text" name="venue" value="${esc(m.venue ?? '')}" placeholder="Dejar igual"></div>
+  </div>
+  <div class="field"><label>Motivo (obligatorio)</label><input type="text" name="reason" maxlength="500" placeholder="Ej.: la cancha está inundada" required></div>
+  <button class="btn btn-primary" type="submit" onclick="return confirm('¿Reprogramar este partido? No cambia equipos, jornada ni resultado.')">Reprogramar</button>
+  ${rescheduleRows(reschedules)}
+</div></div></form></section>`;
 
   const evRows = (side: 'home' | 'away') => {
     const teamId = side === 'home' ? m.home_team_id : m.away_team_id;
@@ -2124,6 +2179,7 @@ ${flash('success', msg)}${flash('error', error)}
     <button class="btn btn-primary" type="submit">Guardar planilla</button>
   </div>
 </form></section>
+${rescheduleBlock}
 ${submissionsBlock}
 <section class="block grid-2">
 ${evBlock('home')}

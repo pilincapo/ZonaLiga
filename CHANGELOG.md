@@ -13,6 +13,21 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.7] — 2026-10-01 — Reprogramación de partidos (Fase 13)
+
+### Nuevo
+
+- Nueva acción **Reprogramar partido** en la planilla de cada partido pendiente: se cambia el día, la hora y/o la cancha, y queda registrado el motivo de la decisión.
+- Historial de reprogramaciones visible en la planilla: tabla con fecha del cambio, valores anteriores, valores nuevos y el motivo, ordenado del más reciente al más antiguo.
+
+### Importante
+
+- Solo se pueden reprogramar partidos pendientes: un partido ya jugado (o con resultado por walkover) queda bloqueado y el panel lo muestra en modo solo lectura con su historial.
+- Si el torneo está finalizado o archivado, no se permite reprogramar nada.
+- La reprogramación no toca equipos, jornada, resultado, eventos ni llaves: solo día, hora y cancha, siempre con motivo (obligatorio, hasta 500 caracteres).
+
+---
+
 ## [0.3.6] — 2026-10-01 — Estados y cierre de competencia (Fase 12C)
 
 ### Nuevo

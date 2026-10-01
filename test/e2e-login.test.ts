@@ -3019,3 +3019,309 @@ describe.skipIf(!has)('e2e: estados y cierre de competencia (Fase 12C)', () => {
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: reprogramación de partidos (Fase 13)', () => {
+  /** IDs únicos de partidos en el HTML del fixture. */
+  function ids13(html: string): string[] {
+    return [...new Set([...html.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!))];
+  }
+
+  async function altaTorneo13(
+    admin: ReturnType<typeof client>,
+    nombre: string,
+    status: string,
+    teamIds: string[],
+    extra: Record<string, string> = {}
+  ): Promise<{ tid: string; partBody: Record<string, string> }> {
+    const alta = await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status,
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+      ...extra,
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes(nombre))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: nombre,
+      season: '2026',
+      status,
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    expect((await admin.post(`/admin/torneos/${tid}`, partBody)).status).toBe(302);
+    return { tid, partBody };
+  }
+
+  it('reprogramar un partido: cambia día/hora/cancha, registra motivo y no toca resultado ni eventos', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const { tid, partBody } = await altaTorneo13(admin, '13 Reprog E2E', 'active', teamIds);
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '13-reprog-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    const fx = await (await admin.get('/admin/fixture?t=13-reprog-e2e')).text();
+    const ids = ids13(fx);
+    expect(ids.length).toBe(6);
+
+    // Se juega el partido 1 (2-0 con autor sin nombre) y el partido 2 queda
+    // pendiente para reprogramar.
+    const jugadoId = ids[0]!;
+    const pendienteId = ids[1]!;
+    expect((await admin.post(`/admin/planilla/${jugadoId}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '2',
+      away_goals: '0',
+      hg1: 'none',
+      hg2: 'none',
+      notes: '',
+    })).status).toBe(302);
+
+    // Reprograma el pendiente: nueva fecha, hora y cancha, con motivo.
+    const res = await admin.post(`/admin/fixture/${pendienteId}/reprogramar`, {
+      played_on: '2026-10-28',
+      kickoff_time: '18:30',
+      venue: 'Cancha Sur',
+      reason: 'La cancha original está inundada',
+    });
+    expect(res.status).toBe(302);
+    const loc = decodeURIComponent(res.headers.get('location') ?? '');
+    expect(loc).toContain('reprogramado');
+    expect(loc).toContain('motivo quedó registrado');
+
+    // El fixture muestra la nueva fecha (28 oct) y no la vieja (10 oct) en
+    // la fila del partido.
+    const fx2 = await (await admin.get('/admin/fixture?t=13-reprog-e2e')).text();
+    const fila = fx2.split('<tr>').find((c) => c.includes(`/admin/fixture/${pendienteId}/eliminar`)) ?? '';
+    expect(fila).toContain('28');
+    expect(fila).toContain('18:30');
+    expect(fila).toContain('Cancha Sur');
+
+    // La planilla muestra el formulario y el historial con el motivo.
+    const sheet = await (await admin.get(`/admin/planilla/${pendienteId}`)).text();
+    expect(sheet).toContain('Reprogramar partido');
+    expect(sheet).toContain('Historial de reprogramaciones');
+    expect(sheet).toContain('La cancha original está inundada');
+    expect(sheet).toContain('Cancha Norte'); // el "antes"
+
+    // El partido jugado muestra el bloque de "ya se jugó", no el formulario.
+    const sheetJugado = await (await admin.get(`/admin/planilla/${jugadoId}`)).text();
+    expect(sheetJugado).toContain('ya se jugó');
+    expect(sheetJugado).not.toContain('Reprogramar partido</h2>');
+
+    // El resultado y el historial quedan intactos (tabla: solo 3 pts del jugado).
+    const tabla = await (await admin.get('/posiciones?t=13-reprog-e2e')).text();
+    const pts = [...tabla.matchAll(/<strong>(\d+)<\/strong>/g)].map((m) => Number(m[1]));
+    expect(pts.reduce((a, b) => a + b, 0)).toBe(3);
+
+    // Sin motivo: rechaza.
+    const sinMotivo = await admin.post(`/admin/fixture/${pendienteId}/reprogramar`, {
+      played_on: '2026-10-29',
+      kickoff_time: '',
+      venue: '',
+      reason: '',
+    });
+    expect(decodeURIComponent(sinMotivo.headers.get('location') ?? '')).toContain('motivo');
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+    void partBody;
+  });
+
+  it('bloqueos: partido jugado, torneo finalizado y archivado no se reprograman', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const { tid, partBody } = await altaTorneo13(admin, '13 Reprog Bloqueos E2E', 'active', teamIds);
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '13-reprog-bloq-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    const ids = ids13(await (await admin.get('/admin/fixture?t=13-reprog-bloq-e2e')).text());
+
+    // Se juega el partido 1.
+    expect((await admin.post(`/admin/planilla/${ids[0]}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '1',
+      away_goals: '0',
+      hg1: 'none',
+      notes: '',
+    })).status).toBe(302);
+
+    // Intento de reprogramar el JUGADO: rechaza (aunque el torneo siga activo).
+    const jugado = await admin.post(`/admin/fixture/${ids[0]}/reprogramar`, {
+      played_on: '2026-10-30',
+      kickoff_time: '',
+      venue: '',
+      reason: 'intento sobre un jugado',
+    });
+    expect(decodeURIComponent(jugado.headers.get('location') ?? '')).toContain('ya se jugó');
+
+    // El resultado del jugado quedó intacto (1-0 → 3 pts) tras el intento.
+    const tabla = await (await admin.get('/posiciones?t=13-reprog-bloqueos-e2e')).text();
+    const pts = [...tabla.matchAll(/<strong>(\d+)<\/strong>/g)].map((m) => Number(m[1]));
+    expect(pts.reduce((a, b) => a + b, 0)).toBe(3);
+
+    // Torneo → FINALIZADO: reprogramar el pendiente queda bloqueado.
+    expect((await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'finished' })).status).toBe(302);
+    const fin = await admin.post(`/admin/fixture/${ids[1]}/reprogramar`, {
+      played_on: '2026-10-30',
+      kickoff_time: '',
+      venue: '',
+      reason: 'intento en torneo finalizado',
+    });
+    expect(decodeURIComponent(fin.headers.get('location') ?? '')).toContain('finalizado');
+
+    // Torneo → ARCHIVADO: mensaje de archivado.
+    expect((await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'archived' })).status).toBe(302);
+    const arch = await admin.post(`/admin/fixture/${ids[1]}/reprogramar`, {
+      played_on: '2026-10-31',
+      kickoff_time: '',
+      venue: '',
+      reason: 'intento en torneo archivado',
+    });
+    expect(decodeURIComponent(arch.headers.get('location') ?? '')).toContain('archivado');
+
+    // La fecha del pendiente sigue siendo la original.
+    const fx = await (await admin.get('/admin/fixture?t=13-reprog-bloq-e2e')).text();
+    const fila = fx.split('<tr>').find((c) => c.includes(`/admin/fixture/${ids[1]}/eliminar`)) ?? '';
+    expect(fila).not.toContain('Cancha Sur');
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('playoff pendiente: reprogramar la semifinal no cambia la llave ni sus orígenes', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    // Grupos + Playoffs con SF en partido único.
+    const alta = await admin.post('/admin/torneos', {
+      name: '13 Reprog Playoff E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('13 Reprog Playoff E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: '13 Reprog Playoff E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    expect((await admin.post(`/admin/torneos/${tid}`, partBody)).status).toBe(302);
+
+    // Fixture de grupos (2 partidos) + jugarlos.
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    expect(decodeURIComponent((await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '13-reprog-playoff-e2e' })).headers.get('location') ?? '')).toContain('Fixture guardado');
+    const fx = await (await admin.get('/admin/fixture?t=13-reprog-playoff-e2e')).text();
+    const groupIds = ids13(fx);
+    expect(groupIds.length).toBe(2);
+    for (const mid of groupIds) {
+      expect((await admin.post(`/admin/planilla/${mid}`, {
+        status: 'played',
+        played_on: '2026-10-05',
+        kickoff_time: '10:00',
+        venue: 'Cancha Norte',
+        home_goals: '1',
+        away_goals: '0',
+        hg1: 'none',
+        notes: '',
+      })).status).toBe(302);
+    }
+
+    // Genera las llaves: 2 SF + 1 F.
+    expect(decodeURIComponent((await admin.post('/admin/fixture/llaves', { tournament_id: tid })).headers.get('location') ?? '')).toContain('Llaves generadas');
+    const fx2 = await (await admin.get('/admin/fixture?t=13-reprog-playoff-e2e')).text();
+    const sf = ids13(fx2).filter((id) => !groupIds.includes(id));
+    expect(sf.length).toBe(3); // 2 SF + 1 F
+    const sf1 = sf[0]!;
+    const filaSf1Antes = (fx2.split('<tr>').find((c) => c.includes(`/admin/fixture/${sf1}/eliminar`)) ?? '');
+    const filaFinalAntes = (fx2.split('<tr>').find((c) => c.includes(`/admin/fixture/${sf[2]}/eliminar`)) ?? '');
+
+    // Reprograma la SF1 pendiente: nueva fecha y cancha, con motivo.
+    const res = await admin.post(`/admin/fixture/${sf1}/reprogramar`, {
+      played_on: '2026-11-15',
+      kickoff_time: '20:00',
+      venue: 'Cancha Sur',
+      reason: 'Suspendida por lluvia en la fecha original',
+    });
+    expect(res.status).toBe(302);
+    expect(decodeURIComponent(res.headers.get('location') ?? '')).toContain('reprogramado');
+
+    // La llave no cambia: la SF1 mantiene sus equipos y la final sigue
+    // esperando a los ganadores (orígenes intactos).
+    const fx3 = await (await admin.get('/admin/fixture?t=13-reprog-playoff-e2e')).text();
+    const filaSf1Despues = fx3.split('<tr>').find((c) => c.includes(`/admin/fixture/${sf1}/eliminar`)) ?? '';
+    const filaFinalDespues = fx3.split('<tr>').find((c) => c.includes(`/admin/fixture/${sf[2]}/eliminar`)) ?? '';
+    // La semifinal conservó el par (los dos nombres antes = los dos después).
+    const nombres = (fila: string) => (/<td>([^<]+) <span class="faint">vs<\/span> ([^<]+)</.exec(fila)?.slice(1).join('|') ?? '');
+    expect(nombres(filaSf1Despues)).toBe(nombres(filaSf1Antes));
+    // La final sigue con el mismo origen pendiente.
+    expect(filaFinalDespues).toContain('→ WSF');
+    expect(nombres(filaFinalDespues)).toBe(nombres(filaFinalAntes));
+    // Y la nueva fecha quedó aplicada en la SF.
+    expect(filaSf1Despues).toContain('Cancha Sur');
+    expect(filaSf1Despues).toContain('20:00');
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+});
