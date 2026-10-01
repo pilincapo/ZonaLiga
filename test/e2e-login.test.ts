@@ -617,7 +617,7 @@ describe.skipIf(!has)('e2e: generar fixture no pisa los jugados', () => {
 
     // La página explica el bloqueo y el botón queda deshabilitado.
     const page = await (await admin.get('/admin/fixture')).text();
-    expect(page).toContain('deshabilitado');
+    expect(page).toContain('deshabilitado para no pisarlos');
     expect(page).toContain('disabled');
 
     // Lo jugado sigue publicado en el sitio.
@@ -2776,6 +2776,246 @@ describe.skipIf(!has)('e2e: cierre del motor de playoffs (Fase 12B)', () => {
     expect(finalEq).toEqual(expect.arrayContaining([ganadorSf1]));
     expect(finalEq).toEqual(expect.arrayContaining([ganadorSf2]));
 
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+});
+
+describe.skipIf(!has)('e2e: estados y cierre de competencia (Fase 12C)', () => {
+  /** IDs únicos de partidos en el HTML del fixture. */
+  function ids12c(html: string): string[] {
+    return [...new Set([...html.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!))];
+  }
+
+  it('ciclo completo: BORRADOR → INSCRIPCIONES → ACTIVO → FINALIZADO → ARCHIVADO con bloqueos por etapa', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    // BORRADOR: alta con 4 participantes y formato UNA_RUEDA.
+    const alta = await admin.post('/admin/torneos', {
+      name: '12C Ciclo E2E',
+      season: '2026',
+      status: 'draft',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('12C Ciclo E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: '12C Ciclo E2E',
+      season: '2026',
+      status: 'draft',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    expect((await admin.post(`/admin/torneos/${tid}`, partBody)).status).toBe(302);
+
+    // BORRADOR: fixture se genera sin problema.
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12c-ciclo-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    const fx = await (await admin.get('/admin/fixture?t=12c-ciclo-e2e')).text();
+    const ids = ids12c(fx);
+    expect(ids.length).toBe(6);
+
+    // BORRADOR → INSCRIPCIONES.
+    const aIns = await admin.post(`/admin/torneos/${tid}`, {
+      ...partBody,
+      status: 'registrations',
+    });
+    expect(aIns.status).toBe(302);
+
+    // INSCRIPCIONES: puede jugar partidos igual (resultado de prueba) y el
+    // fixture no se rompe.
+    expect((await admin.post(`/admin/planilla/${ids[0]}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '1',
+      away_goals: '0',
+      hg1: 'none',
+      notes: '',
+    })).status).toBe(302);
+
+    // INSCRIPCIONES → ACTIVO.
+    expect((await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'active' })).status).toBe(302);
+
+    // ACTIVO: la estructura queda congelada — regenerar el cruce rechaza
+    // pisar el fixture existente (guardia de jugados) y la estructura
+    // competitiva ya no se puede cambiar desde el form del torneo.
+    const estructura = await admin.post(`/admin/torneos/${tid}`, {
+      ...partBody,
+      status: 'active',
+      comp_format: 'DOS_RUEDAS', // intento de cambio estructural
+    });
+    expect(estructura.status).toBe(400);
+    const estructuraHtml = await estructura.text();
+    expect(estructuraHtml).toContain('en curso');
+
+    // ACTIVO: seguir cargando resultados sigue funcionando.
+    expect((await admin.post(`/admin/planilla/${ids[1]}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '2',
+      away_goals: '0',
+      hg1: 'none',
+      hg2: 'none',
+      notes: '',
+    })).status).toBe(302);
+
+    // ACTIVO: la participación queda fijada (el guardado no da de baja).
+    const sinBaja: Record<string, string> = { ...partBody, status: 'active' };
+    // (no manda ningún participate_ → si el servidor aceptara la baja, quedaría vacío)
+    await admin.post(`/admin/torneos/${tid}`, sinBaja);
+    const equiposTras = await (await admin.get(`/admin/torneos/${tid}`)).text();
+    for (const id of teamIds) {
+      expect(equiposTras).toContain(`name="participate_${id}"`);
+    }
+
+    // ACTIVO → FINALIZADO.
+    expect((await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'finished' })).status).toBe(302);
+
+    // FINALIZADO: solo lectura.
+    const confFin = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12c-ciclo-e2e' });
+    const confFinLoc = decodeURIComponent(confFin.headers.get('location') ?? '');
+    expect(confFinLoc).toContain('err=');
+    expect(confFinLoc).toContain('finalizado');
+    // No se pueden modificar resultados históricos.
+    const resFin = await admin.post(`/admin/planilla/${ids[1]}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '9',
+      away_goals: '9',
+      notes: '',
+    });
+    expect(resFin.status).toBe(302);
+    expect(decodeURIComponent(resFin.headers.get('location') ?? '')).toContain('finalizado');
+    // La transición a active está bloqueada (no se reabre): 400 con el motivo.
+    const reabrir = await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'active' });
+    expect(reabrir.status).toBe(400);
+    expect(await reabrir.text()).toContain('no vuelve');
+
+    // Los resultados siguen intactos después de los intentos.
+    const tabla = await (await admin.get('/posiciones?t=12c-ciclo-e2e')).text();
+    const pts = [...tabla.matchAll(/<strong>(\d+)<\/strong>/g)].map((m) => Number(m[1]));
+    expect(pts.reduce((a, b) => a + b, 0)).toBe(6); // 1-0 (3 pts) + 2-0 (3 pts)
+
+    // FINALIZADO → ARCHIVADO.
+    expect((await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'archived' })).status).toBe(302);
+
+    // ARCHIVADO: solo lectura total, y no se reabre.
+    const resArch = await admin.post(`/admin/planilla/${ids[1]}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '8',
+      away_goals: '8',
+      notes: '',
+    });
+    expect(decodeURIComponent(resArch.headers.get('location') ?? '')).toContain('archivado');
+    const reabrirArch = await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'active' });
+    expect(reabrirArch.status).toBe(400);
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('ACTIVO: bloqueos de estructura, partido suelto y participants fijados, resultados permitidos', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    // Crear en activo directo (alta → activo es una transición válida).
+    const alta = await admin.post('/admin/torneos', {
+      name: '12C Activo E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('12C Activo E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: '12C Activo E2E',
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    expect((await admin.post(`/admin/torneos/${tid}`, partBody)).status).toBe(302);
+
+    // En ACTIVO el fixture se genera una vez (aún no existe)...
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12c-activo-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    const fx = await (await admin.get('/admin/fixture?t=12c-activo-e2e')).text();
+    const ids = ids12c(fx);
+    expect(ids.length).toBe(6);
+
+    // ...pero la estructura competitiva ya no se puede cambiar desde el form.
+    const estructura = await admin.post(`/admin/torneos/${tid}`, {
+      ...partBody,
+      status: 'active',
+      comp_format: 'DOS_RUEDAS',
+    });
+    expect(estructura.status).toBe(400);
+    expect(await estructura.text()).toContain('en curso');
+
+    // Resultados: permitidos en activo.
+    expect((await admin.post(`/admin/planilla/${ids[0]}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '3',
+      away_goals: '0',
+      hg1: 'none',
+      hg2: 'none',
+      hg3: 'none',
+      notes: '',
+    })).status).toBe(302);
+
+    // Limpieza.
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
 });

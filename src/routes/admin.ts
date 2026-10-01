@@ -69,6 +69,15 @@ import {
 } from '../lib/playoff.ts';
 import { buildMakeUpPlan, postponedMatches, overflowOfRound, pickDeferred, splitOverflowByZone } from '../lib/oversub.ts';
 import {
+  fixtureBlockedReason,
+  matchEditsBlockedReason,
+  participationBlockedReason,
+  statusBlocksMatchEdits,
+  statusBlocksParticipation,
+  statusTransitionBlocked,
+  transitionBlockedReason,
+} from '../lib/status.ts';
+import {
   buildBracketPlan,
   bracketConfigJson,
   bracketHasPlayed,
@@ -221,10 +230,19 @@ adminRoutes.post('/torneos/:id', async (c) => {
   const f = await c.req.parseBody();
   const name = String(f['name'] ?? '').trim();
   if (!name) return c.html(await admin.tournamentFormPage(c.env.DB, id, 'El nombre es obligatorio'), 400);
-  const rules = readRules(f);
   // Preserva las fechas de cruce ya generadas: se guardan en la misma config
   // y este form no las toca.
   const prevRow = await c.env.DB.prepare('SELECT config, status, format FROM tournaments WHERE id = ?1').bind(id).first<{ config: string; status: string; format: string }>();
+  // Fase 12C: transición de estado validada (el ciclo no vuelve hacia atrás).
+  const fromStatus = prevRow?.status ?? 'draft';
+  const toStatus = String(f['status'] ?? fromStatus);
+  if (statusTransitionBlocked(fromStatus, toStatus)) {
+    return c.html(
+      await admin.tournamentFormPage(c.env.DB, id, transitionBlockedReason(fromStatus, toStatus)),
+      400
+    );
+  }
+  const rules = readRules(f);
   const prevConfigJson = prevRow?.config ?? '{}';
   const prevKeep = {
     ...crossoverConfigJson(parseCrossoverConfig(prevConfigJson)),
@@ -259,9 +277,18 @@ adminRoutes.post('/torneos/:id', async (c) => {
   // tienen zona (la zona conserva al equipo aunque su casilla esté apagada),
   // siempre que las zonas vengan activas en este guardado.
   // Batch atómico: queda la lista exacta del formulario, sin duplicados.
-  const zoned = f['zones_enabled'] ? zonedTeamIdsFromForm(f) : [];
-  const ids = [...new Set([...participatingIdsFromForm(f), ...zoned])];
-  await replaceTournamentParticipation(c.env.DB, id, ids);
+  // Fase 12C: si el estado (nuevo o anterior) bloquea participantes y el
+  // torneo YA TIENE inscriptos, la participación queda EXACTAMENTE como
+  // estaba: ni altas ni bajas. Un torneo sin inscriptos guardados (recién
+  // creado, incluso directo en activo) acepta la carga inicial del form.
+  const beforeIds = await teamIdsOfTournament(c.env.DB, id);
+  if (beforeIds.length > 0 && (statusBlocksParticipation(toStatus) || statusBlocksParticipation(fromStatus))) {
+    await replaceTournamentParticipation(c.env.DB, id, beforeIds);
+  } else {
+    const zoned = f['zones_enabled'] ? zonedTeamIdsFromForm(f) : [];
+    const ids = [...new Set([...participatingIdsFromForm(f), ...zoned])];
+    await replaceTournamentParticipation(c.env.DB, id, ids);
+  }
   return c.redirect('/admin/torneos?msg=' + encodeURIComponent('Torneo actualizado'));
 });
 
@@ -626,7 +653,7 @@ adminRoutes.post('/fixture/previsualizar', async (c) => {
   if (!tRow) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Torneo inexistente'));
   const dest = `/admin/fixture?t=${encodeURIComponent(tRow.slug)}`;
   if (tRow.status === 'finished' || tRow.status === 'archived') {
-    return c.redirect(dest + '&err=' + encodeURIComponent('El torneo está finalizado: cambialo a activo para regenerar el fixture.'));
+    return c.redirect(dest + '&err=' + encodeURIComponent(fixtureBlockedReason(tRow.status)));
   }
 
   // Pool del torneo: SOLO sus equipos participantes (tabla tournament_teams).
@@ -904,6 +931,17 @@ adminRoutes.post('/fixture/nuevo', async (c) => {
   const away = f['away_team_id'] ? Number(f['away_team_id']) : null;
   if (!Number.isFinite(tournamentId) || home == null || away == null) {
     return c.html(await admin.matchFormPage(c.env.DB, undefined, undefined, 'Elegí local y visitante'), 400);
+  }
+  // Fase 12C: en finalizado/archivado no se agregan partidos (solo lectura).
+  const statusRow = await c.env.DB
+    .prepare('SELECT status FROM tournaments WHERE id = ?1')
+    .bind(tournamentId)
+    .first<{ status: string }>();
+  if (statusRow && statusBlocksMatchEdits(statusRow.status)) {
+    return c.html(
+      await admin.matchFormPage(c.env.DB, undefined, undefined, matchEditsBlockedReason(statusRow.status)),
+      400
+    );
   }
   const roundRaw = String(f['round'] ?? '').trim();
   const round = roundRaw ? Number(roundRaw) : null;
@@ -1549,6 +1587,14 @@ adminRoutes.post('/planilla/:id', async (c) => {
   if (!mRow) {
     return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
   }
+  // Fase 12C: en finalizado/archivado los resultados son históricos.
+  const tStatus = await c.env.DB
+    .prepare('SELECT status FROM tournaments WHERE id = ?1')
+    .bind(mRow.tournament_id)
+    .first<{ status: string }>();
+  if (tStatus && statusBlocksMatchEdits(tStatus.status)) {
+    return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(matchEditsBlockedReason(tStatus.status)));
+  }
 
   // Declaración de goles: el marcador del form manda y las listas nombran a
   // los autores. Guardar REEMPLAZA los goles del partido (las tarjetas no se
@@ -1637,6 +1683,14 @@ adminRoutes.post('/planilla/:id/evento', async (c) => {
   // genera eventos acá. Bloqueo duro, con motivo y origen en el mensaje.
   const mRow = await getMatch(c.env.DB, id);
   if (!mRow) return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
+  // Fase 12C: en finalizado/archivado no se agregan ni quitan eventos.
+  const evStatus = await c.env.DB
+    .prepare('SELECT status FROM tournaments WHERE id = ?1')
+    .bind(mRow.tournament_id)
+    .first<{ status: string }>();
+  if (evStatus && statusBlocksMatchEdits(evStatus.status)) {
+    return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(matchEditsBlockedReason(evStatus.status)));
+  }
   const discipline = await admin.disciplineForMatch(c.env.DB, mRow);
   if (discipline) {
     const el = playerEligibility(discipline, playerId);
@@ -1653,6 +1707,17 @@ adminRoutes.post('/planilla/:id/evento', async (c) => {
 adminRoutes.post('/planilla/:id/evento/eliminar', async (c) => {
   const id = Number(c.req.param('id'));
   const f = await c.req.parseBody();
+  const mRow = await getMatch(c.env.DB, id);
+  if (mRow) {
+    // Fase 12C: en finalizado/archivado los eventos son históricos.
+    const evStatus = await c.env.DB
+      .prepare('SELECT status FROM tournaments WHERE id = ?1')
+      .bind(mRow.tournament_id)
+      .first<{ status: string }>();
+    if (evStatus && statusBlocksMatchEdits(evStatus.status)) {
+      return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(matchEditsBlockedReason(evStatus.status)));
+    }
+  }
   await c.env.DB.prepare('DELETE FROM events WHERE id = ?1').bind(Number(f['event_id'])).run();
   return c.redirect(`/admin/planilla/${id}`);
 });

@@ -13,6 +13,22 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.6] — 2026-10-01 — Estados y cierre de competencia (Fase 12C)
+
+### Nuevo
+
+- Reglas de estado consolidadas y centralizadas para el ciclo de vida del torneo: Borrador → Inscripciones → En curso → Finalizado → Archivado. Rutas y panel consultan la misma fuente, así que los bloqueos son consistentes entre servidor y pantalla.
+- Corrección temprana del ciclo: mientras la competencia no terminó (borrador, inscripciones o en curso) se puede volver a un estado anterior para corregir; Finalizado solo puede archivarse y Archivado no se reabre (protege el histórico).
+- Participantes fijados: desde que el torneo está en curso, el guardado del torneo ya no da de baja ni agrega participantes (la carga inicial de un torneo recién creado sigue funcionando).
+- Resultados protegidos: en Finalizado y Archivado la planilla rechaza cambios con un mensaje claro; tampoco se agregan partidos sueltos ni se agregan/quitan eventos.
+- El panel de fixture muestra un aviso claro según el estado: en curso (estructura congelada, solo resultados), finalizado o archivado (solo lectura).
+
+### Importante
+
+- No se agregaron estados nuevos ni se movieron datos: las reglas consolidan el comportamiento existente y cierran los huecos que faltaban (planilla, eventos y partido suelto no tenían guardia por estado).
+
+---
+
 ## [0.3.5] — 2026-10-01 — Cierre del motor de playoffs (Fase 12B)
 
 ### Arreglo

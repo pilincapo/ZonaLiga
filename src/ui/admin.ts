@@ -18,6 +18,7 @@ import {
 import { BRACKET_LABELS, buildBracketColumns } from '../lib/bracket.ts';
 import { bracketColumn } from './match.ts';
 import { parseBracketConfig, bracketHasPlayed } from '../lib/playoffsBracket.ts';
+import { statusBlocksFixtureEdits, statusIsReadOnly } from '../lib/status.ts';
 import {
   type CompetitionConfig,
   type CompetitionFormat,
@@ -1545,9 +1546,12 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   }
 
   // Guardia contra pisar resultados: con partidos jugados (o torneo
-  // finalizado), "Generar" queda deshabilitado y se explica por qué.
+  // finalizado/archivado), "Generar" queda deshabilitado y se explica por qué.
+  // Fase 12C: los bloqueos por estado vienen de lib/status.
   const jugados = playedCount(matches);
-  const genBlocked = jugados > 0 || t.status === 'finished';
+  const readOnly = statusIsReadOnly(t.status);
+  const structureFrozen = statusBlocksFixtureEdits(t.status);
+  const genBlocked = jugados > 0 || structureFrozen;
 
   // Fase 11C: bloque de llaves de playoffs (formatos con playoffs de la Fase 10).
   // Reutiliza el render de columnas de llave del sitio público. Con la llave
@@ -1611,11 +1615,13 @@ export async function fixtureAdminPage(db: D1Database, slugParam: string | undef
   }
 
   const blockNote =
-    jugados > 0
-      ? `<div class="warning-box">Hay ${jugados} partido(s) con resultado cargado: “Generar” está deshabilitado para no pisarlos. Usá “Regenerar cruce” para rearmar solo los pendientes.</div>`
-      : t.status === 'finished'
-        ? '<div class="warning-box">Torneo finalizado: “Generar” está deshabilitado. Cambialo a activo para regenerar el fixture.</div>'
-        : '';
+    readOnly
+      ? `<div class="warning-box">🔒 Torneo ${t.status === 'archived' ? 'archivado' : 'finalizado'}: solo lectura. No se puede generar, regenerar ni modificar resultados.</div>`
+      : jugados > 0
+        ? `<div class="warning-box">Hay ${jugados} partido(s) con resultado cargado: “Generar” está deshabilitado para no pisarlos. Usá “Regenerar cruce” para rearmar solo los pendientes.</div>`
+        : structureFrozen
+          ? '<div class="warning-box">Torneo en curso: la estructura del fixture queda congelada mientras se juega. Solo se cargan resultados.</div>'
+          : '';
 
   const roundSections = roundKeys
     .map((r) => {
