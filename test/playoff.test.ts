@@ -3,12 +3,14 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  bracketTies,
   buildPlayoffPlan,
   parsePlayoffConfig,
   parsePlayoffFormat,
   pendingLeagueCount,
   playoffFormatLabel,
   resolveAdvancements,
+  tieWinnerLoser,
 } from '../src/lib/playoff.ts';
 import { matchWinnerLoser } from '../src/lib/bracket.ts';
 import { matchesForStandings } from '../src/lib/crossover.ts';
@@ -167,6 +169,91 @@ describe('resolveAdvancements', () => {
       mk({ id: 12, round: 9, bracket_round: 'F', home_team_id: 1, away_team_id: null, away_source: 'WSF1' }),
     ];
     expect(resolveAdvancements(matches)).toEqual([{ matchId: 12, side: 'away', teamId: 5 }]);
+  });
+});
+
+describe('Fase 12A: avance por resultado global (ida y vuelta)', () => {
+  it('bracketTies agrupa los dos partidos del mismo cruce (localía invertida)', () => {
+    const matches = [
+      // SF1: ida (3 local vs 1) y revancha (1 local vs 3).
+      mk({ id: 20, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 0, away_goals: 2 }),
+      mk({ id: 21, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 1, away_goals: 1 }),
+      // SF2: ida y revancha de la otra llave.
+      mk({ id: 22, round: 5, bracket_round: 'SF', home_team_id: 2, away_team_id: 4, status: 'played', home_goals: 2, away_goals: 0 }),
+      mk({ id: 23, round: 6, bracket_round: 'SF', home_team_id: 4, away_team_id: 2, status: 'played', home_goals: 0, away_goals: 0 }),
+    ];
+    const ties = bracketTies(matches, 'SF');
+    expect(ties).toHaveLength(2);
+    expect(ties[0]!.teams).toEqual([1, 3]);
+    expect(ties[0]!.matchIds).toEqual([20, 21]);
+    expect(ties[1]!.teams).toEqual([2, 4]);
+  });
+
+  it('tieWinnerLoser: gana el del global aunque pierda la ida (y localía invertida)', () => {
+    const matches = [
+      // Ida: gana 3 (3-1). Revancha (localía invertida): gana 1 (3-0).
+      // Global: 1 sumó 1+3=4, 3 sumó 3+0=3 → gana 1 por global.
+      mk({ id: 20, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 3, away_goals: 1 }),
+      mk({ id: 21, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 3, away_goals: 0 }),
+    ];
+    const tie = bracketTies(matches, 'SF')[0]!;
+    expect(tieWinnerLoser(matches, tie)).toEqual({ winner: 1, loser: 3 });
+  });
+
+  it('tieWinnerLoser: con global empatado, define la suma de puntos (penales)', () => {
+    const matches = [
+      mk({ id: 20, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 1, away_goals: 1, home_points: 3, away_points: 4 }),
+      mk({ id: 21, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 0, away_goals: 0 }),
+    ];
+    const tie = bracketTies(matches, 'SF')[0]!;
+    // 1 ganó los penales (4-3 en la ida).
+    expect(tieWinnerLoser(matches, tie)).toEqual({ winner: 1, loser: 3 });
+  });
+
+  it('tieWinnerLoser: falta jugar la revancha → sin ganador todavía', () => {
+    const matches = [
+      mk({ id: 20, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 3, away_goals: 1 }),
+      mk({ id: 21, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'scheduled' }),
+    ];
+    const tie = bracketTies(matches, 'SF')[0]!;
+    expect(tieWinnerLoser(matches, tie)).toBeNull();
+  });
+
+  it('la final por ida/vuelta se completa sola cuando ambas semis están decididas por global', () => {
+    const matches = [
+      // SF1 ida y vuelta: gana 1 por global (2-3 con revancha).
+      mk({ id: 20, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 2, away_goals: 1 }),
+      mk({ id: 21, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 2, away_goals: 0 }),
+      // SF2 ida y vuelta: gana 2 (global 3-1).
+      mk({ id: 22, round: 5, bracket_round: 'SF', home_team_id: 4, away_team_id: 2, status: 'played', home_goals: 1, away_goals: 2 }),
+      mk({ id: 23, round: 6, bracket_round: 'SF', home_team_id: 2, away_team_id: 4, status: 'played', home_goals: 1, away_goals: 0 }),
+      // Final ida y vuelta con orígenes WSF1/WSF2: queda en espera.
+      mk({ id: 24, round: 7, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF1', away_source: 'WSF2' }),
+      mk({ id: 25, round: 8, bracket_round: 'F', home_team_id: null, away_team_id: null, home_source: 'WSF2', away_source: 'WSF1' }),
+    ];
+    expect(resolveAdvancements(matches)).toEqual([
+      { matchId: 24, side: 'home', teamId: 1 },
+      { matchId: 24, side: 'away', teamId: 2 },
+      { matchId: 25, side: 'home', teamId: 2 },
+      { matchId: 25, side: 'away', teamId: 1 },
+    ]);
+  });
+
+  it('el 3er puesto por ida/vuelta recibe a los perdedores del global', () => {
+    const matches = [
+      // SF1: gana 3 por global (4-2) → perdedor 1.
+      mk({ id: 20, round: 5, bracket_round: 'SF', home_team_id: 3, away_team_id: 1, status: 'played', home_goals: 2, away_goals: 1 }),
+      mk({ id: 21, round: 6, bracket_round: 'SF', home_team_id: 1, away_team_id: 3, status: 'played', home_goals: 1, away_goals: 2 }),
+      // SF2: gana 2 por global (3-1) → perdedor 4.
+      mk({ id: 22, round: 5, bracket_round: 'SF', home_team_id: 4, away_team_id: 2, status: 'played', home_goals: 1, away_goals: 2 }),
+      mk({ id: 23, round: 6, bracket_round: 'SF', home_team_id: 2, away_team_id: 4, status: 'played', home_goals: 1, away_goals: 0 }),
+      mk({ id: 26, round: 7, bracket_round: '3P', home_team_id: null, away_team_id: null, home_source: 'LSF1', away_source: 'LSF2' }),
+    ];
+    const adv = resolveAdvancements(matches);
+    expect(adv).toEqual([
+      { matchId: 26, side: 'home', teamId: 1 }, // perdedor SF1
+      { matchId: 26, side: 'away', teamId: 4 }, // perdedor SF2
+    ]);
   });
 });
 

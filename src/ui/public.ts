@@ -10,6 +10,7 @@ import { crossoverBadge } from './match.ts';
 import { zonesOf } from '../lib/zones.ts';
 import { computeSuspensions } from '../lib/suspensions.ts';
 import { buildBracketColumns, hasBracket, matchShortLabel, matchWinnerLoser, BRACKET_LABELS } from '../lib/bracket.ts';
+import { bracketTies, tieWinnerLoser } from '../lib/playoff.ts';
 import {
   absoluteUrl,
   shareTextHome,
@@ -1084,9 +1085,10 @@ export async function historyPage(db: D1Database): Promise<string> {
         teams.map((tm) => ({ id: tm.id, name: tm.name })),
         rulesOf(t)
       );
-      // Si hay llave y la final está decidida, el campeón es el de la final.
-      const finalMatch = matches.find((m) => m.bracket_round === 'F');
-      const finalWinner = finalMatch ? matchWinnerLoser(finalMatch) : null;
+      // Si hay llave y la final está decidida, el campeón es el de la final
+      // por resultado GLOBAL (con ida y vuelta, goles sumados de ambas).
+      const finalTie = bracketTies(matches, 'F')[0];
+      const finalWinner = finalTie ? tieWinnerLoser(matches, finalTie) : null;
       const championId = finalWinner?.winner ?? standings[0]?.teamId;
       champion = championId != null ? `<div class="champ-band mt-2">${icon('trophy', 15)}<span><strong>Campeón:</strong> ${esc(teamMap.get(championId)?.name ?? '')}</span></div>` : '';
       if (adj !== 0) {

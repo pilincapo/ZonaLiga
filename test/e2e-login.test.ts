@@ -2175,3 +2175,324 @@ describe.skipIf(!has)('e2e: llaves de playoffs (Fase 11C)', () => {
     expect(del.status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: flujo completo de competencia (Fase 12A)', () => {
+  /** Guarda un resultado jugado (goles sin autor: la planilla los acepta como "sin autor"). */
+  async function jugar(admin: ReturnType<typeof client>, mid: string, homeGoals: string, awayGoals: string, day: string): Promise<void> {
+    const raws: Record<string, string> = {
+      status: 'played',
+      played_on: day,
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: homeGoals,
+      away_goals: awayGoals,
+      notes: '',
+    };
+    for (let i = 1; i <= Number(homeGoals); i++) raws[`hg${i}`] = 'none';
+    for (let i = 1; i <= Number(awayGoals); i++) raws[`ag${i}`] = 'none';
+    const res = await admin.post(`/admin/planilla/${mid}`, raws);
+    expect(res.status).toBe(302);
+    const loc = decodeURIComponent(res.headers.get('location') ?? '');
+    expect(loc, `planilla ${mid}: ${loc}`).toContain('Planilla guardada');
+  }
+
+  /** IDs únicos de partidos en el HTML del fixture. */
+  function matchIds(html: string): string[] {
+    return [...new Set([...html.matchAll(/\/admin\/fixture\/(\d+)\/eliminar/g)].map((m) => m[1]!))];
+  }
+
+  /** Alta de torneo + participantes. Devuelve el id del torneo. */
+  async function crearTorneo(
+    admin: ReturnType<typeof client>,
+    nombre: string,
+    slug: string,
+    extra: Record<string, string>,
+    teamIds: string[]
+  ): Promise<string> {
+    const alta = await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      ...extra,
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes(nombre))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      ...extra,
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    const part = await admin.post(`/admin/torneos/${tid}`, partBody);
+    expect(part.status).toBe(302);
+    void slug;
+    return tid;
+  }
+
+  it('recorrido 1 — UNA_RUEDA: participantes → fixture → resultados → posiciones', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const tid = await crearTorneo(admin, '12A Liga E2E', '12a-liga-e2e', {
+      comp_format: 'UNA_RUEDA',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    }, teamIds);
+
+    // Fixture: 6 partidos (4 equipos, una rueda).
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12a-liga-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+
+    const fx = await (await admin.get('/admin/fixture?t=12a-liga-e2e')).text();
+    const ids = matchIds(fx);
+    expect(ids.length).toBe(6);
+
+    // Juega todos los partidos: los locales ganan 1-0 → el que más gana
+    // como local encabeza. Con round-robin puro cada equipo es local 2 veces;
+    // los desempates deciden el orden.
+    for (const [i, mid] of ids.entries()) {
+      await jugar(admin, mid, i % 2 === 0 ? '2' : '0', i % 2 === 0 ? '0' : '1', '2026-10-05');
+    }
+
+    // La tabla pública refleja la fase regular: 6 partidos jugados, con
+    // goles. Los partidos de liga no están marcados con ronda de llave.
+    const tabla = await (await admin.get('/posiciones?t=12a-liga-e2e')).text();
+    expect(tabla).toContain('12A Liga E2E');
+    expect(tabla).toContain('<strong>'); // hay puntos cargados
+    // Total de puntos: 3 partidos con ganador por 2-0 y 3 por 0-1 → 18 pts repartidos.
+    const pts = [...tabla.matchAll(/<strong>(\d+)<\/strong>/g)].map((m) => Number(m[1]));
+    expect(pts.reduce((a, b) => a + b, 0)).toBe(18);
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('recorrido 2 — GRUPOS_PLAYOFFS: grupos → fixture → resultados → semis → final', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const tid = await crearTorneo(admin, '12A Grupos E2E', '12a-grupos-e2e', {
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    }, teamIds);
+
+    // Fixture de grupos: 2 partidos (1 por grupo, una rueda).
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12a-grupos-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    const fx = await (await admin.get('/admin/fixture?t=12a-grupos-e2e')).text();
+    const groupIds = matchIds(fx);
+    expect(groupIds.length).toBe(2);
+
+    // Juega la fase de grupos: el local gana 1-0 en ambos.
+    for (const mid of groupIds) await jugar(admin, mid, '1', '0', '2026-10-05');
+
+    // Genera las llaves: los 4 clasificados (2 por grupo) → 2 SF + final.
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(decodeURIComponent(llaves.headers.get('location') ?? '')).toContain('Llaves generadas');
+
+    const fx2 = await (await admin.get('/admin/fixture?t=12a-grupos-e2e')).text();
+    const bracketIds = matchIds(fx2).filter((id) => !groupIds.includes(id));
+    expect(bracketIds.length).toBe(3); // 2 SF + 1 F
+
+    // La tabla de la fase regular NO cambió con la llave generada.
+    const tablaAntes = await (await admin.get('/posiciones?t=12a-grupos-e2e')).text();
+    const totalAntes = [...tablaAntes.matchAll(/<strong>(\d+)<\/strong>/g)].reduce((a, m) => a + Number(m[1]), 0);
+    expect(totalAntes).toBe(6); // 2 partidos, 3 pts cada ganador
+
+    // Juega las semis: gana el LOCAL de cada una (2-0).
+    for (const mid of bracketIds.slice(0, 2)) await jugar(admin, mid, '2', '0', '2026-10-12');
+
+    // El avance automático completó la final con los ganadores de las semis.
+    const fx3 = await (await admin.get('/admin/fixture?t=12a-grupos-e2e')).text();
+    const finalId = bracketIds[2]!;
+    const filaFinal = fx3.split('<tr>').find((chunk) => chunk.includes(`/admin/fixture/${finalId}/eliminar`)) ?? '';
+    expect(filaFinal).not.toContain('Por definir');
+
+    // La tabla sigue igual después de jugar las semis (los playoffs no suman).
+    const tablaDespues = await (await admin.get('/posiciones?t=12a-grupos-e2e')).text();
+    const totalDespues = [...tablaDespues.matchAll(/<strong>(\d+)<\/strong>/g)].reduce((a, m) => a + Number(m[1]), 0);
+    expect(totalDespues).toBe(totalAntes);
+
+    // Juega la final: gana el local 3-1.
+    await jugar(admin, finalId, '3', '1', '2026-10-19');
+
+    // La tabla sigue intacta después de la final.
+    const tablaFinal = await (await admin.get('/posiciones?t=12a-grupos-e2e')).text();
+    const totalFinal = [...tablaFinal.matchAll(/<strong>(\d+)<\/strong>/g)].reduce((a, m) => a + Number(m[1]), 0);
+    expect(totalFinal).toBe(totalAntes);
+
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('recorrido 3 — playoffs ida/vuelta: localía invertida y avance por resultado global', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const tid = await crearTorneo(admin, '12A IdaVuelta E2E', '12a-idavuelta-e2e', {
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    }, teamIds);
+
+    // Fixture de grupos (1 rueda) + llaves ida/vuelta (2 SF × 2 + final × 2).
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12a-idavuelta-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    for (const mid of matchIds(await (await admin.get('/admin/fixture?t=12a-idavuelta-e2e')).text())) {
+      await jugar(admin, mid, '1', '0', '2026-10-05');
+    }
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(decodeURIComponent(llaves.headers.get('location') ?? '')).toContain('Llaves generadas');
+
+    const fx = await (await admin.get('/admin/fixture?t=12a-idavuelta-e2e')).text();
+    const sfLegs = matchIds(fx).filter((id) => {
+      const fila = fx.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '';
+      return fila.includes('Semifinales');
+    });
+    expect(sfLegs.length).toBe(4); // 2 cruces × 2 partidos
+
+    // Localía invertida: los dos partidos del mismo cruce tienen el mismo par
+    // de equipos, con local/visitante intercambiados.
+    const pares = sfLegs.map((id) => {
+      const fila = fx.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '';
+      return /([^<>\s][^<>]*?) <span class="faint">vs<\/span> ([^<>\s][^<>]*?)</.exec(fila)?.slice(1).join('|') ?? '';
+    });
+    const ordenado = [...pares].sort();
+    const parIda = ordenado[0]!;
+    const parRevancha = ordenado.find((p) => p !== parIda && p.split('|').reverse().join('|') === parIda.split('|').reverse().join(''));
+    // El par invertido debe existir entre las semis (ida y revancha).
+    expect(pares.some((p) => p !== parIda && p.split('|')[0] === parIda.split('|')[1] && p.split('|')[1] === parIda.split('|')[0])).toBe(true);
+    void parRevancha;
+
+    // Juega la ida de un cruce: el visitante gana 0-2. En la revancha,
+    // ese equipo es local: si gana 2-0, el global es 4-0 y avanza aunque
+    // haya "perdido" de local — el avance sale del global, no del partido.
+    // Juega las 4 semis: ida 0-2 (visitante), revancha 1-1.
+    // Cruz A: ida 0-2, vuelta 1-1 → global 3-2 para el visitante de la ida.
+    // Cruz B: ida 2-0, vuelta 0-0 → global 2-0 para el local de la ida.
+    for (const [i, mid] of sfLegs.entries()) {
+      if (i < 2) await jugar(admin, mid, i === 0 ? '0' : '2', i === 0 ? '2' : '0', '2026-10-12');
+      else await jugar(admin, mid, '1', '1', '2026-10-19');
+    }
+
+    // Ambas finales de ida/vuelta quedan completadas por el avance automático.
+    const fx2 = await (await admin.get('/admin/fixture?t=12a-idavuelta-e2e')).text();
+    const finalLegs = matchIds(fx2).filter((id) => !sfLegs.includes(id) && !sfLegs.includes(id));
+    const filasFinal = finalLegs.map((id) => fx2.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '');
+    for (const fila of filasFinal) expect(fila).not.toContain('Por definir');
+
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('recorrido 4 — tercer puesto: los perdedores de las semis avanzan al 3P', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const tid = await crearTorneo(admin, '12A Tercero E2E', '12a-tercero-e2e', {
+      comp_format: 'GRUPOS_PLAYOFFS',
+      comp_groups: '2',
+      comp_qualifiers: '2',
+      comp_playoff_start: 'SF',
+      comp_playoff_single: 'on',
+      comp_playoff_third: 'on',
+      comp_playoff_tiebreak: 'PENALES',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    }, teamIds);
+
+    // Grupos + llaves con 3er puesto: 2 SF + 3P + final = 4 partidos.
+    const gen = await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' });
+    expect(gen.status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '12a-tercero-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+    for (const mid of matchIds(await (await admin.get('/admin/fixture?t=12a-tercero-e2e')).text())) {
+      await jugar(admin, mid, '1', '0', '2026-10-05');
+    }
+    const llaves = await admin.post('/admin/fixture/llaves', { tournament_id: tid });
+    expect(decodeURIComponent(llaves.headers.get('location') ?? '')).toContain('Llaves generadas');
+
+    const fx = await (await admin.get('/admin/fixture?t=12a-tercero-e2e')).text();
+    const bracketIds = matchIds(fx).filter((id) => {
+      const fila = fx.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '';
+      return fila.includes('Semifinales') || fila.includes('Tercer puesto') || fila.includes('Final');
+    });
+    expect(bracketIds.length).toBe(4); // 2 SF + 3P + F
+
+    // Juega las 2 semis (local gana 2-0).
+    const sfIds = bracketIds.filter((id) => {
+      const fila = fx.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '';
+      return fila.includes('Semifinales');
+    });
+    expect(sfIds.length).toBe(2);
+    for (const mid of sfIds) await jugar(admin, mid, '2', '0', '2026-10-12');
+
+    // El avance automático completó el 3P con los PERDEDORES y la final con
+    // los ganadores.
+    const fx2 = await (await admin.get('/admin/fixture?t=12a-tercero-e2e')).text();
+    const tercerId = bracketIds.find((id) => {
+      const fila = fx2.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '';
+      return fila.includes('Tercer puesto');
+    })!;
+    const filaTercer = fx2.split('<tr>').find((chunk) => chunk.includes(`/admin/fixture/${tercerId}/eliminar`)) ?? '';
+    expect(filaTercer).not.toContain('Por definir');
+    const finalId = bracketIds.find((id) => {
+      const fila = fx2.split('<tr>').find((c) => c.includes(`/admin/fixture/${id}/eliminar`)) ?? '';
+      return fila.includes('Final') && !fila.includes('Tercer puesto');
+    })!;
+    const filaFinal = fx2.split('<tr>').find((chunk) => chunk.includes(`/admin/fixture/${finalId}/eliminar`)) ?? '';
+    expect(filaFinal).not.toContain('Por definir');
+
+    // Juega el 3P y la final: la tabla de la fase regular no cambia.
+    const tablaAntes = await (await admin.get('/posiciones?t=12a-tercero-e2e')).text();
+    const totalAntes = [...tablaAntes.matchAll(/<strong>(\d+)<\/strong>/g)].reduce((a, m) => a + Number(m[1]), 0);
+    await jugar(admin, tercerId, '1', '0', '2026-10-19');
+    await jugar(admin, finalId, '2', '1', '2026-10-19');
+    const tablaDespues = await (await admin.get('/posiciones?t=12a-tercero-e2e')).text();
+    const totalDespues = [...tablaDespues.matchAll(/<strong>(\d+)<\/strong>/g)].reduce((a, m) => a + Number(m[1]), 0);
+    expect(totalDespues).toBe(totalAntes);
+
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+});

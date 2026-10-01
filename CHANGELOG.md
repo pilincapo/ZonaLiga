@@ -13,6 +13,20 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.4] — 2026-10-01 — Resultado global en llaves de ida y vuelta (Fase 12A)
+
+### Arreglo
+
+- En llaves de ida y vuelta, el avance a la ronda siguiente ahora se decide por el **resultado global del cruce** (goles sumados de ida y revancha): antes se miraba un solo partido, lo que podía avanzar al equipo equivocado.
+- Con el global empatado, define la suma de los puntos de penales cargados en las planillas.
+- El campeón del historial de torneos se calcula con el resultado global de la final (antes: solo un partido de la final).
+
+### Importante
+
+- Sin reglas nuevas de desempate: gol de visitante no aplica; solo goles globales y, si empata, penales.
+
+---
+
 ## [0.3.3] — 2026-10-01 — Llaves de playoffs (Fase 11C)
 
 ### Nuevo

@@ -5,7 +5,7 @@
 // Dominio puro: no toca la base.
 
 import type { BracketRound, Match, StandingRow } from './types.ts';
-import { matchShortLabel, matchWinnerLoser } from './bracket.ts';
+import { matchWinnerLoser } from './bracket.ts';
 import { isCrossoverMatch } from './crossover.ts';
 
 export type PlayoffFormat = 'final' | 'semis_final' | 'semis_final_3p';
@@ -15,6 +15,68 @@ export const PLAYOFF_FORMATS: { value: PlayoffFormat; label: string }[] = [
   { value: 'semis_final', label: 'Semifinales + final' },
   { value: 'semis_final_3p', label: 'Semifinales + final + 3er puesto' },
 ];
+
+/**
+ * Fase 12A: agrupa los partidos de una ronda de llave en cruces ("ties").
+ * Con ida y vuelta, los dos partidos del mismo cruce comparten el par de
+ * equipos y forman UN solo cruce; con partido único, cada partido es su
+ * propio cruce. El orden de los cruces es el de creación (menor id primero),
+ * el mismo con el que el generador numeró los orígenes "W…"/"L…".
+ */
+export function bracketTies(
+  matches: Match[],
+  round: string
+): { teams: [number, number]; matchIds: number[] }[] {
+  if (!round) return [];
+  const inRound = matches
+    .filter((m) => m.bracket_round === round && m.home_team_id != null && m.away_team_id != null)
+    .sort((a, b) => a.id - b.id);
+  const ties: { teams: [number, number]; matchIds: number[] }[] = [];
+  for (const m of inRound) {
+    const lo = Math.min(m.home_team_id!, m.away_team_id!);
+    const hi = Math.max(m.home_team_id!, m.away_team_id!);
+    let tie = ties.find((t) => t.teams[0] === lo && t.teams[1] === hi);
+    if (!tie) {
+      tie = { teams: [lo, hi], matchIds: [] };
+      ties.push(tie);
+    }
+    tie.matchIds.push(m.id);
+  }
+  return ties;
+}
+
+/**
+ * Fase 12A: ganador y perdedor de un cruce completo (partido único o ida y
+ * vuelta) por resultado GLOBAL: goles sumados entre todas las fechas. Con el
+ * global empatado, define la suma de puntos manuales (penales). Si falta
+ * jugar algún partido del cruce, todavía no hay ganador.
+ */
+export function tieWinnerLoser(
+  matches: Match[],
+  tie: { teams: [number, number]; matchIds: number[] }
+): { winner: number; loser: number } | null {
+  const legs = tie.matchIds
+    .map((id) => matches.find((m) => m.id === id))
+    .filter((m): m is Match => Boolean(m));
+  if (legs.length === 0) return null;
+  if (!legs.every((m) => m.status === 'played' || m.status === 'walkover')) return null;
+  const [t0, t1] = tie.teams;
+  let g0 = 0;
+  let g1 = 0;
+  let pen0 = 0;
+  for (const leg of legs) {
+    const homeIs0 = leg.home_team_id === t0;
+    g0 += homeIs0 ? leg.home_goals : leg.away_goals;
+    g1 += homeIs0 ? leg.away_goals : leg.home_goals;
+    if (leg.home_points != null && leg.away_points != null) {
+      pen0 += homeIs0 ? leg.home_points - leg.away_points : leg.away_points - leg.home_points;
+    }
+  }
+  if (g0 > g1) return { winner: t0, loser: t1 };
+  if (g1 > g0) return { winner: t1, loser: t0 };
+  if (pen0 !== 0) return pen0 > 0 ? { winner: t0, loser: t1 } : { winner: t1, loser: t0 };
+  return null;
+}
 
 export function parsePlayoffFormat(value: unknown): PlayoffFormat {
   return value === 'semis_final' || value === 'semis_final_3p' ? value : 'final';
@@ -122,13 +184,22 @@ export interface Advancement {
 
 /**
  * Avance automático de la llave: para cada partido con un equipo sin definir
- * y un origen "W…" / "L…", busca el partido referenciado por su etiqueta
- * corta (SF1, QF2…) y, si ya está decidido (incluye penales: empate en goles
- * con puntos manuales cargados), devuelve el equipo que pasa.
+ * y un origen "W…" / "L…", busca el cruce referenciado (ronda + número) y, si
+ * ya está decidido por resultado global (goles sumados, con ida y vuelta, o
+ * penales), devuelve el equipo que pasa.
  */
 export function resolveAdvancements(matches: Match[]): Advancement[] {
-  const decided = new Map<string, ReturnType<typeof matchWinnerLoser>>();
   const out: Advancement[] = [];
+  const cache = new Map<string, { winner: number; loser: number } | null>();
+  const winnerOf = (label: string): { winner: number; loser: number } | null => {
+    if (!cache.has(label)) {
+      const round = label.replace(/\d+$/, '');
+      const n = Number(label.slice(round.length));
+      const tie = Number.isInteger(n) && n >= 1 ? bracketTies(matches, round)[n - 1] : undefined;
+      cache.set(label, tie ? tieWinnerLoser(matches, tie) : null);
+    }
+    return cache.get(label) ?? null;
+  };
   for (const m of matches) {
     if (!m.bracket_round) continue;
     const sides: { side: 'home' | 'away'; source: string }[] = [
@@ -139,15 +210,8 @@ export function resolveAdvancements(matches: Match[]): Advancement[] {
       const hasTeam = side === 'home' ? m.home_team_id != null : m.away_team_id != null;
       if (hasTeam || !source) continue;
       const wantWinner = source.startsWith('W');
-      const label = source.slice(1);
       if (!wantWinner && !source.startsWith('L')) continue;
-      const ref = matches.find((x) => x.bracket_round && matchShortLabel(x, matches) === label);
-      if (!ref) continue;
-      let wl = decided.get(ref.id.toString());
-      if (wl === undefined) {
-        wl = matchWinnerLoser(ref);
-        decided.set(ref.id.toString(), wl);
-      }
+      const wl = winnerOf(source.slice(1));
       if (!wl) continue;
       const teamId = wantWinner ? wl.winner : wl.loser;
       out.push({ matchId: m.id, side, teamId });
