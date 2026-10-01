@@ -8,7 +8,11 @@ import { crossoverRoundsOf, matchesForStandings, isCrossoverMatch } from '../lib
 import { orderMatchesForDisplay } from '../lib/order.ts';
 import { crossoverBadge } from './match.ts';
 import { zonesOf } from '../lib/zones.ts';
-import { computeSuspensions } from '../lib/suspensions.ts';
+import {
+  computeSuspensions,
+  remainingSuspensionMatches,
+  type PlayerSuspension,
+} from '../lib/suspensions.ts';
 import { buildBracketColumns, hasBracket, matchShortLabel, matchWinnerLoser, BRACKET_LABELS } from '../lib/bracket.ts';
 import { bracketTies, tieWinnerLoser } from '../lib/playoff.ts';
 import {
@@ -38,10 +42,23 @@ import {
 import { searchPlayers, searchTeams, searchTournaments } from '../lib/search.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { adjustmentsForTournament } from '../lib/adjustments.ts';
-import { sanctionsForTournament } from '../lib/sanctions.ts';
-import { combineDiscipline } from '../lib/discipline.ts';
+import {
+  sanctionsForTournament,
+  closeFulfilledSanctions,
+  SANCTION_MEASURE_LABELS,
+  type SanctionRow,
+  type SanctionStatus,
+} from '../lib/sanctions.ts';
+import {
+  combineDiscipline,
+  playerEligibility,
+  hasHardBlock,
+  type DisciplineEntry,
+  type PlayerEligibility,
+} from '../lib/discipline.ts';
 import { sanctionEffectsOf } from '../lib/sanctionEffects.ts';
 import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow, zoneBadge } from './match.ts';
+import { disciplineForMatch, teamDisciplineNotice } from './admin.ts';
 import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
@@ -1008,6 +1025,55 @@ export async function matchPage(db: D1Database, id: number, origin: string): Pro
     }
   }
 
+  // Elegibilidad para este partido: disciplina combinada (auto + manual),
+  // sin recalcular suspensiones. Solo se muestran datos reales existentes.
+  const eligibilityInput = await disciplineForMatch(db, m);
+  const [homeSquad, awaySquad] = await Promise.all([
+    home != null ? listPlayers(db, home.id) : Promise.resolve([]),
+    away != null ? listPlayers(db, away.id) : Promise.resolve([]),
+  ]);
+  const suspended: { name: string; teamName: string; teamId: number | null; reasons: PlayerEligibility['reasons']; hard: boolean }[] = [];
+  if (eligibilityInput) {
+    for (const p of [...homeSquad, ...awaySquad]) {
+      const elig = playerEligibility(eligibilityInput, p.id);
+      if (!elig.eligible && elig.reasons.length > 0) {
+        const teamName = p.team_id === home?.id ? (home?.name ?? '') : p.team_id === away?.id ? (away?.name ?? '') : '';
+        suspended.push({ name: p.name, teamName, teamId: p.team_id, reasons: elig.reasons, hard: hasHardBlock(elig) });
+      }
+    }
+  }
+  const teamNotice =
+    teamDisciplineNotice(eligibilityInput, m.home_team_id) + teamDisciplineNotice(eligibilityInput, m.away_team_id);
+  const suspendedRows = suspended
+    .map((s) => {
+      const tags = s.reasons
+        .map((r) => {
+          const origen = r.source === 'auto' ? 'Automática' : 'Manual';
+          const rest = r.remaining != null ? ` · ${r.remaining} fecha${r.remaining === 1 ? '' : 's'}` : '';
+          const rev = r.needsReview ? ' · a revisar' : '';
+          return `<span class="badge ${r.source === 'auto' ? 'ghost' : 'amber'}">${origen}</span> ${esc(r.reason)}${rest}${rev}`;
+        })
+        .join('<br>');
+      const estado = s.hard ? '<span class="badge red">No habilitado</span>' : '<span class="badge amber">Revisar</span>';
+      const teamTag = s.teamId != null ? ` <span class="muted small">${esc(s.teamName)}</span>` : '';
+      return `<tr><td>${esc(s.name)}${teamTag}</td><td>${tags}</td><td>${estado}</td></tr>`;
+    })
+    .join('');
+  const disciplineBlock =
+    eligibilityInput && (teamNotice || suspendedRows)
+      ? `<section class="block"><div class="card">${sectionHead('Elegibilidad para este partido')}
+        ${teamNotice}
+        ${
+          suspendedRows
+            ? `<div class="table-wrap"><table class="data">
+          <thead><tr><th>Jugador</th><th>Motivo</th><th>Estado</th></tr></thead>
+          <tbody>${suspendedRows}</tbody></table></div>`
+            : emptyNote('Sin jugadores afectados 🎉')
+        }
+        <p class="hint" style="margin:10px 0 0">Se muestran sanciones vigentes que afectan a este partido. El detalle completo está en <a href="/suspensiones${tournament ? `?t=${escUrl(tournament.slug)}` : ''}">Suspensiones</a>.</p>
+      </div></section>`
+      : '';
+
   const homeEvents = events.filter((e) => e.team_id === m.home_team_id);
   const awayEvents = events.filter((e) => e.team_id !== m.home_team_id);
   const evList = (list: typeof events) =>
@@ -1049,6 +1115,7 @@ export async function matchPage(db: D1Database, id: number, origin: string): Pro
   ${m.notes ? `<p class="muted small mt-2" style="text-align:center">${esc(m.notes)}</p>` : ''}
   ${shareBar([{ label: '📲 Compartir resultado', href: shareHref }])}
 </section>
+${disciplineBlock}
 ${
   m.status === 'played' || m.status === 'walkover'
     ? `<section class="block grid-2">
@@ -1239,6 +1306,11 @@ export function notFoundPage(): string {
 
 /* ============================== Suspensiones (público) ============================== */
 
+function sortEntries(a: DisciplineEntry, b: DisciplineEntry): number {
+  if (a.source !== b.source) return a.source === 'auto' ? -1 : 1;
+  return (a.playerId ?? 0) - (b.playerId ?? 0);
+}
+
 export async function suspensionsPage(db: D1Database, slugParam?: string): Promise<string> {
   const view = await loadTournamentView(db, { slug: slugParam, events: true });
   if (!view) return layout({ title: 'Suspensiones', active: 'suspensiones', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, body: emptyNote('No hay torneo activo') });
@@ -1251,27 +1323,130 @@ export async function suspensionsPage(db: D1Database, slugParam?: string): Promi
   const maxRound = matches.reduce((acc, m) => Math.max(acc, m.round ?? 0), 0);
   const suspensions = computeSuspensions(events, matches, rules, maxRound);
 
-  const rows: string[] = [];
-  for (const s of suspensions) {
-    const p = await getPlayer(db, s.playerId);
-    const team = teamMap.get(s.teamId);
-    rows.push(`<tr>
-    <td>${p ? `<a href="/jugador/${p.id}">${esc(p.name)}</a>` : '—'}</td>
-    <td>${team ? esc(team.name) : '—'}</td>
-    <td>${esc(s.reason)}</td>
-    <td class="num"><strong>${s.matches}</strong></td>
-  </tr>`);
+  // Disciplina unificada: automáticas + manuales (origen conservado, sin fusión).
+  const today = leagueNow().date;
+  const playedRounds = matches
+    .filter((m) => m.status === 'played' || m.status === 'walkover')
+    .map((m) => m.round ?? 0)
+    .filter((r) => r > 0);
+  const servedRemaining = (s: PlayerSuspension): number | null => {
+    const rest = remainingSuspensionMatches(s, matches, maxRound);
+    return rest.length > 0 ? rest.length : 0;
+  };
+  const incidentRoundOf = (s: SanctionRow): number | null => {
+    if (!s.team_id) return null;
+    const rounds = matches
+      .filter((m) => (m.home_team_id === s.team_id || m.away_team_id === s.team_id) && m.played_on === s.incident_date)
+      .map((m) => m.round)
+      .filter((r): r is number => r != null);
+    return rounds.length ? Math.max(...rounds) : null;
+  };
+  // Fase 8: cierre automático de sanciones cumplidas (idempotente).
+  await closeFulfilledSanctions(db, t.id, { playedRounds, today, incidentRoundOf });
+  const allSanctions = await sanctionsForTournament(db, t.id);
+  const { active: discipline, archive: disciplineArchive } = combineDiscipline(
+    suspensions.map((s) => ({ tournamentId: t.id, suspension: s, servedRemaining: servedRemaining(s) })),
+    allSanctions.map((s) => ({ sanction: s, incidentRound: incidentRoundOf(s), playedRounds, today }))
+  );
+
+  // Nombres de jugadores (automáticas + manuales) en una sola tanda.
+  const playerName = new Map<number, string>();
+  const playerIds = new Set<number>(
+    [...discipline, ...disciplineArchive].flatMap((e) => (e.playerId != null ? [e.playerId] : []))
+  );
+  if (playerIds.size > 0) {
+    const ids = [...playerIds];
+    const ph = ids.map((_, i) => `?${i + 1}`).join(',');
+    const { results } = await db
+      .prepare(`SELECT id, name FROM players WHERE id IN (${ph})`)
+      .bind(...ids)
+      .all<{ id: number; name: string }>();
+    for (const row of results ?? []) playerName.set(row.id, row.name);
   }
 
-  const table = rows.length
-    ? `<div class="table-wrap"><table class="data">
-  <thead><tr><th>Jugador</th><th>Equipo</th><th>Motivo</th><th class="num">Partidos</th></tr></thead>
-  <tbody>${rows.join('')}</tbody></table></div>`
-    : emptyNote('Sin suspensiones vigentes 🎉');
+  // Badges (reutilizados del patrón de admin).
+  const originBadge = (source: DisciplineEntry['source']): string =>
+    source === 'auto'
+      ? '<span class="badge ghost">Automática</span>'
+      : '<span class="badge amber">Manual</span>';
+  const scopeBadge = (scope: 'player' | 'team'): string =>
+    scope === 'team' ? '<span class="badge ghost">Equipo</span> ' : '';
+  const durationBadge = (d: DisciplineEntry['duration']): string => {
+    if (d.kind === 'fechas') return `<span class="badge ghost">${d.amount ?? 0} fecha${(d.amount ?? 0) === 1 ? '' : 's'}</span>`;
+    if (d.kind === 'dias') return `<span class="badge ghost">${d.amount ?? 0} día${(d.amount ?? 0) === 1 ? '' : 's'}</span>`;
+    return `<span class="badge ghost">Hasta el ${esc(d.untilDate ?? '—')}</span>`;
+  };
+  const measureBadge = (e: DisciplineEntry): string => {
+    if (e.measure == null) return '';
+    const label = SANCTION_MEASURE_LABELS[e.measure];
+    const detail =
+      e.measure === 'perdida_puntos' ? ` (${e.duration.amount ?? 0} pt${(e.duration.amount ?? 0) === 1 ? '' : 's'})`
+      : e.measure === 'suspension_fechas' ? ` (${e.duration.amount ?? 0} fecha${(e.duration.amount ?? 0) === 1 ? '' : 's'})`
+      : e.measure === 'suspension_dias' && e.duration.untilDate ? ` (hasta el ${esc(e.duration.untilDate)})`
+      : '';
+    const tone = e.measure === 'expulsion' ? 'red' : e.measure === 'advertencia' ? 'ghost' : 'amber';
+    return `<span class="badge ${tone}">${esc(label)}${detail}</span>`;
+  };
+  const statusBadge = (status: SanctionStatus, annulReason?: string): string => {
+    if (status === 'activa') return '<span class="badge red">Activa</span>';
+    if (status === 'cumplida') return '<span class="badge green">Cumplida</span>';
+    return `<span class="badge ghost">Anulada</span>${annulReason ? `<div class="small muted">Motivo de anulación: ${esc(annulReason)}</div>` : ''}`;
+  };
+  const rowFor = (e: DisciplineEntry): string => {
+    const orig = e.sanctionId != null ? allSanctions.find((s) => s.id === e.sanctionId) : undefined;
+    const afflicted =
+      e.scope === 'team'
+        ? `Equipo ${teamMap.get(e.teamId ?? -1)?.name ?? '—'}`
+        : e.playerId != null
+          ? `<a href="/jugador/${e.playerId}">${esc(playerName.get(e.playerId) ?? '—')}</a>`
+          : '—';
+    const teamName = esc(teamMap.get(e.teamId ?? -1)?.name ?? '—');
+    const motivo =
+      e.source === 'manual' && e.description ? `${esc(e.reason)} — ${esc(e.description)}` : esc(e.reason);
+    const periodo = e.measure != null ? measureBadge(e) : durationBadge(e.duration);
+    const restante =
+      e.remaining != null && e.status === 'activa' && e.duration.kind !== 'hasta_fecha'
+        ? `<div class="small muted">${e.remaining} ${e.duration.kind === 'fechas' ? 'fecha(s) restante(s)' : 'día(s) restante(s)'}</div>`
+        : '';
+    const annul =
+      e.status === 'anulada' && orig?.annul_reason
+        ? `<div class="small muted">Motivo de anulación: ${esc(orig.annul_reason)}</div>`
+        : '';
+    return `<tr>
+      <td>${scopeBadge(e.scope)}${afflicted}${annul}</td>
+      <td>${teamName}</td>
+      <td>${motivo}</td>
+      <td>${periodo}${restante}</td>
+      <td>${formatDateShort(e.originDate ?? '') || '—'}</td>
+      <td>${statusBadge(e.status, orig?.annul_reason)}</td>
+      <td>${originBadge(e.source)}</td>
+    </tr>`;
+  };
+
+  const activeRows = discipline.slice().sort(sortEntries).map((e) => rowFor(e)).join('');
+  const activeTable =
+    activeRows
+      ? `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Afectado</th><th>Equipo</th><th>Motivo</th><th>Período</th><th>Fecha</th><th>Estado</th><th>Origen</th></tr></thead>
+    <tbody>${activeRows}</tbody></table></div>`
+      : emptyNote('Sin sanciones ni suspensiones vigentes 🎉');
+
+  const archiveRows = disciplineArchive.slice().sort(sortEntries).map((e) => rowFor(e)).join('');
+  const archiveSection =
+    disciplineArchive.length
+      ? `<details class="mt-3" style="margin-top:10px">
+    <summary style="cursor:pointer;font-weight:600">Historial (cumplidas y anuladas) · ${disciplineArchive.length}</summary>
+    ${archiveRows
+        ? `<div class="table-wrap" style="margin-top:8px"><table class="data">
+      <thead><tr><th>Afectado</th><th>Equipo</th><th>Motivo</th><th>Período</th><th>Fecha</th><th>Estado</th><th>Origen</th></tr></thead>
+      <tbody>${archiveRows}</tbody></table></div>`
+        : '<p class="hint">Todavía no hay sanciones cumplidas ni anuladas.</p>'}
+  </details>`
+      : '';
 
   const body = `
-<section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Suspensiones</h1></section>
-<section class="block"><div class="card">${table}</div></section>`;
+<section class="hero"><div class="hero-kicker">${esc(t.name)}</div><h1>Suspensiones y sanciones</h1></section>
+<section class="block"><div class="card">${activeTable}${archiveSection}</div></section>`;
   return layout({ title: `Suspensiones — ${t.name}`, active: 'suspensiones', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug: t.slug, body });
 }
 

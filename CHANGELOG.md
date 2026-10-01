@@ -13,6 +13,21 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.9] — 2026-10-01 — Suspensiones y elegibilidad a la vista (Fase 14)
+
+### Nuevo
+
+- La página pública **Suspensiones** ahora muestra todo junto: las suspensiones automáticas (por tarjetas) y las sanciones manuales del tribunal, cada una con su sello de origen (Automática / Manual) y su estado (Activa, Cumplida o Anulada).
+- Cada fila indica quién queda afectado (jugador o equipo), el equipo, el motivo, el período (fechas o días, con lo que falta cumplir) y la fecha del incidente o jornada de origen.
+- Las sanciones anuladas quedan en el historial con su motivo de anulación a la vista: nada se borra.
+- La ficha de cada partido muestra la **elegibilidad para ese partido**: los jugadores no habilitados, con el motivo y el origen de cada sanción, más el aviso si un equipo tiene una sanción disciplinaria activa.
+
+### Mejora
+
+- El detalle de cada sanción manual incluye su descripción completa en la tabla, así se entiende sin tener que ir al panel de administración.
+
+---
+
 ## [0.3.8] — 2026-10-01 — Suspensiones más rápidas
 
 ### Mejora
