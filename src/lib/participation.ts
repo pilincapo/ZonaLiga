@@ -178,6 +178,51 @@ export async function participantsOrAllTeams(
 }
 
 /**
+ * Pools de varios torneos en una sola tanda de consultas: un JOIN que trae los
+ * equipos vinculados a cada torneo, y una sola consulta de respaldo para los
+ * torneos que no tienen participantes registrados (retrocompatibilidad con los
+ * torneos previos a la tabla de participación). Evita el N+1 de hacer un viaje
+ * por torneo. El orden por nombre se conserva por torneo.
+ */
+export async function participantsTeamsByTournament(
+  db: D1Database,
+  tournamentIds: number[]
+): Promise<Map<number, Team[]>> {
+  const byTid = new Map<number, Team[]>();
+  if (tournamentIds.length > 0) {
+    const ph = tournamentIds.map((_, i) => `?${i + 1}`).join(',');
+    const { results } = await db
+      .prepare(
+        `SELECT tt.tournament_id, tm.*
+         FROM tournament_teams tt
+         JOIN teams tm ON tm.id = tt.team_id
+         WHERE tt.tournament_id IN (${ph})
+         ORDER BY tt.tournament_id, tm.name COLLATE NOCASE`
+      )
+      .bind(...tournamentIds)
+      .all<{ tournament_id: number } & Team>();
+    for (const row of results ?? []) {
+      const arr = byTid.get(row.tournament_id) ?? [];
+      arr.push(row);
+      byTid.set(row.tournament_id, arr);
+    }
+  }
+  // Respaldo global (igual que participantsOrAllTeams) solo si hace falta.
+  let fallback: Team[] | null = null;
+  const result = new Map<number, Team[]>();
+  for (const tid of tournamentIds) {
+    const pool = byTid.get(tid);
+    if (pool && pool.length > 0) {
+      result.set(tid, pool);
+    } else {
+      if (fallback === null) fallback = (await db.prepare('SELECT * FROM teams ORDER BY name COLLATE NOCASE').all<Team>()).results ?? [];
+      result.set(tid, fallback);
+    }
+  }
+  return result;
+}
+
+/**
  * Participantes sin zona asignada en un torneo con zonas activas. Solo
  * DETECCIÓN: no inventa zona ni quita la participación. Vacío si las zonas
  * están apagadas (torneo de círculo global: no aplica).

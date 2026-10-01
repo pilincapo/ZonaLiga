@@ -61,7 +61,7 @@ import {
 import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
-import { teamIdsOfTournament, participantsOrAllTeams, participantsWithoutZone } from '../lib/participation.ts';
+import { teamIdsOfTournament, participantsTeamsByTournament, participantsWithoutZone } from '../lib/participation.ts';
 import { sanctionsForTournament, SANCTION_MEASURES, SANCTION_MEASURE_LABELS, closeFulfilledSanctions } from '../lib/sanctions.ts';
 import type { SanctionRow, SanctionStatus } from '../lib/sanctions.ts';
 import { combineDiscipline, playerEligibility, hasHardBlock, type DisciplineEntry, type PlayerEligibility } from '../lib/discipline.ts';
@@ -1764,8 +1764,10 @@ export async function matchFormPage(
   // Un equipo que ya figura en el partido (editando) entra igual, aunque hoy
   // no participe: no se rompe lo existente.
   const perTournament = new Map<number, Map<number, string>>();
+  // Una sola tanda de consultas para todos los torneos (evita N+1).
+  const pools = await participantsTeamsByTournament(db, tournaments.map((x) => x.id));
   for (const x of tournaments) {
-    const { teams: pool } = await participantsOrAllTeams(db, x.id);
+    const pool = pools.get(x.id) ?? teams;
     perTournament.set(x.id, new Map(pool.map((tm) => [tm.id, tm.name])));
   }
   if (m?.tournament_id != null && !perTournament.has(m.tournament_id)) {
@@ -2580,15 +2582,31 @@ export async function suspensionsAdminPage(db: D1Database, slugParam: string | u
   const playerIds = new Set<number>();
   for (const s of suspensions) playerIds.add(s.playerId);
   for (const s of allSanctions) if (s.player_id != null) playerIds.add(s.player_id);
+  // Consultas agrupadas: en vez de un viaje a la base por cada jugador y otro
+  // por cada equipo (era lo que hacía lenta la página), traemos todo en dos
+  // tandas y armamos los mapas acá.
   const playerName = new Map<number, string>();
-  for (const pid of playerIds) {
-    const row = await db.prepare('SELECT name FROM players WHERE id = ?1').bind(pid).first<{ name: string }>();
-    if (row) playerName.set(pid, row.name);
+  if (playerIds.size > 0) {
+    const ids = [...playerIds];
+    const ph = ids.map((_, i) => `?${i + 1}`).join(',');
+    const { results } = await db
+      .prepare(`SELECT id, name FROM players WHERE id IN (${ph})`)
+      .bind(...ids)
+      .all<{ id: number; name: string }>();
+    for (const row of results ?? []) playerName.set(row.id, row.name);
   }
   const playersOf = new Map<number, { id: number; name: string }[]>();
-  for (const tm of teams) {
-    const roster = await listPlayers(db, tm.id, true);
-    playersOf.set(tm.id, roster.map((p) => ({ id: p.id, name: p.name })));
+  if (teams.length > 0) {
+    const ph = teams.map((_, i) => `?${i + 1}`).join(',');
+    const { results } = await db
+      .prepare(`SELECT id, team_id, name FROM players WHERE team_id IN (${ph}) ORDER BY name COLLATE NOCASE`)
+      .bind(...teams.map((tm) => tm.id))
+      .all<{ id: number; name: string; team_id: number }>();
+    for (const row of results ?? []) {
+      const list = playersOf.get(row.team_id) ?? [];
+      list.push({ id: row.id, name: row.name });
+      playersOf.set(row.team_id, list);
+    }
   }
 
   // Filas de AUTOMÁTICAS: remaining real calculado por la capa de disciplina

@@ -13,6 +13,14 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.8] — 2026-10-01 — Suspensiones más rápidas
+
+### Mejora
+
+- El panel de Suspensiones demora bastante menos en abrir: ahora consulta a la base de datos en pocas tandas grandes en lugar de hacer un viaje por cada equipo y por cada jugador sancionado. La pantalla se ve exactamente igual que antes.
+- El formulario de partido (nuevo/editar) también carga más rápido: los dropdowns de equipos por torneo ahora se resuelven con una sola consulta por torneo en lugar de un viaje a la base por cada uno.
+---
+
 ## [0.3.7] — 2026-10-01 — Reprogramación de partidos (Fase 13)
 
 ### Nuevo
