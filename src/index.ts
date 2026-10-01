@@ -43,7 +43,12 @@ app.get('/suspensiones', async (c) => c.html(await pub.suspensionsPage(c.env.DB,
 app.get('/buscar', async (c) => c.html(await pub.searchPage(c.env.DB, c.req.query('q'))));
 
 /** Novedades: qué cambió en cada versión (no usa base de datos). */
-app.get('/changelog', (c) => c.html(pub.changelogPage()));
+app.get('/changelog', (c) => {
+  const t0 = Date.now();
+  const html = pub.changelogPage();
+  c.header('Server-Timing', `generate;dur=${Date.now() - t0}`);
+  return c.html(html);
+});
 
 /** Fecha en vivo: la página y el JSON que refresca solo. */
 app.get('/en-vivo', async (c) => c.html(await live.livePage(c.env.DB, c.req.query('t'))));
