@@ -13,6 +13,26 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.12] — 2026-10-02 — Equipos y jugadores (Fase 16)
+
+### Nuevo
+
+- Los **jugadores se pueden editar**: nombre, dorsal y posición, sin borrar y volver a crear (lo que se llevaba por delante todo el historial del jugador).
+- Se puede **dar de baja y reactivar** a un jugador. Un jugador que ya tiene goles o tarjetas cargados **nunca se borra**: se da de baja, así sus estadísticas, la planilla y las fichas públicas conservan al autor. Los que no tienen nada asociado sí se eliminan de verdad.
+- Cada tarjeta de jugador muestra cuántos eventos tiene, y el botón de quitar avisa antes qué va a pasar ("se elimina" o "se da de baja").
+- La lista de jugadores tiene **búsqueda por nombre o dorsal** y filtros por **estado** (en plantilla / de baja) y **posición**, combinables.
+- La **tarjeta de cada equipo** muestra cuántos jugadores, partidos y torneos tiene, con un distintivo "En fixture" para los que ya tienen partidos, y un acceso directo a su plantilla.
+- La **ficha de edición del equipo** tiene una "Ficha rápida" con su contexto: jugadores, partidos, ya jugados, en qué torneo participa (con su estado) y accesos a la plantilla y al sitio público.
+
+### Arreglo
+
+- **Ya no se rompen las altas con datos inválidos.** Antes, un dorsal fuera de rango, una posición inexistente o un equipo que no existe devolvían un error 500. Ahora se validan en el servidor y se explica el problema en español.
+- El **color del equipo** se valida como hexadecimal y el **escudo** solo acepta direcciones web: antes se guardaba cualquier texto y el escudo quedaba roto en todo el sitio.
+- **No se puede eliminar un equipo que tiene partidos**: sus partidos se quedarían sin equipo y el torneo quedaría inconsistente. Si dejó de competir, la salida es marcarlo inactivo. La confirmación dice cuántos jugadores, torneos y partidos se borran.
+- El formulario del torneo ahora **lista también a los participantes inactivos**: antes un participante dado de baja desaparecía de la lista y al guardar se perdía su participación sin avisar.
+
+---
+
 ## [0.3.11] — 2026-10-02 — Calendario operativo del fixture (Fase 15)
 
 ### Nuevo

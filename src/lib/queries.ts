@@ -2,6 +2,7 @@
 
 import type { Event, EventType, Match, Player, Rules, Team, Tournament } from './types.ts';
 import type { RescheduleRecord } from './reschedule.ts';
+import type { TeamUsage } from './roster.ts';
 
 export async function listTournaments(db: D1Database): Promise<Tournament[]> {
   const { results } = await db
@@ -303,6 +304,73 @@ export async function tournamentEvents(db: D1Database, tournamentId: number): Pr
     .bind(tournamentId)
     .all<Event>();
   return results ?? [];
+}
+
+/**
+ * Fase 16: historial asociado a un jugador, para decidir si se puede borrar.
+ * Los eventos son los goles y tarjetas ya cargados (histórico público); las
+ * entregas son las propuestas de los delegados que lo mencionan.
+ */
+export async function playerUsage(
+  db: D1Database,
+  playerId: number
+): Promise<{ events: number; submissions: number }> {
+  const [ev, sub] = await Promise.all([
+    db
+      .prepare('SELECT COUNT(*) AS n FROM events WHERE player_id = ?1')
+      .bind(playerId)
+      .first<{ n: number }>(),
+    db
+      .prepare('SELECT COUNT(*) AS n FROM submission_events WHERE player_id = ?1')
+      .bind(playerId)
+      .first<{ n: number }>(),
+  ]);
+  return { events: ev?.n ?? 0, submissions: sub?.n ?? 0 };
+}
+
+/**
+ * Fase 16: qué tiene alrededor un equipo (partidos, plantilla, torneos) para
+ * el aviso de eliminación y la tarjeta del panel. Una sola consulta con
+ * subselect correlacionados: evita el N+1 de contar por separado.
+ */
+export async function teamUsage(db: D1Database, teamId: number): Promise<TeamUsage> {
+  const row = await db
+    .prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM matches WHERE home_team_id = ?1 OR away_team_id = ?1) AS matches,
+        (SELECT COUNT(*) FROM matches
+          WHERE (home_team_id = ?1 OR away_team_id = ?1)
+            AND status IN ('played','walkover')) AS played,
+        (SELECT COUNT(*) FROM players WHERE team_id = ?1) AS players,
+        (SELECT COUNT(*) FROM tournament_teams WHERE team_id = ?1) AS tournaments`
+    )
+    .bind(teamId)
+    .first<{ matches: number; played: number; players: number; tournaments: number }>();
+  return {
+    matches: row?.matches ?? 0,
+    played: row?.played ?? 0,
+    players: row?.players ?? 0,
+    tournaments: row?.tournaments ?? 0,
+  };
+}
+
+/** Fase 16: uso de varios equipos en una sola tanda (listado del panel). */
+export async function teamUsageById(db: D1Database): Promise<Map<number, TeamUsage>> {
+  const { results } = await db
+    .prepare(
+      `SELECT t.id AS id,
+        (SELECT COUNT(*) FROM matches WHERE home_team_id = t.id OR away_team_id = t.id) AS matches,
+        (SELECT COUNT(*) FROM matches
+          WHERE (home_team_id = t.id OR away_team_id = t.id)
+            AND status IN ('played','walkover')) AS played,
+        (SELECT COUNT(*) FROM players WHERE team_id = t.id) AS players,
+        (SELECT COUNT(*) FROM tournament_teams WHERE team_id = t.id) AS tournaments
+       FROM teams t`
+    )
+    .all<{ id: number } & TeamUsage>();
+  const out = new Map<number, TeamUsage>();
+  for (const r of results ?? []) out.set(r.id, { matches: r.matches, played: r.played, players: r.players, tournaments: r.tournaments });
+  return out;
 }
 
 /**

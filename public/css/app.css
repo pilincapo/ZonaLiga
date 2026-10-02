@@ -2266,6 +2266,22 @@ html[data-theme='dark'] .pnum { background: rgba(255, 255, 255, 0.08); color: #b
 
 .padd { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 
+/* ---------- Fase 16: edicion de jugador en la tarjeta ---------- */
+.pedit {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.pedit[hidden] { display: none; }
+.pedit .field { min-width: 0; }
+.pedit input[type='text'], .pedit input[type='number'], .pedit select {
+  padding: 6px 9px; font-size: 0.82rem;
+}
+.pcard .tcard-ghost[disabled] {
+  opacity: 0.35; cursor: not-allowed;
+}
+.pcard .tcard-ghost[disabled]:hover { border-color: var(--border-strong); color: var(--muted); }
+
 /* ---------- Fixture (card generadora + encabezados de fecha) ---------- */
 
 .fgen { border-left: 3px solid var(--accent); }

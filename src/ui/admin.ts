@@ -51,7 +51,18 @@ import {
   listPlayers,
   listTeams,
   listTournaments,
+  playerUsage,
+  teamUsage,
+  teamUsageById,
 } from '../lib/queries.ts';
+import { tournamentsOfTeam } from '../lib/participation.ts';
+import {
+  LIMITS,
+  playerRemovalPlan,
+  playerRemovalWarning,
+  teamDeletionWarning,
+  teamUsageSummary,
+} from '../lib/roster.ts';
 import {
   countPendingSubmissions,
   matchIdsWithPendingSubmissions,
@@ -937,13 +948,21 @@ export async function tournamentFormPage(db: D1Database, id?: number, error?: st
   // habilitado: el servidor rechaza lo estructural).
   const structureLocked = t != null && (t.status === 'active' || t.status === 'finished' || t.status === 'archived');
   const activeTeams = (await listTeams(db, true)).filter((tm) => tm.active);
+  const allTeams = await listTeams(db, true);
   const savedParticipants = id != null ? await teamIdsOfTournament(db, id) : [];
   const participantSet = new Set([...savedParticipants, ...zones.zones.flatMap((z) => z.teamIds)]);
+  // Fase 16: un participante que quedó INACTIVO antes aparecia solo en
+  // `activeTeams`, o sea no se listaba y al guardar se perdia su
+  // participacion en silencio. Ahora se listan todos, y los inactivos salen
+  // marcados y con la casilla de zona apagada (no se puede asignar zona a un
+  // equipo que no juega).
+  const inactiveTeams = allTeams.filter((tm) => !tm.active);
+  const listedTeams = [...activeTeams, ...inactiveTeams];
   // Detectar participantes sin zona cuando las zonas están activas: solo aviso,
   // no inventa zona ni quita la participación.
   const sinZona = participantsWithoutZone(savedParticipants, zones)
-    .map((tid) => activeTeams.find((tm) => tm.id === tid)?.name ?? `#${tid}`);
-  const zoneRows = activeTeams
+    .map((tid) => allTeams.find((tm) => tm.id === tid)?.name ?? `#${tid}`);
+  const zoneRows = listedTeams
     .map((tm) => {
       const zi = zones.zones.findIndex((z) => z.teamIds.includes(tm.id)) + 1;
       const opts =
@@ -953,10 +972,11 @@ export async function tournamentFormPage(db: D1Database, id?: number, error?: st
             (z, i) => `<option value="${i + 1}" ${zi === i + 1 ? 'selected' : ''}>${esc(z.name)}</option>`
           )
           .join('');
-      return `<tr>
-      <td>${esc(tm.name)}</td>
+      const inactivo = !tm.active;
+      return `<tr${inactivo ? ' class="off"' : ''}>
+      <td>${esc(tm.name)}${inactivo ? ' <span class="badge ghost" title="Equipo inactivo: se listan para no perder su participacion guardada, pero no se puede asignar zona">Inactivo</span>' : ''}</td>
       <td class="num"><input type="checkbox" name="participate_${tm.id}" data-participate ${participantSet.has(tm.id) ? 'checked' : ''} style="width:auto"></td>
-      <td><select name="zone_of_${tm.id}" data-zone-select ${zi > 0 ? '' : 'disabled'}>${opts}</select></td>
+      <td><select name="zone_of_${tm.id}" data-zone-select ${zi > 0 && !inactivo ? '' : 'disabled'}>${opts}</select></td>
     </tr>`;
     })
     .join('');
@@ -1085,6 +1105,12 @@ export async function teamsAdminPage(db: D1Database, msg?: string, errMsg?: stri
   const teams = await listTeams(db, true);
   const activos = teams.filter((tm) => tm.active).length;
   const inactivos = teams.length - activos;
+  // Fase 16: qué tiene alrededor cada equipo (jugadores, partidos, torneos).
+  // La tarjeta lo muestra y el boton de borrar avisa con esos numeros antes de
+  // dejar que se pierda algo.
+  const usageMap = await teamUsageById(db);
+  const usageOf = (id: number) => usageMap.get(id) ?? { matches: 0, played: 0, players: 0, tournaments: 0 };
+  const equiposConPartidos = teams.filter((tm) => usageOf(tm.id).matches > 0).length;
   const metric = (label: string, sub: string, value: number, tone: string, ico: string) => `
   <div class="dash-metric ${tone}">
     <span class="dash-metric-ico">${icon(ico as 'users', 18)}</span>
@@ -1096,23 +1122,35 @@ export async function teamsAdminPage(db: D1Database, msg?: string, errMsg?: stri
       const badgeHtml = tm.active
         ? '<span class="badge green">Activo</span>'
         : '<span class="badge ghost">Inactivo</span>';
+      const usage = usageOf(tm.id);
+      // Con partidos en el fixture el borrado queda bloqueado (el servidor
+      // tambien lo rechaza): el boton explica por que y ofrece la salida
+      // correcta, que es marcarlo inactivo.
+      const conPartidos = usage.matches > 0;
+      const borrar = conPartidos
+        ? `<button class="tcard-ghost" type="button" disabled title="No se puede eliminar: tiene ${usage.matches} partido(s) en el fixture. Marcalo como inactivo." aria-label="No se puede eliminar">✕</button>`
+        : `<form method="post" action="/admin/equipos/${tm.id}/eliminar" style="display:inline" onsubmit="return confirm('${esc(
+            teamDeletionWarning(tm, usage)
+          )}')">
+        <button class="tcard-ghost" type="submit" title="Eliminar equipo" aria-label="Eliminar equipo">✕</button>
+      </form>`;
       // <strong>Nombre</strong>…/admin/equipos/ID">Editar: lo parsean los
       // scripts de seed (seed-dev/prod) y fix-zonas; no cambiar la estructura.
       return `<article class="tcard pcard ${tm.active ? '' : 'off'}" data-nombre="${esc(tm.name.toLowerCase())}" data-activo="${tm.active ? '1' : '0'}">
     <span class="tcard-ico pcrest">${crest(tm, 'sm')}</span>
     <div class="tcard-tx">
-      <div class="tcard-top"><a href="/equipos/${escUrl(tm.slug)}"><strong>${esc(tm.name)}</strong></a>${badgeHtml}</div>
+      <div class="tcard-top"><a href="/equipos/${escUrl(tm.slug)}"><strong>${esc(tm.name)}</strong></a>${badgeHtml}${conPartidos ? '<span class="badge amber" title="Tiene partidos en el fixture: no se puede eliminar, se marca inactivo">En fixture</span>' : ''}</div>
       <div class="tcard-meta">
         <span>Nombre corto: ${esc(tm.short_name || '···')}</span>
+        <span>${esc(teamUsageSummary(usage))}</span>
         <span>${tm.active ? 'Participa de la liga' : 'No participa de la liga'}</span>
       </div>
     </div>
     <div class="tcard-acts">
+      <a class="btn btn-ghost btn-sm" href="/admin/jugadores?team=${tm.id}" title="Ver la plantilla">Plantilla</a>
       <a class="btn btn-ghost btn-sm" href="/equipos/${escUrl(tm.slug)}" title="Ver en el sitio">Ver</a>
       <a class="btn btn-primary btn-sm" href="/admin/equipos/${tm.id}">Editar</a>
-      <form method="post" action="/admin/equipos/${tm.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar equipo? Se borran sus jugadores.')">
-        <button class="tcard-ghost" type="submit" title="Eliminar equipo" aria-label="Eliminar equipo">✕</button>
-      </form>
+      ${borrar}
     </div>
   </article>`;
     })
@@ -1127,6 +1165,11 @@ ${flash('success', msg)}${flash('error', errMsg)}
   </div>
   <a class="btn btn-primary" href="/admin/equipos/nuevo">+ Nuevo equipo</a>
 </div>
+${
+  equiposConPartidos > 0
+    ? `<div class="warning-box">ℹ️ ${equiposConPartidos} equipo(s) tienen partidos en el fixture: no se pueden eliminar (sus partidos se quedarían sin equipo). Si dejaron de competir, marcalos como <strong>inactivos</strong>.</div>`
+    : ''
+}
 <div class="dash-metrics">
   ${metric('Total', 'equipos', teams.length, 'm-blue', 'list')}
   ${metric('Activos', 'jugando la liga', activos, 'm-green', 'users')}
@@ -1221,6 +1264,42 @@ export async function teamFormPage(db: D1Database, id?: number, error?: string, 
   if (id != null) tm = await getTeam(db, id);
   const isEdit = tm != null;
   const delegateBlock = isEdit ? delegateSection(tm!, origin) : '';
+  // Fase 16: contexto del equipo (participaciones, partidos, plantilla) para
+  // editar informed, no a ciegas. Los torneos traen su estado y su slug.
+  const usage = isEdit ? await teamUsage(db, tm!.id) : null;
+  const tournaments = isEdit ? await tournamentsOfTeam(db, tm!.id) : [];
+  const contextBlock =
+    isEdit && usage
+      ? `<section class="block"><div class="card"><div class="card-body">
+  <div class="dash-card-head"><h2>${icon('users', 16)} Ficha rápida</h2><span class="muted small">${
+    tm!.active ? 'Equipo activo' : 'Equipo inactivo'
+  }</span></div>
+  <div class="stats-grid">
+    <div class="stat-card st-blue"><span class="stat-num">${usage.players}</span><span class="stat-lbl">Jugadores en la plantilla</span></div>
+    <div class="stat-card st-green"><span class="stat-num">${usage.matches}</span><span class="stat-lbl">Partidos en el fixture</span></div>
+    <div class="stat-card st-amber"><span class="stat-num">${usage.played}</span><span class="stat-lbl">Ya jugados</span></div>
+    <div class="stat-card st-violet"><span class="stat-num">${tournaments.length}</span><span class="stat-lbl">Torneos</span></div>
+  </div>
+  <div class="btn-row mt-2">
+    <a class="btn btn-ghost btn-sm" href="/admin/jugadores?team=${tm!.id}">Ver plantilla →</a>
+    <a class="btn btn-ghost btn-sm" href="/equipos/${escUrl(tm!.slug)}">Ver en el sitio ↗</a>
+  </div>
+  ${
+    tournaments.length > 0
+      ? `<p class="hint">Participa de: ${tournaments
+          .map((t) => `<a href="/admin/torneos/${t.id}">${esc(t.name)}</a> <span class="badge ghost">${esc(
+            t.status === 'active' ? 'En curso' : t.status === 'draft' ? 'Borrador' : t.status === 'registrations' ? 'Inscripciones' : t.status === 'finished' ? 'Finalizado' : 'Archivado'
+          )}</span>`)
+          .join(' · ')}</p>`
+      : '<p class="hint">Todavía no participa de ningún torneo: marcalo desde el formulario del torneo.</p>'
+  }
+  ${
+    usage && usage.matches > 0
+      ? '<p class="hint">Tiene partidos en el fixture, así que no se puede eliminar. Si dejó de competir, desactivalo con la casilla <strong>Activo</strong>.</p>'
+      : ''
+  }
+</div></div></section>`
+      : '';
   const body = `
 ${flash('error', error)}
 ${pageHead(isEdit ? `Editar: ${tm!.name}` : 'Nuevo equipo')}
@@ -1229,11 +1308,13 @@ ${pageHead(isEdit ? `Editar: ${tm!.name}` : 'Nuevo equipo')}
     <div class="form-row">
       <div class="field">
         <label for="name">Nombre</label>
-        <input type="text" id="name" name="name" required value="${esc(tm?.name ?? '')}">
+        <input type="text" id="name" name="name" required maxlength="${LIMITS.teamName}" value="${esc(tm?.name ?? '')}">
       </div>
       <div class="field">
         <label for="short_name">Nombre corto (3 letras)</label>
-        <input type="text" id="short_name" name="short_name" maxlength="4" value="${esc(tm?.short_name ?? '')}" placeholder="ALM">
+        <input type="text" id="short_name" name="short_name" maxlength="${LIMITS.teamShortName}" value="${esc(
+          tm?.short_name ?? ''
+        )}" placeholder="ALM">
       </div>
     </div>
     <div class="form-row">
@@ -1243,7 +1324,9 @@ ${pageHead(isEdit ? `Editar: ${tm!.name}` : 'Nuevo equipo')}
       </div>
       <div class="field">
         <label for="logo_url">Escudo (URL opcional)</label>
-        <input type="url" id="logo_url" name="logo_url" value="${esc(tm?.logo_url ?? '')}" placeholder="https://...">
+        <input type="url" id="logo_url" name="logo_url" maxlength="${LIMITS.teamLogoUrl}" value="${esc(
+          tm?.logo_url ?? ''
+        )}" placeholder="https://...">
       </div>
     </div>
     <div class="field">
@@ -1255,7 +1338,8 @@ ${pageHead(isEdit ? `Editar: ${tm!.name}` : 'Nuevo equipo')}
     <a class="btn btn-ghost" href="/admin/equipos">Cancelar</a>
   </form>
   ${delegateBlock}
-</div></div></section>`;
+</div></div></section>
+${contextBlock}`;
   return adminLayout(db, { title: isEdit ? 'Editar equipo' : 'Nuevo equipo', active: 'equipos', body });
 }
 
@@ -1266,6 +1350,10 @@ export async function playersAdminPage(db: D1Database, selectedTeamId?: number, 
   const selectedId = selectedTeamId ?? teams[0]?.id;
   const players = selectedId != null ? await listPlayers(db, selectedId, true) : [];
   const team = teams.find((tm) => tm.id === selectedId) ?? null;
+  // Fase 16: historial de cada jugador (eventos + entregas), para que la UI
+  // y el servidor decida lo mismo qué hacer al sacarlo de la plantilla.
+  const usageEntries = await Promise.all(players.map((p) => playerUsage(db, p.id)));
+  const usageById = new Map(players.map((p, i) => [p.id, usageEntries[i]!]));
 
   const teamOptions = teams
     .map(
@@ -1287,6 +1375,7 @@ export async function playersAdminPage(db: D1Database, selectedTeamId?: number, 
     pos,
     n: players.filter((p) => p.position === pos && p.active).length,
   }));
+  const bajas = players.filter((p) => !p.active).length;
 
   const metric = (label: string, sub: string, value: number, tone: string, ico: string) => `
   <div class="dash-metric ${tone}">
@@ -1295,21 +1384,52 @@ export async function playersAdminPage(db: D1Database, selectedTeamId?: number, 
     <span class="dash-metric-bar"><span></span></span>
   </div>`;
 
+  // Fase 16: cada tarjeta trae el form de edición (oculto hasta que se pide)
+  // y la acción que corresponde según el historial del jugador. Con eventos o
+  // entregas el botón da de baja (no borra), para no perder estadísticas.
   const cards = players
-    .map(
-      (p) => `<article class="tcard pcard ${p.active ? '' : 'off'}">
+    .map((p) => {
+      const usage = usageById.get(p.id) ?? { events: 0, submissions: 0 };
+      const plan = playerRemovalPlan(p, usage);
+      const accion = p.active
+        ? `<form method="post" action="/admin/jugadores/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('${esc(
+            playerRemovalWarning(p, plan)
+          )}')">
+        <button class="tcard-ghost" type="submit" title="${
+          plan.kind === 'delete' ? 'Eliminar jugador' : 'Dar de baja'
+        }" aria-label="${plan.kind === 'delete' ? 'Eliminar jugador' : 'Dar de baja'}">${plan.kind === 'delete' ? '✕' : '⊘'}</button>
+      </form>`
+        : `<form method="post" action="/admin/jugadores/${p.id}/reactivar" style="display:inline">
+        <button class="btn btn-ghost btn-sm" type="submit" title="Volver a la plantilla">↺ Reactivar</button>
+      </form>`;
+      const historial = usage.events > 0 || usage.submissions > 0
+        ? `<span class="badge ghost" title="${esc(
+            `${usage.events} evento(s) · ${usage.submissions} entrega(s)`
+          )}">${usage.events} evento(s)</span>`
+        : '';
+      return `<article class="tcard pcard ${p.active ? '' : 'off'}" data-nombre="${esc(
+        p.name.toLowerCase()
+      )}" data-dorsal="${p.number != null ? String(p.number) : ''}" data-pos="${esc(p.position)}" data-activo="${p.active ? '1' : '0'}">
     <span class="pnum">${p.number != null ? esc(String(p.number)) : '—'}</span>
     <div class="tcard-tx">
-      <div class="tcard-top"><strong>${esc(p.name)}</strong>${p.active ? '' : '<span class="badge ghost">Baja</span>'}</div>
-      <div class="tcard-meta"><span>${p.position ? `<span class="pchip ${esc(p.position)}">${esc(p.position)}</span>` : 'Sin posición'}</span></div>
-    </div>
-    <div class="tcard-acts">
-      <form method="post" action="/admin/jugadores/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar jugador?')">
-        <button class="tcard-ghost" type="submit" title="Eliminar jugador" aria-label="Eliminar jugador">✕</button>
+      <div class="tcard-top"><strong>${esc(p.name)}</strong>${p.active ? '' : '<span class="badge ghost">Baja</span>'}${historial}</div>
+      <div class="tcard-meta"><span>${
+        p.position ? `<span class="pchip ${esc(p.position)}">${esc(p.position)}</span>` : 'Sin posición'
+      }</span></div>
+      <form method="post" action="/admin/jugadores/${p.id}" class="pedit" hidden>
+        <div class="field grow"><input type="text" name="name" value="${esc(p.name)}" placeholder="Nombre" aria-label="Nombre"></div>
+        <div class="field" style="max-width:74px"><input type="number" name="number" min="${LIMITS.playerNumberMin}" max="${LIMITS.playerNumberMax}" value="${p.number ?? ''}" placeholder="#" aria-label="Dorsal"></div>
+        <div class="field" style="max-width:104px"><select name="position" aria-label="Posición">${positionOptions(p.position)}</select></div>
+        <button class="btn btn-primary btn-sm" type="submit">Guardar</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-pedit-cancel>Cancelar</button>
       </form>
     </div>
-  </article>`
-    )
+    <div class="tcard-acts">
+      <button class="tcard-ghost" type="button" data-pedit-open title="Editar jugador" aria-label="Editar jugador">✎</button>
+      ${accion}
+    </div>
+  </article>`;
+    })
     .join('');
 
   const body = `
@@ -1332,6 +1452,7 @@ ${team
     ? `<div class="dash-metrics pmetrics">
   ${metric('Jugadores', `plantilla de ${team.name}`, players.length, 'm-blue', 'list')}
   ${porPos.map((x) => metric(x.pos, POS_LABEL[x.pos] ?? '', x.n, POS_TONE[x.pos] ?? 'm-green', 'shield')).join('')}
+  ${bajas > 0 ? metric('De baja', 'dados de baja', bajas, 'm-amber', 'shield') : ''}
 </div>`
     : ''}
 <section class="block"><div class="dash-card">
@@ -1339,16 +1460,97 @@ ${team
   ${selectedId != null
     ? `<form method="post" action="/admin/jugadores" class="padd">
     <input type="hidden" name="team_id" value="${selectedId}">
-    <div class="field grow"><label>Nombre</label><input type="text" name="name" required placeholder="Nombre y apellido"></div>
-    <div class="field" style="max-width:90px"><label>#</label><input type="number" name="number" min="1" max="99"></div>
+    <div class="field grow"><label>Nombre</label><input type="text" name="name" required maxlength="${LIMITS.playerName}" placeholder="Nombre y apellido"></div>
+    <div class="field" style="max-width:90px"><label>#</label><input type="number" name="number" min="${LIMITS.playerNumberMin}" max="${LIMITS.playerNumberMax}"></div>
     <div class="field" style="max-width:130px"><label>Posición</label><select name="position">${positionOptions('')}</select></div>
     <button class="btn btn-primary" type="submit">+ Agregar</button>
   </form>`
     : '<div class="empty-note">Cargá un equipo primero para poder sumar jugadores.</div>'}
 </div></section>
+${
+  players.length > 0
+    ? `<section class="block"><div class="card" style="padding:14px">
+  <div class="tpage-filters">
+    <div class="tpage-search">${icon('search', 15)}<input id="pSearch" type="search" placeholder="Buscar jugador por nombre o dorsal…" aria-label="Buscar jugador"></div>
+    <div class="tpage-tabs" role="group" aria-label="Filtrar por estado">
+      <button type="button" class="tpage-tab on" data-activo="">Todos</button>
+      <button type="button" class="tpage-tab" data-activo="1">En plantilla</button>
+      <button type="button" class="tpage-tab" data-activo="0">De baja</button>
+    </div>
+    <div class="tpage-tabs" role="group" aria-label="Filtrar por posición">
+      <button type="button" class="tpage-tab on" data-pos="">Todas</button>
+      ${POSITION_ORDER.map((pos) => `<button type="button" class="tpage-tab" data-pos="${esc(pos)}">${esc(pos)}</button>`).join('')}
+    </div>
+  </div>
+  <div class="empty-note" id="pEmpty" style="display:none">Ningún jugador coincide con el filtro.</div>
+</div></section>`
+    : ''
+}
 <section class="block"><div class="tpage-list">
   ${cards || `<div class="empty-note">Sin jugadores en este equipo.</div>`}
-</div></section>`;
+</div></section>
+<p class="hint">Fase 16: se edita con el lápiz de cada tarjeta. Si el jugador tiene goles o tarjetas cargados, sacarlo lo <strong>dá de baja</strong> en vez de borrarlo, así las estadísticas y las planillas no pierden al autor. Los que no tienen nada se eliminan de verdad, y a los dados de baja los podés reactivar.</p>
+<script>
+  (function () {
+    // ---------- Editar jugador (el form vive en la tarjeta) ----------
+    var cards = [].slice.call(document.querySelectorAll('.pcard'));
+    cards.forEach(function (card) {
+      var open = card.querySelector('[data-pedit-open]');
+      var form = card.querySelector('.pedit');
+      var cancel = card.querySelector('[data-pedit-cancel]');
+      if (!open || !form) return;
+      var name = form.querySelector('[name="name"]');
+      open.addEventListener('click', function () {
+        form.hidden = !form.hidden;
+        if (!form.hidden && name) name.focus();
+      });
+      if (cancel) cancel.addEventListener('click', function () { form.hidden = true; });
+    });
+
+    // ---------- Filtros: texto + estado + posición ----------
+    var input = document.getElementById('pSearch');
+    if (!input) return;
+    var tabs = [].slice.call(document.querySelectorAll('.tpage-tab'));
+    var vacio = document.getElementById('pEmpty');
+    function selDelGrupo(attr) {
+      var valor = '';
+      tabs.forEach(function (b) {
+        if (b.classList.contains('on') && b.getAttribute(attr) !== null) valor = b.getAttribute(attr) || '';
+      });
+      return valor;
+    }
+    function sync() {
+      var q = (input.value || '').trim().toLowerCase();
+      var est = selDelGrupo('data-activo');
+      var pos = selDelGrupo('data-pos');
+      var visibles = 0;
+      cards.forEach(function (c) {
+        var nombre = c.getAttribute('data-nombre') || '';
+        var dorsal = c.getAttribute('data-dorsal') || '';
+        var okTexto = !q || nombre.indexOf(q) !== -1 || (dorsal && dorsal === q);
+        var okEstado = est === '' || c.getAttribute('data-activo') === est;
+        var okPos = pos === '' || c.getAttribute('data-pos') === pos;
+        var ok = okTexto && okEstado && okPos;
+        c.style.display = ok ? '' : 'none';
+        if (ok) visibles++;
+      });
+      if (vacio) vacio.style.display = visibles ? 'none' : '';
+    }
+    tabs.forEach(function (b) {
+      b.addEventListener('click', function () {
+        // Los dos grupos son independientes: el "on" solo se mueve dentro del
+        // grupo al que pertenece el boton que se toco (data-activo o data-pos).
+        var grupo = b.getAttribute('data-activo') !== null ? 'data-activo' : 'data-pos';
+        tabs.forEach(function (x) {
+          if (x.getAttribute(grupo) !== null) x.classList.toggle('on', x === b);
+        });
+        sync();
+      });
+    });
+    input.addEventListener('input', sync);
+    sync();
+  })();
+</script>`;
   return adminLayout(db, { title: 'Jugadores', active: 'jugadores', body });
 }
 

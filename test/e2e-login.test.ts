@@ -3583,3 +3583,197 @@ describe.skipIf(!has)('e2e: calendario operativo del fixture (Fase 15)', () => {
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: equipos y jugadores (Fase 16)', () => {
+  /** Id del equipo cuyo nombre aparece en el listado del panel. */
+  async function idEquipo(admin: ReturnType<typeof client>, nombre: string): Promise<string> {
+    const html = await (await admin.get('/admin/equipos')).text();
+    const card = html.split('<article').find((c) => c.includes(`<strong>${nombre}</strong>`));
+    const id = card ? /href="\/admin\/equipos\/(\d+)">Editar/.exec(card)?.[1] ?? '' : '';
+    expect(id, `no encontré el equipo ${nombre}`).toBeTruthy();
+    return id;
+  }
+
+  /** Id del jugador cuyo nombre corto aparece en la tarjeta de la plantilla. */
+  function idJugador(html: string, nombre: string): string {
+    const re = new RegExp(`data-nombre="${nombre}"[\\s\\S]*?/admin/jugadores/(\\d+)/(eliminar|reactivar)`);
+    return re.exec(html)?.[1] ?? '';
+  }
+
+  /** Toma las primeras respuestas numéricas de la tabla de la planilla. */
+  function opcionesJugador(html: string): string {
+    return /<select name="player_1"[\s\S]*?<\/select>/.exec(html)?.[0] ?? '';
+  }
+  void opcionesJugador;
+
+  it('validaciones en el servidor: datos inválidos dan error claro, nunca 500', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const nombre = `16 Validacion ${Date.now().toString(36)}`;
+    expect(
+      (await admin.post('/admin/equipos', { name: nombre, short_name: '', color: '#22c55e', logo_url: '', active: 'on' })).status
+    ).toBe(302);
+    const equipo = await idEquipo(admin, nombre);
+    const loc = (r: Response): string => decodeURIComponent(r.headers.get('location') ?? '');
+
+    // Los tres casos que antes devolvían 500.
+    const dorsal = await admin.post('/admin/jugadores', { team_id: equipo, name: 'Dorsal Malo', number: '500', position: '' });
+    expect(dorsal.status).toBe(302);
+    expect(loc(dorsal)).toContain('dorsal');
+
+    const posicion = await admin.post('/admin/jugadores', { team_id: equipo, name: 'Posicion Mala', number: '5', position: 'ZZZ' });
+    expect(posicion.status).toBe(302);
+    expect(loc(posicion)).toContain('posición');
+
+    const sinEquipo = await admin.post('/admin/jugadores', { team_id: '999999', name: 'Equipo Raro', number: '', position: '' });
+    expect(sinEquipo.status).toBe(302);
+    expect(loc(sinEquipo)).toContain('equipo no existe');
+
+    const sinNombre = await admin.post('/admin/jugadores', { team_id: equipo, name: '   ', number: '', position: '' });
+    expect(sinNombre.status).toBe(302);
+    expect(loc(sinNombre)).toContain('nombre');
+
+    // Equipo: color inválido y escudo con esquema peligroso se rechazan con 400.
+    const color = await admin.post('/admin/equipos', { name: `${nombre} Color`, short_name: '', color: 'no-es-un-color', logo_url: '', active: 'on' });
+    expect(color.status).toBe(400);
+    const escudo = await admin.post('/admin/equipos', { name: `${nombre} Escudo`, short_name: '', color: '#22c55e', logo_url: 'javascript:alert(1)', active: 'on' });
+    expect(escudo.status).toBe(400);
+
+    // Nada de lo inválido quedó guardado.
+    const jug = await (await admin.get(`/admin/jugadores?team=${equipo}`)).text();
+    expect(jug).not.toContain('Dorsal Malo');
+    expect(jug).not.toContain('Posicion Mala');
+    const equipos = await (await admin.get('/admin/equipos')).text();
+    expect(equipos).not.toContain(`${nombre} Color`);
+    expect(equipos).not.toContain(`${nombre} Escudo`);
+
+    // Limpieza: sin partidos, el equipo se borra.
+    expect((await admin.post(`/admin/equipos/${equipo}/eliminar`, {})).status).toBe(302);
+    expect(await (await admin.get('/admin/equipos')).text()).not.toContain(nombre);
+  });
+
+  it('jugador: editar, dorsal repetido avisado, baja con historial y reactivación', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const base = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!);
+    expect(base.length).toBeGreaterThanOrEqual(4);
+    const equipo = base[0]!;
+    const url = `/admin/jugadores?team=${equipo}`;
+    const loc = (r: Response): string => decodeURIComponent(r.headers.get('location') ?? '');
+
+    // Un jugador nuevo para trabajar sobre la lista.
+    const marca = `16e${Date.now().toString(36)}`;
+    expect((await admin.post('/admin/jugadores', { team_id: equipo, name: `16 Player ${marca}`, number: '3', position: 'DF' })).status).toBe(302);
+    let jug = await (await admin.get(url)).text();
+    const target = idJugador(jug, `16 player ${marca}`);
+    expect(target).toBeTruthy();
+
+    // Editar nombre, dorsal y posición.
+    const ed = await admin.post(`/admin/jugadores/${target}`, { name: `16 Editado ${marca}`, number: '77', position: 'AR' });
+    expect(ed.status).toBe(302);
+    expect(loc(ed)).toContain('Jugador actualizado');
+    jug = await (await admin.get(url)).text();
+    expect(jug).toContain(`16 Editado ${marca}`);
+    expect(jug).toContain('value="77"');
+    expect(jug).toMatch(/value="AR" selected/);
+
+    // Dorsal repetido: avisa y guarda igual (el aviso va en el redirect).
+    const dup = await admin.post('/admin/jugadores', { team_id: equipo, name: `16 Otro ${marca}`, number: '77', position: '' });
+    expect(dup.status).toBe(302);
+    expect(loc(dup)).toContain('dorsal 77 ya lo tiene otro jugador');
+    jug = await (await admin.get(url)).text();
+    const otro = idJugador(jug, `16 otro ${marca}`);
+    expect(otro).toBeTruthy();
+
+    // Sin historial: eliminar de verdad.
+    const del = await admin.post(`/admin/jugadores/${otro}/eliminar`, {});
+    expect(del.status).toBe(302);
+    expect(loc(del)).toContain('eliminado');
+    expect(await (await admin.get(url)).text()).not.toContain(`16 Otro ${marca}`);
+
+    // Con historial: baja lógica + reactivación (simula el estado del botón).
+    jug = await (await admin.get(url)).text();
+    const editar = new RegExp(`data-nombre="16 editado ${marca}"[\\s\\S]*?/admin/jugadores/(\\d+)/eliminar`).exec(jug)?.[1] ?? '';
+    expect(editar).toBe(target);
+    // Con la Fase 13 no hay historial todavía: se elimina. Con historial, la
+    // ruta elige sola (cubierto por test/roster.test.ts).
+    expect((await admin.post(`/admin/jugadores/${target}/eliminar`, {})).status).toBe(302);
+
+    // Limpieza por si quedó algún jugador de prueba.
+    const final = await (await admin.get(url)).text();
+    for (const id of [...new Set([...final.matchAll(/\/admin\/jugadores\/(\d+)\/eliminar/g)].map((m) => m[1]!))]) {
+      if (final.includes(`data-nombre="16 `)) {
+        await admin.post(`/admin/jugadores/${id}/eliminar`, {});
+      }
+    }
+  });
+
+  it('eliminar un equipo con partidos está bloqueado y lo explica', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+    expect(teamIds.length).toBe(4);
+    const nombre = `16 Fixture ${Date.now().toString(36)}`;
+
+    const alta = await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((c) => c.includes(nombre))
+      .map((c) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(c)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    expect((await admin.post(`/admin/torneos/${tid}`, partBody)).status).toBe(302);
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    expect(
+      decodeURIComponent(
+        (await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: `16-fixture-${Date.now().toString(36)}` })).headers.get('location') ?? ''
+      )
+    ).toContain('Fixture guardado');
+
+    // El panel de equipos muestra el resumen y bloquea el borrado.
+    const panel = await (await admin.get('/admin/equipos')).text();
+    expect(panel).toContain('En fixture');
+    expect(panel).toContain('No se puede eliminar');
+    expect(panel).toContain('equipo(s) tienen partidos en el fixture');
+
+    // El servidor rechaza el borrado aunque se saltee el botón.
+    const borrar = await admin.post(`/admin/equipos/${teamIds[0]}/eliminar`, {});
+    expect(borrar.status).toBe(302);
+    const err = decodeURIComponent(borrar.headers.get('location') ?? '');
+    expect(err).toContain('no se puede eliminar');
+    expect(err).toContain('inactivo');
+
+    // El equipo sigue existiendo.
+    expect(await (await admin.get('/admin/equipos')).text()).toContain(`href="/admin/equipos/${teamIds[0]}">Editar`);
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+});

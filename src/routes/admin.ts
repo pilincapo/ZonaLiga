@@ -79,6 +79,13 @@ import {
 } from '../lib/status.ts';
 import { planReschedule, type RescheduleRecord } from '../lib/reschedule.ts';
 import {
+  duplicateNumberMessage,
+  playerRemovalPlan,
+  teamDeletionPlan,
+  validatePlayer,
+  validateTeam,
+} from '../lib/roster.ts';
+import {
   buildBracketPlan,
   bracketConfigJson,
   bracketHasPlayed,
@@ -92,7 +99,7 @@ import { CROSSOVER_NOTE, CROSSOVER_NOTE_COUNTS } from '../lib/crossover.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
-import { getMatch, getPlayer, getTeam } from '../lib/queries.ts';
+import { getMatch, getPlayer, getTeam, listPlayers, playerUsage, teamUsage } from '../lib/queries.ts';
 import { playerEligibility, eligibilityErrorMessage, type PlayerEligibility } from '../lib/discipline.ts';
 import { getSubmission } from '../lib/submissions.ts';
 import { deleteAdjustment, insertAdjustment, parseAdjustment } from '../lib/adjustments.ts';
@@ -451,13 +458,20 @@ adminRoutes.get('/equipos/nuevo', (c) => admin.teamFormPage(c.env.DB).then((h) =
 
 adminRoutes.post('/equipos', async (c) => {
   const f = await c.req.parseBody();
-  const name = String(f['name'] ?? '').trim();
-  if (!name) return c.html(await admin.teamFormPage(c.env.DB, undefined, 'El nombre es obligatorio'), 400);
-  let slug = slugify(name);
+  // Fase 16: la validación vive en el servidor (antes solo el `required` del
+  // HTML y un color sin validar que terminaba en un escudo roto).
+  const v = validateTeam({
+    name: String(f['name'] ?? ''),
+    shortName: String(f['short_name'] ?? ''),
+    color: String(f['color'] ?? ''),
+    logoUrl: String(f['logo_url'] ?? ''),
+  });
+  if (!v.ok) return c.html(await admin.teamFormPage(c.env.DB, undefined, v.error), 400);
+  let slug = slugify(v.value.name);
   const existing = await c.env.DB.prepare('SELECT id FROM teams WHERE slug = ?1').bind(slug).first();
   if (existing) slug = `${slug}-${Date.now().toString(36)}`;
   await c.env.DB.prepare('INSERT INTO teams (name, slug, short_name, color, logo_url, active) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-    .bind(name, slug, String(f['short_name'] ?? '').toUpperCase(), String(f['color'] ?? '#22c55e'), String(f['logo_url'] ?? ''), f['active'] ? 1 : 0)
+    .bind(v.value.name, slug, v.value.shortName, v.value.color, v.value.logoUrl, f['active'] ? 1 : 0)
     .run();
   return c.redirect('/admin/equipos?msg=' + encodeURIComponent('Equipo creado'));
 });
@@ -577,18 +591,33 @@ adminRoutes.post('/entregas/:id/rechazar', async (c) => {
 adminRoutes.post('/equipos/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const f = await c.req.parseBody();
-  const name = String(f['name'] ?? '').trim();
-  if (!name) {
-    return c.html(await admin.teamFormPage(c.env.DB, id, 'El nombre es obligatorio', new URL(c.req.url).origin), 400);
+  const team = await getTeam(c.env.DB, id);
+  if (!team) return c.redirect('/admin/equipos?err=' + encodeURIComponent('Ese equipo no existe.'));
+  const v = validateTeam({
+    name: String(f['name'] ?? ''),
+    shortName: String(f['short_name'] ?? ''),
+    color: String(f['color'] ?? ''),
+    logoUrl: String(f['logo_url'] ?? ''),
+  });
+  if (!v.ok) {
+    return c.html(await admin.teamFormPage(c.env.DB, id, v.error, new URL(c.req.url).origin), 400);
   }
   await c.env.DB.prepare('UPDATE teams SET name = ?1, short_name = ?2, color = ?3, logo_url = ?4, active = ?5 WHERE id = ?6')
-    .bind(name, String(f['short_name'] ?? '').toUpperCase(), String(f['color'] ?? '#22c55e'), String(f['logo_url'] ?? ''), f['active'] ? 1 : 0, id)
+    .bind(v.value.name, v.value.shortName, v.value.color, v.value.logoUrl, f['active'] ? 1 : 0, id)
     .run();
   return c.redirect('/admin/equipos?msg=' + encodeURIComponent('Equipo actualizado'));
 });
 
 adminRoutes.post('/equipos/:id/eliminar', async (c) => {
   const id = Number(c.req.param('id'));
+  const team = await getTeam(c.env.DB, id);
+  if (!team) return c.redirect('/admin/equipos?err=' + encodeURIComponent('Ese equipo no existe.'));
+  // Fase 16: con partidos en el fixture NO se borra. La base los dejaría con
+  // el equipo en null ("Por definir") y el torneo quedaría inconsistente. Si
+  // dejó de competir, la salida es marcarlo inactivo.
+  const usage = await teamUsage(c.env.DB, id);
+  const plan = teamDeletionPlan(usage);
+  if (!plan.allowed) return c.redirect('/admin/equipos?err=' + encodeURIComponent(plan.error));
   await c.env.DB.prepare('DELETE FROM teams WHERE id = ?1').bind(id).run();
   return c.redirect('/admin/equipos?msg=' + encodeURIComponent('Equipo eliminado'));
 });
@@ -600,26 +629,87 @@ adminRoutes.get('/jugadores', async (c) => {
   return c.html(await admin.playersAdminPage(c.env.DB, teamParam ? Number(teamParam) : undefined, c.req.query('msg'), c.req.query('err')));
 });
 
+/** Destino de los errores del alta/edición: la pantalla del equipo. */
+function playersBack(teamId: number | null, msg?: string, err?: string): string {
+  let dest = `/admin/jugadores${teamId != null ? `?team=${teamId}` : ''}`;
+  if (msg) dest += (dest.includes('?') ? '&' : '?') + 'msg=' + encodeURIComponent(msg);
+  if (err) dest += (dest.includes('?') ? '&' : '?') + 'err=' + encodeURIComponent(err);
+  return dest;
+}
+
+/** ¿Es un id de equipo que existe? (guarda contra claves foráneas rotas) */
+async function teamExists(db: D1Database, teamId: number): Promise<boolean> {
+  if (!Number.isInteger(teamId) || teamId <= 0) return false;
+  return Boolean(await db.prepare('SELECT id FROM teams WHERE id = ?1').bind(teamId).first());
+}
+
 adminRoutes.post('/jugadores', async (c) => {
   const f = await c.req.parseBody();
   const teamId = Number(f['team_id']);
-  const name = String(f['name'] ?? '').trim();
-  if (!name || !Number.isFinite(teamId)) {
-    return c.redirect('/admin/jugadores?err=' + encodeURIComponent('Faltan datos'));
+  if (!(await teamExists(c.env.DB, teamId))) {
+    return c.redirect(playersBack(null, undefined, 'El equipo no existe: elegí uno de la lista.'));
   }
-  const numberRaw = String(f['number'] ?? '').trim();
-  const number = numberRaw ? Number(numberRaw) : null;
+  // Fase 16: la validación vive en el servidor. Antes un dorsal fuera de
+  // rango o una posición inválida llegaban a la base y devolvían un 500.
+  const v = validatePlayer({
+    name: String(f['name'] ?? ''),
+    number: String(f['number'] ?? ''),
+    position: String(f['position'] ?? ''),
+  });
+  if (!v.ok) return c.redirect(playersBack(teamId, undefined, v.error));
+
+  const aviso = duplicateNumberMessage(await listPlayers(c.env.DB, teamId, true), v.value.number);
   await c.env.DB.prepare('INSERT INTO players (team_id, name, number, position, active) VALUES (?1, ?2, ?3, ?4, 1)')
-    .bind(teamId, name, number, String(f['position'] ?? ''))
+    .bind(teamId, v.value.name, v.value.number, v.value.position)
     .run();
-  return c.redirect(`/admin/jugadores?team=${teamId}&msg=` + encodeURIComponent('Jugador agregado'));
+  return c.redirect(playersBack(teamId, aviso || 'Jugador agregado', aviso ? undefined : undefined));
 });
 
+/** Fase 16: edita nombre, dorsal y posición de un jugador. */
+adminRoutes.post('/jugadores/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  const f = await c.req.parseBody();
+  const row = await getPlayer(c.env.DB, id);
+  if (!row) return c.redirect(playersBack(null, undefined, 'Ese jugador no existe.'));
+  const v = validatePlayer({
+    name: String(f['name'] ?? ''),
+    number: String(f['number'] ?? ''),
+    position: String(f['position'] ?? ''),
+  });
+  if (!v.ok) return c.redirect(playersBack(row.team_id, undefined, v.error));
+  const aviso = duplicateNumberMessage(await listPlayers(c.env.DB, row.team_id, true), v.value.number, id);
+  await c.env.DB.prepare('UPDATE players SET name = ?1, number = ?2, position = ?3 WHERE id = ?4')
+    .bind(v.value.name, v.value.number, v.value.position, id)
+    .run();
+  return c.redirect(playersBack(row.team_id, aviso || 'Jugador actualizado', undefined));
+});
+
+/**
+ * Fase 16: saca un jugador. Con historial (goles, tarjetas o entregas de
+ * delegado) se da de BAJA LÓGICA, para que las estadísticas y la planilla no
+ * pierdan al autor; sin historial, se elimina de verdad.
+ */
 adminRoutes.post('/jugadores/:id/eliminar', async (c) => {
   const id = Number(c.req.param('id'));
-  const teamParam = c.req.query('team');
+  const row = await getPlayer(c.env.DB, id);
+  if (!row) return c.redirect(playersBack(null, undefined, 'Ese jugador no existe.'));
+  const plan = playerRemovalPlan(row, await playerUsage(c.env.DB, id));
+  if (plan.kind === 'disable') {
+    await c.env.DB.prepare('UPDATE players SET active = 0 WHERE id = ?1').bind(id).run();
+    return c.redirect(playersBack(row.team_id, `${row.name}: dado de baja. ${plan.message}`));
+  }
   await c.env.DB.prepare('DELETE FROM players WHERE id = ?1').bind(id).run();
-  return c.redirect(`/admin/jugadores${teamParam ? `?team=${teamParam}` : ''}&msg=` + encodeURIComponent('Jugador eliminado'));
+  return c.redirect(playersBack(row.team_id, `${row.name} eliminado de la plantilla.`));
+});
+
+/** Fase 16: reactiva un jugador dado de baja. */
+adminRoutes.post('/jugadores/:id/reactivar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const row = await getPlayer(c.env.DB, id);
+  if (!row) return c.redirect(playersBack(null, undefined, 'Ese jugador no existe.'));
+  if (row.active) return c.redirect(playersBack(row.team_id, `${row.name} ya estaba activo.`));
+  await c.env.DB.prepare('UPDATE players SET active = 1 WHERE id = ?1').bind(id).run();
+  return c.redirect(playersBack(row.team_id, `${row.name}: de nuevo en la plantilla.`));
 });
 
 /* ---------- Fixture ---------- */
