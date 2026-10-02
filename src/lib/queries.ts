@@ -1,6 +1,7 @@
 // Helpers de consultas D1 (todas preparadas para binding de parámetros).
 
 import type { Event, EventType, Match, Player, Rules, Team, Tournament } from './types.ts';
+import type { RescheduleRecord } from './reschedule.ts';
 
 export async function listTournaments(db: D1Database): Promise<Tournament[]> {
   const { results } = await db
@@ -302,6 +303,33 @@ export async function tournamentEvents(db: D1Database, tournamentId: number): Pr
     .bind(tournamentId)
     .all<Event>();
   return results ?? [];
+}
+
+/**
+ * Fase 15: historial de reprogramaciones de los partidos de un torneo,
+ * agrupado por partido y del cambio más nuevo al más viejo (mismo orden que
+ * usa la planilla). Reutiliza la tabla de la Fase 13; no agrega datos nuevos.
+ */
+export async function matchRescheduleHistory(
+  db: D1Database,
+  tournamentId: number
+): Promise<Map<number, RescheduleRecord[]>> {
+  const { results } = await db
+    .prepare(
+      `SELECT r.* FROM match_reschedules r
+       JOIN matches m ON m.id = r.match_id
+       WHERE m.tournament_id = ?1
+       ORDER BY r.match_id, r.id DESC`
+    )
+    .bind(tournamentId)
+    .all<RescheduleRecord>();
+  const out = new Map<number, RescheduleRecord[]>();
+  for (const r of results ?? []) {
+    const arr = out.get(r.match_id);
+    if (arr) arr.push(r);
+    else out.set(r.match_id, [r]);
+  }
+  return out;
 }
 
 

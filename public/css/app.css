@@ -2130,6 +2130,36 @@ html[data-theme='dark'] .admin-page .dash-hero h1 { color: #ffffff; }
 }
 .tpage-tab:hover { border-color: var(--accent); color: var(--text); text-decoration: none; }
 .tpage-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+a.tpage-tab { text-decoration: none; display: inline-block; }
+
+/* ---------- Calendario operativo (Fase 15) ---------- */
+.cal-table .actions-cell { white-space: nowrap; }
+.cal-table { min-width: 860px; }
+.cal-table th:nth-child(5), .cal-table td:nth-child(5) { min-width: 250px; max-width: 340px; }
+.cal-vigente { font-size: 0.8rem; line-height: 1.35; }
+.cal-hist { margin-top: 6px; }
+.cal-hist > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: var(--muted);
+  list-style: none;
+}
+.cal-hist > summary::-webkit-details-marker { display: none; }
+.cal-hist > summary::before { content: '▸ '; }
+.cal-hist[open] > summary::before { content: '▾ '; }
+.cal-hist > summary:hover { color: var(--text); }
+.cal-hist .cal-hist-list { margin: 6px 0 0; padding-left: 16px; }
+.cal-hist .cal-hist-list li { font-size: 0.74rem; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+tr.cal-row-repro > td { background: var(--warning-soft); }
+tr.cal-row-repro:hover > td { filter: brightness(0.98); }
+
+/* Aviso de reprogramación en el fixture público. */
+.fx-repro-note {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: -4px 0 8px;
+  padding: 4px 2px 0;
+  font-size: 0.76rem;
+}
 
 .tpage-list { display: flex; flex-direction: column; gap: 10px; }
 .tcard {

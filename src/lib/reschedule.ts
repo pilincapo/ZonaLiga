@@ -95,6 +95,8 @@ export function planReschedule(input: RescheduleInput): ReschedulePlan | { ok: f
 /** Registro del historial de reprogramaciones de un partido. */
 export interface RescheduleRecord {
   id: number;
+  /** Partido al que pertenece el registro. */
+  match_id: number;
   old_played_on: string;
   old_kickoff_time: string;
   old_venue: string;

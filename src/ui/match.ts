@@ -6,6 +6,7 @@ import { esc, escUrl } from '../lib/html.ts';
 import { formatDateShort } from '../lib/format.ts';
 import type { Event, Match, Team } from '../lib/types.ts';
 import type { BracketColumn, BracketMatchView } from '../lib/bracket.ts';
+import type { RescheduleRecord } from '../lib/reschedule.ts';
 import { sourceLabel } from '../lib/bracket.ts';
 import { isCrossoverMatch } from '../lib/crossover.ts';
 
@@ -82,6 +83,26 @@ function matchCenter(m: Match, extra = ''): string {
   return `<div class="match-center"><a class="score" style="opacity:.55" href="/partido/${m.id}">- : -</a><span class="score-time">${statusTag(m)}</span></div>`;
 }
 
+/**
+ * Aviso de reprogramación (Fase 15) para el fixture público. Cuando el
+ * partido fue movido se muestra siempre la fecha, la hora y la cancha
+ * vigentes, que es lo único que le sirve al que tiene que ir a jugar.
+ */
+export function rescheduleNotice(
+  m: Pick<Match, 'played_on' | 'kickoff_time' | 'venue'>,
+  records: readonly RescheduleRecord[] | undefined
+): string {
+  if (!records || records.length === 0) return '';
+  const vigente = [
+    m.played_on ? formatDateShort(m.played_on) || m.played_on : 'día a definir',
+    m.kickoff_time || 'hora a definir',
+    m.venue || 'sin cancha',
+  ].join(' · ');
+  return `<div class="fx-repro-note"><span class="badge amber">Reprogramado</span> <span class="score-time">${esc(
+    vigente
+  )}</span></div>`;
+}
+
 export function matchRow(
   m: Match,
   teamMap: Map<number, Team>,
@@ -90,6 +111,8 @@ export function matchRow(
     awayPlaceholder?: string;
     /** equipo → zona: para los cruces, cuya columna zone está vacía. */
     zoneOfTeam?: Map<number, string>;
+    /** Historial de reprogramaciones (Fase 15): si viene, se muestra el aviso. */
+    reschedules?: readonly RescheduleRecord[];
   } = {}
 ): string {
   const home = m.home_team_id != null ? teamMap.get(m.home_team_id) : undefined;
@@ -105,11 +128,12 @@ export function matchRow(
   const cancha = m.venue
     ? `<span class="score-time" title="Cancha">${esc(m.venue)}</span>`
     : '';
+  const aviso = rescheduleNotice(m, opts.reschedules);
   return `<div class="match-row">
   ${teamCell(home, { placeholder: opts.homePlaceholder, align: 'left' })}${zoneBadge(zonaHome, 'left')}
   ${cruce}${matchCenter(m, cancha)}
   ${zoneBadge(zonaAway, 'right')}${teamCell(away, { placeholder: opts.awayPlaceholder, align: 'right' })}
-</div>`;
+</div>${aviso}`;
 }
 
 export function bracketColumn(col: BracketColumn, teamMap: Map<number, Team>): string {

@@ -221,6 +221,7 @@ export function adminGroupsNav(opts: { pending?: number; unassigned?: number }):
       label: 'Operación',
       items: [
         ...(opts.unassigned ? [{ href: '/admin/fechas', label: 'Fechas', match: 'fechas', badge: opts.unassigned } as NavItem] : [{ href: '/admin/fechas', label: 'Fechas', match: 'fechas' } as NavItem]),
+        { href: '/admin/calendario', label: 'Calendario', match: 'calendario' },
         { href: '/admin/planilla', label: 'Resultados', match: 'planilla' },
         ...(opts.pending ? [{ href: '/admin/entregas', label: 'Entregas', match: 'entregas', badge: opts.pending } as NavItem] : [{ href: '/admin/entregas', label: 'Entregas', match: 'entregas' } as NavItem]),
       ],
@@ -2017,7 +2018,7 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   <p class="hint">Torneo ${tStatus === 'archived' ? 'archivado' : 'finalizado'}: solo lectura, sus partidos no se pueden reprogramar.</p>
   ${rescheduleRows(reschedules)}
 </div></div></section>`
-      : `<section class="block"><form method="post" action="/admin/fixture/${m.id}/reprogramar"><div class="card"><div class="card-body">
+      : `<section class="block" id="reprogramar"><form method="post" action="/admin/fixture/${m.id}/reprogramar"><div class="card"><div class="card-body">
   <div class="dash-card-head"><h2>${icon('calendar', 16)} Reprogramar partido</h2></div>
   <p class="hint">Actual: <strong>${fmtDay(m.played_on)}</strong> ${esc(m.kickoff_time || 'sin hora')} · ${esc(m.venue || 'sin cancha')}. Dejá en blanco lo que no cambie; el motivo queda registrado en el historial.</p>
   <div class="form-row">

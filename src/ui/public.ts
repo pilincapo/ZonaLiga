@@ -37,6 +37,7 @@ import {
   teamCards,
   playerStatsAcrossTournaments,
   tournamentStats,
+  matchRescheduleHistory,
   type ScorersRow,
 } from '../lib/queries.ts';
 import { searchPlayers, searchTeams, searchTournaments } from '../lib/search.ts';
@@ -628,6 +629,10 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
 
   const rounds = groupBy(matches, (m) => (m.round != null ? String(m.round) : 'x'));
   const roundKeys = [...rounds.keys()].sort((a, b) => Number(a) - Number(b));
+  // Fase 15: historial de reprogramaciones del torneo. Solo se usa para
+  // avisar "Reprogramado" y mostrar la fecha/hora/cancha vigente; el resto
+  // de la vista no cambia.
+  const reschedules = await matchRescheduleHistory(db, t.id);
   const crossoverRounds = crossoverRoundsOf(t.config);
   // equipo → zona: los cruces entre zonas no llevan zona en el partido
   // (cada equipo es de una distinta); el badge de zona sale de acá.
@@ -675,7 +680,9 @@ export async function fixturePage(db: D1Database, slugParam?: string, roundParam
       round: key === 'x' ? '' : key,
       lines: shareLines,
       share: JSON.stringify({ label, day, lines: shareLines }),
-      html: `<div class="card">${list.map((m) => matchRow(m, teamMap, { zoneOfTeam })).join('')}</div>`,
+      html: `<div class="card">${list
+        .map((m) => matchRow(m, teamMap, { zoneOfTeam, reschedules: reschedules.get(m.id) }))
+        .join('')}</div>`,
     });
   }
 

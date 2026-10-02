@@ -113,6 +113,7 @@ import {
   zonedTeamIdsFromForm,
 } from '../lib/participation.ts';
 import { adjustmentsAdminPage } from '../ui/adminAjustes.ts';
+import { calendarioAdminPage } from '../ui/adminCalendario.ts';
 import { delegadosAdminPage, estadisticasAdminPage } from '../ui/adminStats.ts';
 import * as admin from '../ui/admin.ts';
 
@@ -625,6 +626,23 @@ adminRoutes.post('/jugadores/:id/eliminar', async (c) => {
 
 adminRoutes.get('/fixture', async (c) => {
   return c.html(await admin.fixtureAdminPage(c.env.DB, c.req.query('t'), c.req.query('msg'), c.req.query('err')));
+});
+
+/**
+ * Fase 15: calendario operativo. Solo lectura: lista el fixture por jornada
+ * con el estado real de cada partido (jugado, pendiente, reprogramado…) y los
+ * filtros por torneo, zona/grupo, jornada y estado.
+ */
+adminRoutes.get('/calendario', async (c) => {
+  return c.html(
+    await calendarioAdminPage(
+      c.env.DB,
+      c.req.query('t'),
+      { zona: c.req.query('zona'), jornada: c.req.query('jornada'), estado: c.req.query('estado') },
+      c.req.query('msg'),
+      c.req.query('err')
+    )
+  );
 });
 
 /**

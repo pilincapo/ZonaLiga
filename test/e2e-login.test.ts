@@ -3325,3 +3325,261 @@ describe.skipIf(!has)('e2e: reprogramación de partidos (Fase 13)', () => {
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
 });
+
+describe.skipIf(!has)('e2e: calendario operativo del fixture (Fase 15)', () => {
+  /** IDs de partidos del calendario, por su acceso directo a la planilla. */
+  function calIds(html: string): string[] {
+    return [...new Set([...html.matchAll(/\/admin\/planilla\/(\d+)"/g)].map((m) => m[1]!))];
+  }
+
+  /** Fila de un partido en el calendario. Se toma por `data-match` y hasta
+   *  la fila siguiente, porque la del reprogramado trae un historial con
+   *  tabla anidada y partir el HTML por `<tr` cortaría la fila. */
+  function calRow(html: string, matchId: string): string {
+    const start = html.indexOf(`<tr data-match="${matchId}"`);
+    if (start < 0) return '';
+    const end = html.indexOf('<tr data-match=', start + 10);
+    return end < 0 ? html.slice(start) : html.slice(start, end);
+  }
+
+  /** Sección (bloque) del calendario que contiene a un partido. */
+  function calSection(html: string, matchId: string): string {
+    const at = html.indexOf(`data-match="${matchId}"`);
+    if (at < 0) return '';
+    const start = html.lastIndexOf('<section class="block">', at);
+    const end = html.indexOf('<section class="block">', at);
+    return html.slice(start < 0 ? 0 : start, end < 0 ? undefined : end);
+  }
+
+  /** Jornada en la que el calendario muestra un partido. */
+  function calRound(html: string, matchId: string): number {
+    return Number(/zone-title">Fecha (\d+)/.exec(calSection(html, matchId))?.[1] ?? 0);
+  }
+
+  async function altaTorneo15(
+    admin: ReturnType<typeof client>,
+    nombre: string,
+    teamIds: string[],
+    extra: Record<string, string> = {}
+  ): Promise<{ tid: string; partBody: Record<string, string> }> {
+    const alta = await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      comp_points_win: '3',
+      comp_points_draw: '1',
+      comp_points_loss: '0',
+      ...extra,
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes(nombre))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+    const partBody: Record<string, string> = {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+    };
+    for (const id of teamIds) partBody[`participate_${id}`] = 'on';
+    expect((await admin.post(`/admin/torneos/${tid}`, partBody)).status).toBe(302);
+    return { tid, partBody };
+  }
+
+  it('el calendario agrupa por fecha, distingue los estados y muestra la fecha vigente del reprogramado', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+
+    const { tid, partBody } = await altaTorneo15(admin, '15 Calendario E2E', teamIds);
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '15-calendario-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+
+    // La página existe, trae los filtros y agrupa por fecha.
+    const cal = await (await admin.get('/admin/calendario?t=15-calendario-e2e')).text();
+    expect(cal).toContain('Calendario');
+    expect(cal).toContain('Fecha 1');
+    expect(cal).toContain('Zona / grupo');
+    expect(cal).toContain('Jornada');
+    expect(cal).toContain('name="estado"');
+    const ids = calIds(cal);
+    expect(ids.length).toBe(6);
+
+    // Se juega el primero y se reprograma el segundo (Fase 13).
+    const jugado = ids[0]!;
+    const reprogramado = ids[1]!;
+    const jugar = await admin.post(`/admin/planilla/${jugado}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '1',
+      away_goals: '0',
+      hg1: 'none',
+      notes: '',
+    });
+    expect(jugar.status).toBe(302);
+    expect(decodeURIComponent(jugar.headers.get('location') ?? '')).not.toContain('err=');
+    const repro = await admin.post(`/admin/fixture/${reprogramado}/reprogramar`, {
+      played_on: '2026-11-02',
+      kickoff_time: '18:30',
+      venue: 'Cancha Sur',
+      reason: 'Cancha inundada',
+    });
+    expect(repro.status).toBe(302);
+    expect(decodeURIComponent(repro.headers.get('location') ?? '')).toContain('reprogramado');
+
+    // Estados claros: el jugado sale "Jugado" (y no se ofrece reprogramar);
+    // el reprogramado sale "Reprogramado" con la fecha vigente y el motivo.
+    const cal2 = await (await admin.get('/admin/calendario?t=15-calendario-e2e')).text();
+    const filaJugado = calRow(cal2, jugado);
+    expect(filaJugado).toContain('Jugado');
+    expect(filaJugado).toContain(`/partido/${jugado}`);
+    expect(filaJugado).not.toContain('#reprogramar');
+    const filaRepro = calRow(cal2, reprogramado);
+    expect(filaRepro).toContain('Reprogramado');
+    expect(filaRepro).toContain('18:30');
+    expect(filaRepro).toContain('Cancha Sur');
+    expect(filaRepro).toContain('Cancha inundada');
+    // Los otros cuatro siguen pendientes.
+    expect(cal2).toContain('Pendiente');
+
+    // Acceso rápido: planilla, reprogramación y edición.
+    expect(filaRepro).toContain(`/admin/planilla/${reprogramado}`);
+    expect(filaRepro).toContain(`/admin/planilla/${reprogramado}#reprogramar`);
+    expect(filaRepro).toContain(`/admin/fixture/${reprogramado}/editar`);
+
+    // El ancla de reprogramación existe en la planilla.
+    const sheet = await (await admin.get(`/admin/planilla/${reprogramado}`)).text();
+    expect(sheet).toContain('id="reprogramar"');
+    expect(sheet).toContain('Cancha inundada');
+
+    // Filtro por estado.
+    const soloRepro = await (await admin.get('/admin/calendario?t=15-calendario-e2e&estado=reprogramado')).text();
+    expect(calIds(soloRepro)).toEqual([reprogramado]);
+    expect(soloRepro).toContain('mostrando 1 de 6');
+    const soloJugado = await (await admin.get('/admin/calendario?t=15-calendario-e2e&estado=jugado')).text();
+    expect(calIds(soloJugado)).toEqual([jugado]);
+
+    // Filtro por jornada (incluido un valor que no existe). La cantidad
+    // esperada sale de la propia sección de la fecha 1 del calendario sin
+    // filtro, así el test no depende de cómo repartió el torneo los partidos.
+    const rondaRepro = calRound(cal2, reprogramado);
+    expect(rondaRepro).toBeGreaterThan(0);
+    const enSuFecha = calIds(calSection(cal2, reprogramado));
+    expect(enSuFecha).toContain(reprogramado);
+    const fRepro = await (await admin.get(`/admin/calendario?t=15-calendario-e2e&jornada=${rondaRepro}`)).text();
+    expect(calIds(fRepro)).toEqual(enSuFecha);
+    expect(fRepro).toContain(`mostrando ${enSuFecha.length} de 6`);
+    expect(fRepro).not.toContain(`Fecha ${rondaRepro + 1} ·`);
+    const f99 = await (await admin.get('/admin/calendario?t=15-calendario-e2e&jornada=99')).text();
+    expect(calIds(f99).length).toBe(0);
+    expect(f99).toContain('Ningún partido coincide con el filtro');
+
+    // Filtro por zona en un torneo sin zonas: no deja nada.
+    const zona = await (await admin.get('/admin/calendario?t=15-calendario-e2e&zona=A')).text();
+    expect(calIds(zona).length).toBe(0);
+
+    // Filtros combinados. La reprogramación cambia día/hora/cancha pero NO la
+    // jornada: el reprogramado sigue figurando en su fecha original.
+    const combo = await (
+      await admin.get(`/admin/calendario?t=15-calendario-e2e&jornada=${rondaRepro}&estado=reprogramado`)
+    ).text();
+    expect(calIds(combo)).toEqual([reprogramado]);
+    // Su fecha + estado "jugado" muestra solo al jugado, si cae en la misma.
+    const comboJugado = await (
+      await admin.get(`/admin/calendario?t=15-calendario-e2e&jornada=${calRound(cal2, jugado)}&estado=jugado`)
+    ).text();
+    expect(calIds(comboJugado)).toEqual([jugado]);
+
+    // El fixture público marca el reprogramado con su fecha vigente.
+    const pub = await (await admin.get('/fixture?t=15-calendario-e2e')).text();
+    expect(pub).toContain('Reprogramado');
+    expect(pub).toContain('Cancha Sur');
+
+    // Torneo finalizado: el calendario avisa que es de solo lectura.
+    expect((await admin.post(`/admin/torneos/${tid}`, { ...partBody, status: 'finished' })).status).toBe(302);
+    const calFin = await (await admin.get('/admin/calendario?t=15-calendario-e2e')).text();
+    expect(calFin).toContain('solo lectura');
+    expect(calRow(calFin, reprogramado)).not.toContain('#reprogramar');
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+
+  it('con zonas configuradas, el filtro de zona muestra solo los partidos de esa zona', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+    expect(teamIds.length).toBe(4);
+
+    const alta = await admin.post('/admin/torneos', {
+      name: '15 Calendario Zonas E2E',
+      season: '2026',
+      status: 'active',
+      format: 'zonas_playoffs',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      zones_enabled: 'on',
+      zone_names: 'A\nB',
+      [`zone_of_${teamIds[0]}`]: '1',
+      [`zone_of_${teamIds[1]}`]: '1',
+      [`zone_of_${teamIds[2]}`]: '2',
+      [`zone_of_${teamIds[3]}`]: '2',
+    });
+    expect(alta.status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((chunk) => chunk.includes('15 Calendario Zonas E2E'))
+      .map((chunk) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(chunk)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    const conf = await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: '15-calendario-zonas-e2e' });
+    expect(decodeURIComponent(conf.headers.get('location') ?? '')).toContain('Fixture guardado');
+
+    // El calendario ofrece A y B en el filtro.
+    const cal = await (await admin.get('/admin/calendario?t=15-calendario-zonas-e2e')).text();
+    expect(cal).toContain('<option value="A"');
+    expect(cal).toContain('<option value="B"');
+
+    // Filtrar por A recorta la lista; por B muestra los otros.
+    const soloA = await (await admin.get('/admin/calendario?t=15-calendario-zonas-e2e&zona=A')).text();
+    const soloB = await (await admin.get('/admin/calendario?t=15-calendario-zonas-e2e&zona=B')).text();
+    const todas = calIds(cal);
+    const enA = calIds(soloA);
+    const enB = calIds(soloB);
+    expect(enA.length).toBeGreaterThan(0);
+    expect(enB.length).toBeGreaterThan(0);
+    expect(enA.length).toBeLessThan(todas.length);
+    // Las dos zonas juntas cubren todos los partidos de sus fechas.
+    expect([...enA, ...enB].sort()).toEqual(todas.filter((id) => soloA.includes(id) || soloB.includes(id)).sort());
+    // Ninguna fila de A es de B: la zona se muestra en la fila.
+    expect(soloA).toContain('>A<');
+    expect(soloB).toContain('>B<');
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+});

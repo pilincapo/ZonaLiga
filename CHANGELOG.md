@@ -13,6 +13,23 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.11] — 2026-10-02 — Calendario operativo del fixture (Fase 15)
+
+### Nuevo
+
+- Nueva página **Calendario** en el panel (Operación): el fixture agrupado por jornada, con el estado real de cada partido —**jugado, pendiente, reprogramado, postergado, suspendido o libre**— y un número arriba con el total de cada estado.
+- Filtros por **torneo, zona/grupo, jornada y estado**, combinables. Quedan guardados en la dirección de la página, así el calendario se puede compartir o recargar sin perderlos.
+- Los partidos **reprogramados** se marcan con un distintivo y muestran **siempre la fecha, la hora y la cancha vigentes**, con el motivo del último cambio y el historial completo de cambios.
+- Acceso rápido desde cada fila: **cargar planilla**, **ver resultado** (si ya se jugó), **reprogramar** y **editar**. A los partidos ya jugados o a un torneo finalizado/archivado no se les ofrece reprogramar.
+- Aviso cuando a un partido pendiente le falta definir día, hora o cancha, y resumen de "reprogramados · pendientes · postergados" que aclara cuántos partidos se están viendo de los totales.
+
+### Mejora
+
+- El **fixture público** marca los partidos reprogramados con un distintivo y repite abajo de la fila la fecha, la hora y la cancha vigentes: es lo único que necesita saber el que tiene que ir a jugar.
+- La reprogramación usa ahora el mismo historial que se viene registrando: el calendario lo lee, no guarda datos nuevos.
+
+---
+
 ## [0.3.10] — 2026-10-01 — Arreglos de sanciones en pantallas públicas
 
 ### Arreglo
