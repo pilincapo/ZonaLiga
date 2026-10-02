@@ -2,6 +2,7 @@
 // con el resultado oficial. Todo puro para poder testearlo sin base de datos.
 
 import type { EventType, Match, MatchStatus } from './types.ts';
+import { EVENT_TYPES } from './matchOps.ts';
 
 export type SubmissionStatus = 'played' | 'postponed' | 'suspended' | 'walkover';
 export type ReviewState = 'pending' | 'approved' | 'rejected';
@@ -121,7 +122,8 @@ export interface EventValue {
   minute: number | null;
 }
 
-const EVENT_TYPES: EventType[] = ['goal', 'own_goal', 'yellow', 'red'];
+// Fase 17: la lista vive en matchOps.ts (la comparte con la planilla del panel)
+// para que agregar un tipo de evento no deje una de las dos sin actualizar.
 
 /** Valida un evento: el jugador tiene que ser de la plantilla del delegado. */
 export function parseEvent(form: FormData, allowedPlayers: Set<number>): ParseResult<EventValue> {

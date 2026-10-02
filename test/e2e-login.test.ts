@@ -798,6 +798,19 @@ describe.skipIf(!has)('e2e: declaración de goles en la planilla', () => {
     expect(ficha2).toMatch(/<span>3<\/span><span class="faint">-<\/span><span>1<\/span>/);
 
     // Bajar a 2-0 con otros autores: la declaración reemplaza el paquete.
+    // Fase 17: bajar el marcador con autores cargados pide confirmación.
+    const bajaSinConfirmar = await admin.post(`/admin/planilla/${matchId}`, {
+      status: 'played',
+      played_on: '2026-11-09',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '2',
+      away_goals: '0',
+      hg1: idA,
+      hg2: idB,
+      notes: '',
+    });
+    expect(decodeURIComponent(bajaSinConfirmar.headers.get('location') ?? '')).toContain('casilla de confirmación');
     await admin.post(`/admin/planilla/${matchId}`, {
       status: 'played',
       played_on: '2026-11-09',
@@ -808,6 +821,7 @@ describe.skipIf(!has)('e2e: declaración de goles en la planilla', () => {
       hg1: idA,
       hg2: idB,
       notes: '',
+      confirm_goles: '1',
     });
     const ficha3 = await (await fetch(`${BASE}/partido/${matchId}`)).text();
     expect(ficha3).toMatch(/<span>2<\/span><span class="faint">-<\/span><span>0<\/span>/);
@@ -3774,6 +3788,181 @@ describe.skipIf(!has)('e2e: equipos y jugadores (Fase 16)', () => {
     expect(await (await admin.get('/admin/equipos')).text()).toContain(`href="/admin/equipos/${teamIds[0]}">Editar`);
 
     // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+  });
+});
+
+describe.skipIf(!has)('e2e: operación de partidos (Fase 17)', () => {
+  const loc = (r: Response): string => decodeURIComponent(r.headers.get('location') ?? '');
+
+  /** Id del jugador cuyo nombre aparece en la plantilla del equipo. */
+  function idJugador(html: string, nombre: string): string {
+    const re = new RegExp(`data-nombre="${nombre}"[\\s\\S]*?/admin/jugadores/(\\d+)/(eliminar|reactivar)`);
+    return re.exec(html)?.[1] ?? '';
+  }
+
+  it('la planilla y los eventos validan de verdad: nada de 500 ni datos ajenos', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const marca = `17${Date.now().toString(36)}`;
+    const nombre = `17 Operacion ${marca}`;
+    const slug = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+    // Torneo propio con 4 equipos, para no tocar los datos de otros tests.
+    const teamsHtml = await (await admin.get('/admin/equipos')).text();
+    const teamIds = [...teamsHtml.matchAll(/href="\/admin\/equipos\/(\d+)">Editar/g)].map((m) => m[1]!).slice(0, 4);
+    expect(teamIds.length).toBe(4);
+    expect(
+      (await admin.post('/admin/torneos', {
+        name: nombre,
+        season: '2026',
+        status: 'active',
+        venues: 'Cancha Norte',
+        kickoffs: '10:00',
+        start_date: '2026-10-05',
+        round_gap: '7',
+        comp_format: 'UNA_RUEDA',
+      })).status
+    ).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((c) => c.includes(nombre))
+      .map((c) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(c)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid, 'el torneo de la Fase 17 tiene que existir').toBeTruthy();
+
+    const alta: Record<string, string> = {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+    };
+    for (const id of teamIds) alta[`participate_${id}`] = 'on';
+    expect((await admin.post(`/admin/torneos/${tid}`, alta)).status).toBe(302);
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    expect(loc(await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: `17-fixture-${marca}` }))).toContain(
+      'Fixture guardado'
+    );
+
+    // Dos partidos distintos del torneo.
+    const fixtureHtml = await (await admin.get(`/admin/fixture?t=${slug}`)).text();
+    const matchIds = [...new Set([...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!))];
+    expect(matchIds.length).toBeGreaterThanOrEqual(2);
+    const [midA, midB] = matchIds as [string, string];
+
+    // Los dos equipos del partido A y un tercero que ahí no juega.
+    const sheetA = await (await admin.get(`/admin/planilla/${midA}`)).text();
+    const sidesA = [...new Set([...sheetA.matchAll(/name="team_id" value="(\d+)"/g)].map((m) => m[1]!))];
+    expect(sidesA.length).toBe(2);
+    const [homeId, awayId] = sidesA as [string, string];
+    const tercero = teamIds.find((id) => id !== homeId && id !== awayId)!;
+    expect(tercero, 'hace falta un tercer equipo en el torneo').toBeTruthy();
+
+    const nom = (n: string): string => `17 ${n} ${marca}`;
+    const bajas = [
+      [homeId, nom('Local')],
+      [awayId, nom('Visita')],
+      [tercero, nom('Tercero')],
+    ] as const;
+    for (const [team, nombreJug] of bajas) {
+      expect((await admin.post('/admin/jugadores', { team_id: team, name: nombreJug, number: '', position: 'DEL' })).status).toBe(302);
+    }
+    const jugHome = idJugador(await (await admin.get(`/admin/jugadores?team=${homeId}`)).text(), nom('local').toLowerCase());
+    const jugAway = idJugador(await (await admin.get(`/admin/jugadores?team=${awayId}`)).text(), nom('visita').toLowerCase());
+    const jugTercero = idJugador(await (await admin.get(`/admin/jugadores?team=${tercero}`)).text(), nom('tercero').toLowerCase());
+    expect(jugHome && jugAway && jugTercero, 'los tres jugadores tienen que estar en la plantilla').toBeTruthy();
+
+    /* ---------- 1. La planilla rechaza datos imposibles (antes: error 500) ---------- */
+
+    const base: Record<string, string> = {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '0',
+      away_goals: '0',
+      notes: '',
+    };
+    const guardar = (extra: Record<string, string>): Promise<Response> => admin.post(`/admin/planilla/${midA}`, { ...base, ...extra });
+
+    const estadoMalo = await guardar({ status: 'inventado' });
+    expect(estadoMalo.status).toBe(302);
+    expect(loc(estadoMalo)).toContain('Estado inválido');
+    const estadoVacio = await guardar({ status: '' });
+    expect(estadoVacio.status).toBe(302);
+    expect(loc(estadoVacio)).toContain('Falta elegir el estado');
+
+    expect(loc(await guardar({ home_points: '99' }))).toContain('0 a 30');
+    expect(loc(await guardar({ played_on: '2026-02-31' }))).toContain('no existe en el calendario');
+    expect(loc(await guardar({ kickoff_time: '25:00' }))).toContain('HH:MM');
+
+    // Nada de eso se guardó: el partido sigue scheduled y sin puntos a mano.
+    const trasErrores = await (await admin.get(`/admin/planilla/${midA}`)).text();
+    expect(trasErrores).toMatch(/<option value="scheduled" selected>/);
+    expect(trasErrores).toMatch(/name="home_points"[^>]*value=""/);
+
+    /* ---------- 2. Estado "Libre" (bye) disponible desde la pantalla ---------- */
+    expect(trasErrores).toMatch(/<option value="bye"[^>]*>Libre<\/option>/);
+
+    /* ---------- 3. Eventos: tipo, minuto, equipo y jugador ---------- */
+    const evento = (extra: Record<string, string>, mid = midA): Promise<Response> =>
+      admin.post(`/admin/planilla/${mid}/evento`, extra);
+
+    const tipoMalo = await evento({ team_id: homeId, player_id: jugHome, type: 'amarillo' });
+    expect(tipoMalo.status).toBe(302);
+    expect(loc(tipoMalo)).toContain('Tipo de evento inválido');
+    expect(loc(await evento({ team_id: homeId, player_id: jugHome, type: 'yellow', minute: '-5' }))).toContain('0 a 130');
+    expect(loc(await evento({ team_id: homeId, player_id: jugHome, type: 'yellow', minute: '500' }))).toContain('0 a 130');
+    // Equipo que no juega ese partido: antes se guardaba y contaminaba las tarjetas públicas.
+    expect(loc(await evento({ team_id: tercero, player_id: jugTercero, type: 'yellow', minute: '10' }))).toContain(
+      'equipo del partido'
+    );
+    // Jugador del otro lado.
+    expect(loc(await evento({ team_id: homeId, player_id: jugAway, type: 'yellow', minute: '10' }))).toContain(
+      'plantilla del equipo'
+    );
+
+    // Ninguno de los rechazados quedó cargado: las dos tablas siguen vacías.
+    const sinNada = await (await admin.get(`/admin/planilla/${midA}`)).text();
+    expect([...sinNada.matchAll(/Sin eventos/g)].length).toBe(2);
+    expect(sinNada).not.toContain('name="event_id"');
+
+    /* ---------- 4. Un evento válido sí se guarda ---------- */
+    expect((await evento({ team_id: homeId, player_id: jugHome, type: 'yellow', minute: '23' })).status).toBe(302);
+    const conEvento = await (await admin.get(`/admin/planilla/${midA}`)).text();
+    expect(conEvento).toContain('17 Local');
+    const eventId = /name="event_id" value="(\d+)"/.exec(conEvento)?.[1] ?? '';
+    expect(eventId, 'el evento válido tiene que quedar cargado').toBeTruthy();
+
+    /* ---------- 5. No se puede borrar el evento de otro partido ---------- */
+    const ajeno = await admin.post(`/admin/planilla/${midB}/evento/eliminar`, { event_id: eventId });
+    expect(ajeno.status).toBe(302);
+    expect(loc(ajeno)).toContain('no pertenece a este partido');
+    expect(await (await admin.get(`/admin/planilla/${midA}`)).text()).toContain(`name="event_id" value="${eventId}"`);
+
+    /* ---------- 6. Confirmación antes de pisar autores de gol ---------- */
+    expect((await guardar({ home_goals: '1', hg1: jugHome })).status).toBe(302);
+    const conAutores = await (await admin.get(`/admin/planilla/${midA}`)).text();
+    expect(conAutores).toContain('confirm_goles');
+    expect(conAutores).toContain('pisar los autores de gol');
+    expect(loc(await guardar({ home_goals: '0', away_goals: '0' }))).toContain('casilla de confirmación');
+    expect(await (await admin.get(`/admin/planilla/${midA}`)).text()).toMatch(/name="home_goals"[^>]*value="1"/);
+    expect(loc(await guardar({ home_goals: '0', away_goals: '0', confirm_goles: '1' }))).toContain('Planilla guardada');
+    expect(await (await admin.get(`/admin/planilla/${midA}`)).text()).toMatch(/name="home_goals"[^>]*value="0"/);
+
+    /* ---------- 7. La lista de planillas se puede cambiar de torneo ---------- */
+    const lista = await (await admin.get(`/admin/planilla?t=${slug}`)).text();
+    expect(lista).toContain(nombre);
+    expect(lista).toContain(`value="${slug}"`);
+
+    // Limpieza.
+    for (const [team] of bajas) await admin.post(`/admin/equipos/${team}/eliminar`, {});
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
 });

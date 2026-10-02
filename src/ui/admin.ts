@@ -70,6 +70,7 @@ import {
   submissionEvents,
 } from '../lib/submissions.ts';
 import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
+import { MATCH_STATUSES, MATCH_STATUS_LABELS, EVENT_TYPE_LABELS, MAX_POINTS_OVERRIDE, goalOverwriteNotice } from '../lib/matchOps.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
 import { teamIdsOfTournament, participantsTeamsByTournament, participantsWithoutZone } from '../lib/participation.ts';
@@ -2066,12 +2067,14 @@ ${pageHead(m ? `Editar partido #${m.id}` : 'Nuevo partido')}
 
 /* ============================== PLANILLA (carga de resultado) ============================== */
 
-export async function sheetListPage(db: D1Database, msg?: string, errMsg?: string): Promise<string> {
+export async function sheetListPage(db: D1Database, slugParam?: string, msg?: string, errMsg?: string): Promise<string> {
   const tournaments = await listTournaments(db);
   if (tournaments.length === 0) {
     return adminLayout(db, { title: 'Planilla', active: 'planilla', body: `${pageHead('Planilla')}<div class="card"><div class="card-body">Primero creá un torneo y su fixture.</div></div>` });
   }
-  const t = tournaments[0]!;
+  // Fase 17: la lista venía atada al primer torneo de la base. Ahora se elige
+  // con el mismo selector del calendario (Fase 15).
+  const t = (slugParam ? tournaments.find((x) => x.slug === slugParam) : undefined) ?? tournaments[0]!;
   const [view, pendingMatches] = await Promise.all([
     loadTournamentView(db, { id: t.id, includeInactiveTeams: true }),
     matchIdsWithPendingSubmissions(db),
@@ -2109,6 +2112,13 @@ ${flash('success', msg)}${flash('error', errMsg)}
     <h1>Planillas</h1>
     <p>Cargá resultados, autores de gol y tarjetas de cada partido del torneo.</p>
   </div>
+  ${
+    tournaments.length > 1
+      ? `<form method="get" action="/admin/planilla" class="pselect"><label for="sheetPick">Torneo</label><div class="tpage-search pselect-box">${icon('trophy', 15)}<select id="sheetPick" name="t" onchange="this.form.submit()">${tournaments
+          .map((x) => `<option value="${escUrl(x.slug)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`)
+          .join('')}</select></div></form>`
+      : ''
+  }
 </div>
 <section class="block"><div class="dash-card">
   <div class="dash-card-head"><h2>${icon('clock', 16)} Pendientes</h2><span class="muted small">${pending.length} partido${pending.length === 1 ? '' : 's'}</span></div>
@@ -2149,6 +2159,11 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   ).results ?? [];
   const readOnlyStatus = statusIsReadOnly(tStatus);
   const matchLocked = m.status === 'played' || m.status === 'walkover';
+  // Fase 17: cuántos goles tienen un autor nombrado. Si el administrador baja
+  // el marcador, guardar pisa esos autores: la casilla pide confirmación.
+  const authoredGoals = events.filter((e) => (e.type === 'goal' || e.type === 'own_goal') && e.player_id != null).length;
+  const declaredGoals = (m.home_goals ?? 0) + (m.away_goals ?? 0);
+  const overwriteNotice = goalOverwriteNotice(authoredGoals, declaredGoals);
 
   // Elegibilidad: disciplina combinada del torneo evaluada para este partido.
   const eligibility = await disciplineForMatch(db, m);
@@ -2240,7 +2255,7 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
       .map(
         (e) => `<tr>
       <td>${e.minute != null ? `${e.minute}'` : ''}</td>
-      <td>${e.type === 'goal' ? '⚽ Gol' : e.type === 'own_goal' ? '🔁 En contra' : e.type === 'yellow' ? '🟨 Amarilla' : '🟥 Roja'}</td>
+      <td>${({ goal: '⚽', own_goal: '🔁', yellow: '🟨', red: '🟥' } as Record<string, string>)[e.type] ?? ''} ${esc(EVENT_TYPE_LABELS[e.type as keyof typeof EVENT_TYPE_LABELS] ?? e.type)}</td>
       <td>${(() => {
         const p = e.player_id;
         const all = [...homePlayers, ...awayPlayers];
@@ -2334,12 +2349,13 @@ ${flash('success', msg)}${flash('error', error)}
       <div class="field">
         <label>Estado del partido</label>
         <select name="status">
-          ${['scheduled', 'played', 'postponed', 'suspended', 'walkover']
-            .map((s) => `<option value="${s}" ${m.status === s ? 'selected' : ''}>${{ scheduled: 'Programado', played: 'Jugado', postponed: 'Postergado', suspended: 'Suspendido', walkover: 'Walkover' }[s] ?? s}</option>`)
-            .join('')}
+          ${MATCH_STATUSES.map(
+            (s) => `<option value="${s}" ${m.status === s ? 'selected' : ''}>${esc(MATCH_STATUS_LABELS[s])}</option>`
+          ).join('')}
         </select>
       </div>
     </div>
+    <p class="hint">"Libre" es para cuando el partido no se juega (queda exento de la tabla). "Walkover" es cuando se decide sin jugar.</p>
     <div class="dash-sub">Datos del partido</div>
     <div class="form-row">
       <div class="field"><label>Fecha jugado</label><input type="date" name="played_on" value="${esc(m.played_on ?? '')}"></div>
@@ -2357,6 +2373,15 @@ ${flash('success', msg)}${flash('error', error)}
     <div class="dash-sub">Autores de goles · ${esc(away?.name ?? 'Visitante')}</div>
     ${goalPicks('away')}
     <p class="hint">Al guardar, los goles del partido se reemplazan con lo declarado acá: nunca se duplican ni se suman de más. Si un equipo no tiene plantilla cargada, sus goles quedan sin autor (salvo los “En contra”).</p>
+    ${
+      authoredGoals > 0
+        ? `<div class="warn-pick">${
+            overwriteNotice
+              ? `<p class="hint" style="margin:0 0 6px"><strong>${esc(overwriteNotice)}</strong> Bajaste el marcador, así que al guardar se pisa lo que ya está cargado.</p>`
+              : `<p class="hint" style="margin:0 0 6px">Este partido tiene ${authoredGoals} autor${authoredGoals === 1 ? '' : 'es'} de gol cargado${authoredGoals === 1 ? '' : 's'}. Si bajás el marcador, se borran: te lo vamos a pedir por las dudas.</p>`
+          }<label class="checkline"><input type="checkbox" name="confirm_goles" value="1"> Confirmo que quiero pisar los autores de gol ya cargados</label></div>`
+        : ''
+    }
     <script>
       (function () {
         function sync(prefix, input) {
@@ -2377,9 +2402,10 @@ ${flash('success', msg)}${flash('error', error)}
   <div class="dash-card" style="margin-top:14px">
     <div class="dash-card-head"><h2>${icon('chart', 16)} Ajustes y notas</h2></div>
     <div class="form-row">
-      <div class="field"><label>Puntos local (override)</label><input type="number" name="home_points" min="0" max="3" value="${m.home_points ?? ''}" placeholder="auto"></div>
-      <div class="field"><label>Puntos visitante (override)</label><input type="number" name="away_points" min="0" max="3" value="${m.away_points ?? ''}" placeholder="auto"></div>
+      <div class="field"><label>Puntos local (override)</label><input type="number" name="home_points" min="0" max="${MAX_POINTS_OVERRIDE}" value="${m.home_points ?? ''}" placeholder="auto"></div>
+      <div class="field"><label>Puntos visitante (override)</label><input type="number" name="away_points" min="0" max="${MAX_POINTS_OVERRIDE}" value="${m.away_points ?? ''}" placeholder="auto"></div>
     </div>
+    <p class="hint">Dejalo vacío y se calculan según las reglas del torneo (3 / 1 / 0). Si los cargás a mano, el torneo los usa como están; en un partido empatado de llaves también mandan como resultado de los penales.</p>
     <div class="field"><label>Notas</label><textarea name="notes" style="min-height:60px">${esc(m.notes ?? '')}</textarea></div>
     <button class="btn btn-primary" type="submit">Guardar planilla</button>
   </div>

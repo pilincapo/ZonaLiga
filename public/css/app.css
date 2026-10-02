@@ -845,6 +845,20 @@ html[data-theme='dark'] .btn-row:hover { background: var(--accent); color: #0412
 .goal-picks { display: flex; flex-wrap: wrap; gap: 10px 14px; }
 .goal-picks [data-pick] { min-width: 180px; flex: 0 1 220px; }
 
+/* Fase 17: aviso de sobrescritura de autores de gol */
+.warn-pick {
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--amber-line, var(--border));
+  border-left: 3px solid var(--amber, #c98a1b);
+  border-radius: var(--radius, 10px);
+  background: var(--amber-soft, rgba(201, 138, 27, 0.08));
+}
+.checkline {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.82rem; cursor: pointer;
+}
+.checkline input[type='checkbox'] { width: auto; margin: 0; }
+
 .actions-cell { white-space: nowrap; text-align: right; }
 
 .form-card { max-width: 660px; }

@@ -13,6 +13,26 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.3.13] — 2026-10-02 — Operación de partidos (Fase 17)
+
+### Nuevo
+
+- El estado **"Libre"** (el partido no se juega) ya se puede elegir desde la planilla. Estaba en la base y se usaba al calcular la tabla, pero no había forma de ponerlo.
+- La lista de planillas tiene **selector de torneo**, como el calendario. Antes siempre mostraba el primer torneo de la base, sin importar cuál tuvieras cargado.
+- La planilla avisa **antes de pisar los autores de gol**: si bajás el marcador de un partido que ya tiene goles con autor, aparece un cartelito y hay que marcar una casilla para confirmar. Antes el guardado los borraba en silencio.
+- La fecha, la hora, la cancha y las notas de la planilla se validan: no se guardan más textos raros ni fechas que no existen (por ejemplo, 31 de febrero).
+
+### Arreglo
+
+- **Cargar la planilla con datos imposibles ya no tira error de servidor.** Un estado inventado o un tipo de evento inexistente devolvían una pantalla en blanco (error 500); ahora se explica el problema en la planilla y no se guarda nada.
+- **No se puede cargar un evento de un equipo que no jugó ese partido.** Antes se guardaba sin avisar y después aparecía en la tabla de tarjetas públicas de ese equipo, contaminando su fair play. Ahora se rechaza.
+- **El evento tiene que ser de un jugador de ese mismo equipo.** Antes se podía atribuir una amarilla o un gol a cualquiera.
+- **No se puede borrar el evento de otro partido.** Antes el borrado iba por número de evento sin mirar de qué partido era: desde la planilla de un partido se caaban eventos de otro, sin dejar rastro.
+- **El minuto se valida:** va de 0 a 130. Antes se aceptaban minutos negativos o de 500.
+- **Los puntos a mano se validan:** tienen que ser un número entero en rango. Antes la pantalla ponía un tope que el servidor no controlaba, así que un `99` tipeado terminaba sumando 99 puntos a un equipo en la tabla. (El campo también se usa para cargar el resultado de los penales en las llaves, así que el rango es holgado a propósito.)
+
+---
+
 ## [0.3.12] — 2026-10-02 — Equipos y jugadores (Fase 16)
 
 ### Nuevo
