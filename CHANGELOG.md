@@ -13,6 +13,25 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.0] — 2026-10-02 — Ayuda y documentación del panel
+
+### Nuevo
+
+- **Guía de uso completa dentro del panel**, en **Ayuda** (menú lateral, al pie). Está pensada para que una persona que recibe el sistema pueda administrar un torneo entero sin depender del desarrollador.
+  - Catorce categorías: Primeros pasos, Torneos, Competencia, Equipos, Jugadores, Delegados, Fixture, Partidos y planillas, Calendario, Reprogramaciones, Disciplina, Estadísticas, Administración y Problemas frecuentes.
+  - **Índice navegable** con anclas internas, pestañas para saltar de categoría y **buscador** por palabras (funciona sin JavaScript).
+  - Incluye el **recorrido completo paso a paso** para levantar un torneo desde cero, la **guía de errores y validaciones** (qué controla el sistema y qué hacer cuando aparece un mensaje) y las **situaciones habituales** con su solución.
+  - Todo el contenido vive en un solo archivo (`src/lib/help.ts`): no hay textos sueltos repetidos en cada pantalla, así que actualizar la documentación es editar un lugar.
+- **Ayuda contextual en cada sección del panel**: un **"? Ayuda"** arriba del contenido de Inicio, Torneos, Fixture, Fechas, Calendario, Resultados, Entregas, Equipos, Jugadores, Delegados, Estadísticas, Ajustes de puntos y Suspensiones. Cada una explica para qué sirve esa pantalla, qué acciones permite, qué precauciones tener y qué bloqueos existen, y enlaza a las secciones correspondientes de la guía.
+- La ayuda de la propia página Ayuda no se muestra ahí: en esa pantalla ya está todo el contenido.
+
+### Mejora
+
+- El **límite real de los puntos manuales** de la planilla (0 a 30, porque el mismo campo se usa para el resultado de los penales en playoffs) y su efecto quedan explicados en la guía, junto con el resto de las validaciones de la planilla.
+- La guía aclara dos detalles que antes no estaban escritos en ningún lado: que un **jugador dado de baja puede seguir apareciendo en las listas de autores y eventos** de la planilla (a propósito, para no perder el historial), y **qué no hace el sistema todavía** (no existe el estado "Cancelado", no hay auditoría general de cambios, no hay transferencias de jugadores ni migración de plantillas). Está en la categoría Administración.
+
+---
+
 ## [0.3.13] — 2026-10-02 — Operación de partidos (Fase 17)
 
 ### Nuevo

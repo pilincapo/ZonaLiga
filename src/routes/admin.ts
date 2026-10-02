@@ -168,6 +168,10 @@ function sessionCookieFor(token: string): string {
   return sessionCookieHeader(token);
 }
 
+adminRoutes.get('/ayuda', (c) =>
+  admin.helpPage(c.env.DB, c.req.query('q') ?? '').then((h) => c.html(h))
+);
+
 adminRoutes.get('/logout', (c) => {
   c.header('Set-Cookie', clearSessionCookieHeader());
   return c.redirect('/admin/login');

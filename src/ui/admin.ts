@@ -70,6 +70,7 @@ import {
   submissionEvents,
 } from '../lib/submissions.ts';
 import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
+import { helpContextBlock, helpPageBody } from './help.ts';
 import { MATCH_STATUSES, MATCH_STATUS_LABELS, EVENT_TYPE_LABELS, MAX_POINTS_OVERRIDE, goalOverwriteNotice } from '../lib/matchOps.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
@@ -254,6 +255,7 @@ export function adminGroupsNav(opts: { pending?: number; unassigned?: number }):
         { href: '/admin/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
       ],
     },
+    { label: 'Ayuda', href: '/admin/ayuda', match: 'ayuda', items: [] },
   ];
 }
 
@@ -266,7 +268,7 @@ export function adminGroupsNav(opts: { pending?: number; unassigned?: number }):
  */
 export async function adminLayout(
   db: D1Database | null,
-  opts: { title: string; active: string; body: string }
+  opts: { title: string; active: string; body: string; help?: string }
 ): Promise<string> {
   let pending: number | undefined;
   let unassigned: number | undefined;
@@ -301,7 +303,9 @@ export async function adminLayout(
     picker,
     search: { action: '/buscar', placeholder: 'Buscar equipos, jugadores, partidos…' },
     pending,
-    body: `<div class="admin-page">${opts.body}</div>`,
+    // Ayuda contextual: una por pantalla, resuelta desde la sección activa
+    // (o el override `help` para subpantallas que comparten sección).
+    body: `<div class="admin-page">${helpContextBlock(opts.help ?? opts.active)}${opts.body}</div>`,
   });
 }
 
@@ -541,8 +545,10 @@ ${pageHead('Resumen', { href: '/admin/torneos/nuevo', label: '+ Nuevo torneo' })
       ? `<div class="dash-status st-warn">${icon('bell', 15)}<span><strong>${pending} entrega${pending === 1 ? '' : 's'} por revisar</strong><em>Los delegados cargaron resultados que esperan tu aprobación.</em></span></div>`
       : `<div class="dash-status st-ok">${icon('shield', 15)}<span><strong>Todo en orden</strong><em>No hay entregas pendientes de revisión.</em></span></div>`;
 
+  // El dashboard arma su propio shell (dashboardShell), asi que la ayuda
+  // contextual se agrega aca a mano en vez de pasar por adminLayout.
   const dashBody = `
-${flash('success', msg)}${flash('error', errMsg)}
+${helpContextBlock('admin')}${flash('success', msg)}${flash('error', errMsg)}
 <section class="dash-hero">
   <div class="dash-hero-tx">
     <span class="dash-kicker">DASHBOARD ADMINISTRADOR</span>
@@ -3178,3 +3184,13 @@ ${
 
 /* Exportados para handlers */
 export { slugify, generateRoundRobin, generateDoubleRoundRobin, shuffled, parseRules };
+
+/* ============================== AYUDA ============================== */
+
+/**
+ * Guía del panel. El contenido vive entero en `src/lib/help.ts` y acá solo se
+ * lo envuelve con el shell del panel (sidebar + topbar).
+ */
+export async function helpPage(db: D1Database, query: string): Promise<string> {
+  return adminLayout(db, { title: 'Ayuda', active: 'ayuda', body: helpPageBody(query) });
+}

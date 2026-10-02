@@ -3966,3 +3966,66 @@ describe.skipIf(!has)('e2e: operación de partidos (Fase 17)', () => {
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
 });
+describe.skipIf(!has)('e2e: ayuda del panel (documentación)', () => {
+  it('la guía carga con índice, categorías y búsqueda que encuentra cosas', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const ayuda = await (await admin.get('/admin/ayuda')).text();
+    expect(ayuda, '/admin/ayuda tiene que existir y devolver 200').toContain('Guía completa del panel');
+
+    // Las 14 categorías del panel están en la guía.
+    for (const cat of ['Primeros pasos', 'Torneos', 'Competencia', 'Equipos', 'Jugadores', 'Delegados', 'Fixture', 'Partidos y planillas', 'Calendario', 'Reprogramaciones', 'Disciplina', 'Estadísticas', 'Administración', 'Problemas frecuentes']) {
+      expect(ayuda, `falta la categoría ${cat}`).toContain(`${cat}</h2>`);
+    }
+
+    // Índice navegable y secciones grandes con ancla.
+    expect(ayuda).toContain('class="h-index"');
+    expect(ayuda).toContain('id="flujo-completo"');
+    expect(ayuda).toContain('id="errores-y-validaciones"');
+    expect(ayuda).toContain('id="situaciones-habituales"');
+    expect(ayuda).toContain('Cómo administrar un torneo desde cero');
+    expect(ayuda).toContain('Situaciones habituales');
+
+    // El item Ayuda está en el menú lateral.
+    expect(ayuda).toContain('href="/admin/ayuda"');
+
+    // Búsqueda: encuentra y no rompe.
+    const res = await (await admin.get('/admin/ayuda?q=walkover')).text();
+    expect(res).toContain('resultado');
+    expect(res).toContain('Walkover');
+    const vacio = await (await admin.get('/admin/ayuda?q=zzzzz')).text();
+    expect(vacio).toContain('No encontré nada');
+  });
+
+  it('cada sección del panel muestra su propia ayuda contextual', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // (ruta, frase propia de esa pantalla) — el texto NO puede ser el mismo en todas.
+    const pantallas: [string, string][] = [
+      ['/admin', 'Resumen del torneo activo'],
+      ['/admin/torneos', 'Crear, editar y borrar torneos'],
+      ['/admin/equipos', 'Alta, edición, activación y borrado'],
+      ['/admin/jugadores', 'Cargar y mantener las plantillas'],
+      ['/admin/fixture', 'Generar el fixture'],
+      ['/admin/planilla', 'Cargar el resultado'],
+      ['/admin/fechas', 'Día, hora y cancha de cada fecha'],
+      ['/admin/calendario', 'La vista operativa del torneo'],
+      ['/admin/delegados', 'Habilitar el acceso de los delegados'],
+      ['/admin/entregas', 'Revisar las entregas de resultado'],
+      ['/admin/estadisticas', 'Tabla de posiciones, goleadores'],
+      ['/admin/ajustes', 'Sumar o restar puntos a un equipo'],
+      ['/admin/suspensiones', 'las suspensiones automáticas'],
+    ];
+    for (const [ruta, frase] of pantallas) {
+      const html = await (await admin.get(ruta)).text();
+      expect(html, `${ruta} tiene que ofrecer la ayuda contextual`).toContain('Qué puedo hacer aquí');
+      expect(html, `${ruta} debe explicar para qué sirve`).toContain(frase);
+      expect(html, `${ruta} debe enlazar a la guía`).toContain('/admin/ayuda#');
+    }
+
+    // La ayuda de la propia página Ayuda no se muestra (ahí está todo).
+    expect(await (await admin.get('/admin/ayuda')).text()).not.toContain('Qué puedo hacer aquí');
+  });
+});
