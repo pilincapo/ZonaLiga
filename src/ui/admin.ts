@@ -71,7 +71,8 @@ import {
 } from '../lib/submissions.ts';
 import { picksFromEvents, scorerOptions, MAX_GOALS } from '../lib/sheet.ts';
 import { helpContextBlock, helpPageBody } from './help.ts';
-import { MATCH_STATUSES, MATCH_STATUS_LABELS, EVENT_TYPE_LABELS, MAX_POINTS_OVERRIDE, goalOverwriteNotice } from '../lib/matchOps.ts';
+import { MATCH_STATUSES, MATCH_STATUS_LABELS, EVENT_TYPE_LABELS, MAX_POINTS_OVERRIDE, goalOverwriteNotice, splitRoster, BAJA_MARK } from '../lib/matchOps.ts';
+import { ACTION_LABELS, ACTOR_SYSTEM, listMatchChanges } from '../lib/matchChanges.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { EMPTY_ZONES, zonesOf } from '../lib/zones.ts';
 import { teamIdsOfTournament, participantsTeamsByTournament, participantsWithoutZone } from '../lib/participation.ts';
@@ -2027,12 +2028,11 @@ ${pageHead(m ? `Editar partido #${m.id}` : 'Nuevo partido')}
       <div class="field">
         <label>Estado</label>
         <select name="status">
-          ${['scheduled', 'played', 'postponed', 'suspended', 'walkover']
-            .map((s) => `<option value="${s}" ${m?.status === s ? 'selected' : ''}>${s}</option>`)
-            .join('')}
+          ${MATCH_STATUSES.map((s) => `<option value="${s}" ${m?.status === s ? 'selected' : ''}>${esc(MATCH_STATUS_LABELS[s])}</option>`).join('')}
         </select>
       </div>
     </div>
+    <p class="hint">Mismos estados que en la planilla: <strong>Libre</strong> es el partido que no se juega nunca (cancelado). Antes faltaba en esta lista y un partido en Libre volvía solo a "Programado" al guardar.</p>
     <p class="hint">El resultado y los goles se cargan desde la <a href="/admin/planilla${m ? `/${m.id}` : ''}">planilla del partido</a>.</p>
     <button class="btn btn-primary" type="submit">Guardar</button>
     <a class="btn btn-ghost" href="/admin/fixture">Cancelar</a>
@@ -2157,6 +2157,20 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
     home ? listPlayers(db, home.id, true) : Promise.resolve([]),
     away ? listPlayers(db, away.id, true) : Promise.resolve([]),
   ]);
+  // Fase 17 (cierre): los dados de baja NO se ofrecen para cargar nada nuevo,
+  // pero los que ya son autores de un gol de ESTE partido vuelven a las
+  // listas, marcados y preseleccionados. Si desaparecieran del <select>, al
+  // guardar la planilla ese gol se volvería "Sin autor" sin avisar.
+  const authorsOf = (teamId: number | null): Set<number> =>
+    new Set(
+      events
+        .filter((e) => e.team_id === teamId && (e.type === 'goal' || e.type === 'own_goal'))
+        .map((e) => e.player_id)
+        .filter((p): p is number => p != null)
+    );
+  const homeSplit = splitRoster(homePlayers, authorsOf(m.home_team_id));
+  const awaySplit = splitRoster(awayPlayers, authorsOf(m.away_team_id));
+  const preservedIds = new Set([...homeSplit.preserved, ...awaySplit.preserved].map((p) => p.id));
   // Fase 13: estado del torneo e historial de reprogramaciones del partido.
   const tStatusRow = await db.prepare('SELECT status FROM tournaments WHERE id = ?1').bind(m.tournament_id).first<{ status: string }>();
   const tStatus = tStatusRow?.status ?? 'draft';
@@ -2200,7 +2214,15 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
     return `<div class="error-box" data-suspended-notice><strong>Jugadores suspendidos · ${esc(sideName)}:</strong><ul>${rows}</ul><p class="hint" style="margin:0">No pueden ser incluidos en eventos de este partido.</p></div>`;
   };
 
-  const playerOptions = (list: typeof homePlayers) =>
+  /** Aviso de dados de baja: no se ofrecen para eventos nuevos. */
+  const lowNotice = (side: 'home' | 'away'): string => {
+    const lows = side === 'home' ? homePlayers.filter((p) => p.active !== 1) : awayPlayers.filter((p) => p.active !== 1);
+    if (lows.length === 0) return '';
+    const nombres = lows.map((p) => `<strong>${esc(p.name)}</strong>`).join(', ');
+    return `<p class="hint">Dados de baja (no se pueden elegir para eventos nuevos): ${nombres}. Los que ya aparecen en los eventos de arriba se conservan.</p>`;
+  };
+
+  const playerOptions = (list: typeof homeSplit.selectable) =>
     list
       .map(
         (p) =>
@@ -2285,7 +2307,7 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   const goalPicks = (side: 'home' | 'away') => {
     const teamId = side === 'home' ? m.home_team_id : m.away_team_id;
     const label = side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante');
-    const players = side === 'home' ? homePlayers : awayPlayers;
+    const players = side === 'home' ? homeSplit.all : awaySplit.all;
     const prefix = side === 'home' ? 'hg' : 'ag';
     const pre = picksFromEvents(
       events.map((e) => ({ teamId: e.team_id, type: e.type, playerId: e.player_id })),
@@ -2296,7 +2318,8 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
       const opts = scorerOptions({ index: i, teamName: label, players })
         .map((o) => {
           const pid = Number(o.value);
-          const extra = Number.isInteger(pid) && pid > 0 ? suspendedBadge(pid) : '';
+          const baja = Number.isInteger(pid) && preservedIds.has(pid) ? BAJA_MARK : '';
+          const extra = Number.isInteger(pid) && pid > 0 ? suspendedBadge(pid) + baja : '';
           return `<option value="${o.value}"${o.value !== '' && o.value === sel ? ' selected' : ''}>${esc(o.label)}${extra}</option>`;
         })
         .join('');
@@ -2307,12 +2330,13 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
 
   const evBlock = (side: 'home' | 'away') => {
     const teamId = side === 'home' ? m.home_team_id : m.away_team_id;
-    const players = side === 'home' ? homePlayers : awayPlayers;
+    const players = side === 'home' ? homeSplit.all : awaySplit.all;
+    const selectable = side === 'home' ? homeSplit.selectable : awaySplit.selectable;
     const sideName = side === 'home' ? (home?.name ?? 'Local') : (away?.name ?? 'Visitante');
     return `<div class="dash-card">
-  <div class="dash-card-head"><h2>${icon('card', 16)} Eventos · ${esc(sideName)}</h2></div>
-  ${suspendedNotice(players, sideName)}
-  ${teamDisciplineNotice(eligibility, teamId)}
+  <div class="dash-card-head"><h2>${icon('card', 16)} Eventos · ${esc(sideName)}</h2></div>${suspendedNotice(players, sideName)}
+    ${lowNotice(side)}
+    ${teamDisciplineNotice(eligibility, teamId)}
   <form method="post" action="/admin/planilla/${m.id}/evento">
     <input type="hidden" name="team_id" value="${teamId ?? ''}">
     <div class="form-row">
@@ -2326,7 +2350,7 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
         </select>
       </div>
       <div class="field" style="max-width:90px"><label>Min (opt.)</label><input type="number" name="minute" min="0" max="130"></div>
-      <div class="field grow"><label>Jugador</label><select name="player_id" required><option value="">Elegí…</option>${playerOptions(players)}</select></div>
+      <div class="field grow"><label>Jugador</label><select name="player_id" required><option value="">Elegí…</option>${playerOptions(selectable)}</select></div>
     </div>
     <button class="btn btn-ghost btn-sm" type="submit">+ Agregar evento</button>
   </form>
@@ -2338,6 +2362,38 @@ export async function sheetPage(db: D1Database, matchId: number, msg?: string, e
   };
 
   const submissionsBlock = await pendingForMatchBlock(db, m, teamMap);
+  // Bitácora: qué se cambió de este partido, cuándo y qué había antes.
+  const changes = await listMatchChanges(db, m.id);
+  const actorLabel = (actor: string): string => {
+    if (actor === ACTOR_SYSTEM) return 'Sistema';
+    if (actor.startsWith('delegado:')) return `Delegado · equipo ${actor.slice('delegado:'.length)}`;
+    return 'Administración';
+  };
+  const valOr = (v: string): string => (v === '' ? '—' : esc(v));
+  const logRows = changes
+    .map(
+      (r) => `<tr>
+      <td>${esc(formatDateShort(r.changed_at.slice(0, 10)))}<div class="small muted">${esc(r.changed_at.slice(11, 16))}</div></td>
+      <td>${esc(ACTION_LABELS[r.action as keyof typeof ACTION_LABELS] ?? r.action)}</td>
+      <td>${esc(actorLabel(r.actor))}</td>
+      <td>${valOr(r.old_value)}</td>
+      <td>${valOr(r.new_value)}</td>
+      <td>${valOr(r.reason)}</td>
+    </tr>`
+    )
+    .join('');
+  const logBlock = `<section class="block" id="bitacora"><div class="dash-card">
+  <div class="dash-card-head"><h2>${icon('list', 16)} Bitácora del partido</h2><span class="muted small">${changes.length} cambio${changes.length === 1 ? '' : 's'}</span></div>
+  ${
+    changes.length === 0
+      ? `<p class="hint">Todavía no se registró ningún cambio en este partido. A partir de ahora, cada vez que se guarde algo distinto, queda anotado acá.</p>`
+      : `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Cuándo</th><th>Qué</th><th>Quién</th><th>Antes</th><th>Después</th><th>Motivo</th></tr></thead>
+    <tbody>${logRows}</tbody>
+  </table></div>`
+  }
+  <p class="hint">Solo partidos: no se registran equipos, jugadores ni sanciones.</p>
+</div></section>`;
   const body = `
 ${flash('success', msg)}${flash('error', error)}
 <div class="dash-hero">
@@ -2361,7 +2417,7 @@ ${flash('success', msg)}${flash('error', error)}
         </select>
       </div>
     </div>
-    <p class="hint">"Libre" es para cuando el partido no se juega (queda exento de la tabla). "Walkover" es cuando se decide sin jugar.</p>
+    <p class="hint">"Libre" es para cuando el partido <strong>no se juega nunca</strong> (queda exento de la tabla y de las llaves): es lo que se usa cuando un partido queda cancelado. "Walkover" es cuando se decide sin jugar.</p>
     <div class="dash-sub">Datos del partido</div>
     <div class="form-row">
       <div class="field"><label>Fecha jugado</label><input type="date" name="played_on" value="${esc(m.played_on ?? '')}"></div>
@@ -2413,10 +2469,12 @@ ${flash('success', msg)}${flash('error', error)}
     </div>
     <p class="hint">Dejalo vacío y se calculan según las reglas del torneo (3 / 1 / 0). Si los cargás a mano, el torneo los usa como están; en un partido empatado de llaves también mandan como resultado de los penales.</p>
     <div class="field"><label>Notas</label><textarea name="notes" style="min-height:60px">${esc(m.notes ?? '')}</textarea></div>
+    <div class="field"><label>Motivo del cambio (opcional)</label><input type="text" name="change_reason" maxlength="500" placeholder="Ej.: se corrigió el marcador por error de carga" value=""><p class="hint">Queda en la bitácora del partido, junto a lo que cambió. Si marcás el partido como <strong>Libre</strong> (cancelado: no se juega nunca), el motivo es obligatorio.</p></div>
     <button class="btn btn-primary" type="submit">Guardar planilla</button>
   </div>
 </form></section>
 ${rescheduleBlock}
+${logBlock}
 ${submissionsBlock}
 <section class="block grid-2">
 ${evBlock('home')}

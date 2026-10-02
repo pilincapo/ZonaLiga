@@ -13,10 +13,24 @@ import {
   verifySessionToken,
 } from '../lib/auth.ts';
 import { slugify } from '../lib/slug.ts';
-import type { Match } from '../lib/types.ts';
+import type { EventType, Match } from '../lib/types.ts';
 import { regeneratePairings, verifyPairings, slotConflicts, playedCount } from '../lib/fixture.ts';
 import { resolveGoalPlan, picksWithoutRoster, MAX_GOALS, type GoalPick } from '../lib/sheet.ts';
-import { eventBelongsToMatch, validateEventForm, validateSheetForm } from '../lib/matchOps.ts';
+import { eventBelongsToMatch, validateEventForm, validateSheetForm, splitRoster, isMatchStatus, EVENT_TYPE_LABELS, MATCH_STATUSES, MATCH_STATUS_LABELS } from '../lib/matchOps.ts';
+import {
+  ACTOR_ADMIN,
+  cleanReason,
+  delegateActor,
+  diffEvents,
+  diffMatch,
+  eventChange,
+  goalAuthorsChange,
+  goalAuthorsLabel,
+  insertMatchChanges,
+  listMatchChanges,
+  needsCancelReason,
+  cancelReasonError,
+} from '../lib/matchChanges.ts';
 import { generateDelegateCode } from '../lib/delegates.ts';
 import {
   roundSlots,
@@ -100,7 +114,7 @@ import { CROSSOVER_NOTE, CROSSOVER_NOTE_COUNTS } from '../lib/crossover.ts';
 import { computeStandings } from '../lib/standings.ts';
 import { rulesOf } from '../lib/rules.ts';
 import { resolveTournament } from '../lib/tournamentView.ts';
-import { getMatch, getPlayer, getTeam, listPlayers, playerUsage, teamUsage } from '../lib/queries.ts';
+import { getMatch, getPlayer, getTeam, listEvents, listPlayers, playerUsage, teamUsage } from '../lib/queries.ts';
 import { playerEligibility, eligibilityErrorMessage, type PlayerEligibility } from '../lib/discipline.ts';
 import { getSubmission } from '../lib/submissions.ts';
 import { deleteAdjustment, insertAdjustment, parseAdjustment } from '../lib/adjustments.ts';
@@ -548,6 +562,8 @@ adminRoutes.post('/entregas/:id/aprobar', async (c) => {
   }
   const match = await getMatch(c.env.DB, sub.match_id);
   if (!match) return c.redirect(`${dest}?err=` + encodeURIComponent('El partido ya no existe'));
+  // Bitácora: la entrega es un cambio más, y dice de quién viene.
+  const beforeEvents = await listEvents(c.env.DB, sub.match_id);
 
   const stmts: D1PreparedStatement[] = [];
   if (applyScore) {
@@ -573,6 +589,20 @@ adminRoutes.post('/entregas/:id/aprobar', async (c) => {
   await c.env.DB.batch(stmts);
   // Si la entrega decide una llave (semifinal), el siguiente round se completa solo.
   await applyAdvancements(c.env.DB, match.tournament_id);
+  // El cambio queda asentado como hecho por el equipo delegado, no por el
+  // administrador que apretó "aprobar".
+  const after = await getMatch(c.env.DB, sub.match_id);
+  if (after) {
+    const afterEvents = await listEvents(c.env.DB, sub.match_id);
+    const ids = new Set<number>();
+    for (const e of [...beforeEvents, ...afterEvents]) if (e.player_id != null) ids.add(e.player_id);
+    const names = await playerNames(c.env.DB, ids);
+    const changes = [
+      ...diffMatch(match, after, { teamNames: {} }),
+      ...diffEvents(beforeEvents, afterEvents, names, EVENT_TYPE_LABELS),
+    ];
+    await insertMatchChanges(c.env.DB, after, changes, delegateActor(sub.team_id));
+  }
 
   return c.redirect(`${dest}?msg=` + encodeURIComponent('Entrega aprobada y publicada'));
 });
@@ -1059,6 +1089,13 @@ adminRoutes.post('/fixture/nuevo', async (c) => {
   }
   const roundRaw = String(f['round'] ?? '').trim();
   const round = roundRaw ? Number(roundRaw) : null;
+  const statusRaw = String(f['status'] ?? 'scheduled').trim();
+  if (!isMatchStatus(statusRaw)) {
+    return c.html(
+      await admin.matchFormPage(c.env.DB, undefined, undefined, invalidStatusMessage(statusRaw)),
+      400
+    );
+  }
   await c.env.DB.prepare(
     'INSERT INTO matches (tournament_id, round, zone, home_team_id, away_team_id, played_on, kickoff_time, venue, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
   )
@@ -1071,7 +1108,7 @@ adminRoutes.post('/fixture/nuevo', async (c) => {
       String(f['played_on'] ?? ''),
       String(f['kickoff_time'] ?? ''),
       String(f['venue'] ?? ''),
-      String(f['status'] ?? 'scheduled')
+      statusRaw
     )
     .run();
   return c.redirect('/admin/fixture?msg=' + encodeURIComponent('Partido creado'));
@@ -1552,7 +1589,9 @@ adminRoutes.post('/fixture/reposicion', async (c) => {
 });
 
 adminRoutes.get('/fixture/:id/editar', async (c) => {
-  return c.html(await admin.matchFormPage(c.env.DB, c.req.query('t'), Number(c.req.param('id'))));
+  return c.html(
+    await admin.matchFormPage(c.env.DB, c.req.query('t'), Number(c.req.param('id')), c.req.query('err'))
+  );
 });
 
 /**
@@ -1613,9 +1652,28 @@ adminRoutes.get('/fixture/:id/reprogramaciones', async (c) => {
   return c.json(results ?? []);
 });
 
+/** Bitácora del partido: qué cambió, cuándo y qué quedó antes. */
+adminRoutes.get('/fixture/:id/bitacora', async (c) => {
+  const id = Number(c.req.param('id'));
+  return c.json(await listMatchChanges(c.env.DB, id));
+});
+
 adminRoutes.post('/fixture/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const f = await c.req.parseBody();
+  const before = await getMatch(c.env.DB, id);
+  if (!before) return c.redirect('/admin/fixture?err=' + encodeURIComponent('Partido inexistente'));
+  // Fase 17: el estado se valida contra lo que la base acepta. Antes se
+  // guardaba tal cual y un valor raro terminaba en error 500.
+  const statusRaw = String(f['status'] ?? '').trim();
+  if (!isMatchStatus(statusRaw)) {
+    return c.redirect(`/admin/fixture/${id}/editar?err=` + encodeURIComponent(invalidStatusMessage(statusRaw)));
+  }
+  // Fase 12C: en finalizado/archivado los partidos son históricos.
+  const tRow = await c.env.DB.prepare('SELECT status FROM tournaments WHERE id = ?1').bind(before.tournament_id).first<{ status: string }>();
+  if (tRow && statusBlocksMatchEdits(tRow.status)) {
+    return c.redirect(`/admin/fixture/${id}/editar?err=` + encodeURIComponent(matchEditsBlockedReason(tRow.status)));
+  }
   const roundRaw = String(f['round'] ?? '').trim();
   const round = roundRaw ? Number(roundRaw) : null;
   await c.env.DB.prepare(
@@ -1630,10 +1688,18 @@ adminRoutes.post('/fixture/:id', async (c) => {
       String(f['played_on'] ?? ''),
       String(f['kickoff_time'] ?? ''),
       String(f['venue'] ?? ''),
-      String(f['status'] ?? 'scheduled'),
+      statusRaw,
       id
     )
     .run();
+  // Bitácora del partido: solo lo que cambió de verdad.
+  const after = await getMatch(c.env.DB, id);
+  if (after) {
+    const { results } = await c.env.DB.prepare('SELECT id, name FROM teams').all<{ id: number; name: string }>();
+    const names: Record<number, string> = {};
+    for (const r of results ?? []) names[r.id] = r.name;
+    await insertMatchChanges(c.env.DB, after, diffMatch(before, after, { teamNames: names }), ACTOR_ADMIN);
+  }
   return c.redirect('/admin/fixture?msg=' + encodeURIComponent('Partido actualizado'));
 });
 
@@ -1749,17 +1815,45 @@ adminRoutes.get('/planilla/:id', async (c) => {
 /** Ids de la plantilla de un equipo (para exigir que un evento sea de ese lado). */
 async function rosterIds(db: D1Database, teamId: number | null): Promise<number[]> {
   if (teamId == null) return [];
-  const { results } = await db.prepare('SELECT id FROM players WHERE team_id = ?1').bind(teamId).all<{ id: number }>();
+  const { results } = await db.prepare('SELECT id FROM players WHERE team_id = ?1 AND active = 1').bind(teamId).all<{ id: number }>();
   return (results ?? []).map((r) => r.id);
+}
+
+/** Mensaje para un estado de partido que no existe. */
+function invalidStatusMessage(raw: string): string {
+  return `Estado inválido: "${raw}". Los estados posibles son: ${MATCH_STATUSES.map((s) => MATCH_STATUS_LABELS[s]).join(', ')}.`;
+}
+
+/** Plantilla completa de un equipo (incluidos los dados de baja) para las listas. */
+async function rosterPlayers(db: D1Database, teamId: number | null): Promise<{ id: number; name: string; active: number }[]> {
+  if (teamId == null) return [];
+  const { results } = await db
+    .prepare('SELECT id, name, active FROM players WHERE team_id = ?1 ORDER BY name COLLATE NOCASE')
+    .bind(teamId)
+    .all<{ id: number; name: string; active: number }>();
+  return results ?? [];
+}
+
+/** Nombres de los jugadores de una lista de partidos, para la bitácora. */
+async function playerNames(db: D1Database, ids: ReadonlySet<number>): Promise<Record<number, string>> {
+  const out: Record<number, string> = {};
+  if (ids.size === 0) return out;
+  const list = [...ids];
+  const ph = list.map((_, i) => `?${i + 1}`).join(',');
+  const { results } = await db
+    .prepare(`SELECT id, name FROM players WHERE id IN (${ph})`)
+    .bind(...list)
+    .all<{ id: number; name: string }>();
+  for (const r of results ?? []) out[r.id] = r.name;
+  return out;
 }
 
 adminRoutes.post('/planilla/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const f = await c.req.parseBody();
-  const mRow = await c.env.DB
-    .prepare('SELECT tournament_id, home_team_id, away_team_id FROM matches WHERE id = ?1')
-    .bind(id)
-    .first<{ tournament_id: number; home_team_id: number | null; away_team_id: number | null }>();
+  // El partido entero, no solo tres columnas: la bitácora necesita comparar
+  // la versión anterior con la nueva para asentar solo lo que cambió de verdad.
+  const mRow = await getMatch(c.env.DB, id);
   if (!mRow) {
     return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
   }
@@ -1775,6 +1869,12 @@ adminRoutes.post('/planilla/:id', async (c) => {
     return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(sheet.error));
   }
   const { status, homeGoals, awayGoals } = sheet.value;
+  // Marcar un partido como Libre es cancelarlo: no se juega nunca y no cuenta
+  // para nadie. Se pide el motivo para que quede dicho POR QUÉ.
+  const changeReason = cleanReason(f['change_reason']);
+  if (needsCancelReason(mRow.status, status) && !changeReason) {
+    return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent(cancelReasonError(status)));
+  }
   // Fase 12C: en finalizado/archivado los resultados son históricos.
   const tStatus = await c.env.DB
     .prepare('SELECT status FROM tournaments WHERE id = ?1')
@@ -1792,14 +1892,25 @@ adminRoutes.post('/planilla/:id', async (c) => {
     for (let i = 1; i <= Math.min(goals, MAX_GOALS); i++) raws.push(String(f[`${prefix}${i}`] ?? ''));
     return raws;
   };
+  const beforeEvents = await listEvents(c.env.DB, id);
   const sidePlan = async (
     teamId: number | null,
     goals: number,
     prefix: string
   ): Promise<{ ok: true; picks: GoalPick[] } | { ok: false; error: string }> => {
     if (goals === 0 || teamId == null) return { ok: true, picks: [] };
-    const roster = await c.env.DB.prepare('SELECT id FROM players WHERE team_id = ?1').bind(teamId).all<{ id: number }>();
-    const allowed = (roster.results ?? []).map((p) => p.id);
+    // Solo se puede elegir a un jugador que NO esté dado de baja... salvo que
+    // ya sea el autor de un gol cargado: ese se conserva o el guardado lo
+    // perdería en silencio.
+    const roster = await rosterPlayers(c.env.DB, teamId);
+    const currentAuthors = new Set(
+      beforeEvents
+        .filter((e) => e.team_id === teamId && (e.type === 'goal' || e.type === 'own_goal'))
+        .map((e) => e.player_id)
+        .filter((p): p is number => p != null)
+    );
+    const split = splitRoster(roster, currentAuthors);
+    const allowed = split.allowedIds;
     // Sin plantilla no hay listas útiles: anónimos, salvo los "en contra".
     if (allowed.length === 0) return { ok: true, picks: picksWithoutRoster(collect(prefix, goals), goals) };
     return resolveGoalPlan({ goals, raws: collect(prefix, goals), allowed });
@@ -1854,6 +1965,21 @@ adminRoutes.post('/planilla/:id', async (c) => {
   await c.env.DB.batch(stmts);
   // Si el partido decide una llave (semifinal), el siguiente round se completa solo.
   await applyAdvancements(c.env.DB, mRow.tournament_id);
+  // Bitácora: SOLO lo que cambió de verdad. Si se abrió y guardó sin tocar nada,
+  // la lista viene vacía y no queda una fila de ruido.
+  const after = await getMatch(c.env.DB, id);
+  if (after) {
+    const afterEvents = await listEvents(c.env.DB, id);
+    const ids = new Set<number>();
+    for (const e of [...beforeEvents, ...afterEvents]) if (e.player_id != null) ids.add(e.player_id);
+    const names = await playerNames(c.env.DB, ids);
+    const sides = { home: after.home_team_id, away: after.away_team_id };
+    const changes = diffMatch(mRow, after, { reason: changeReason });
+    const oldAuthors = goalAuthorsLabel(beforeEvents, sides, names);
+    const newAuthors = goalAuthorsLabel(afterEvents, sides, names);
+    if (oldAuthors !== newAuthors) changes.push(goalAuthorsChange(oldAuthors, newAuthors, changeReason));
+    await insertMatchChanges(c.env.DB, after, changes, ACTOR_ADMIN);
+  }
   return c.redirect(`/admin/planilla/${id}?msg=` + encodeURIComponent('Planilla guardada'));
 });
 
@@ -1862,7 +1988,6 @@ adminRoutes.post('/planilla/:id/evento', async (c) => {
   const f = await c.req.parseBody();
   const mRow = await getMatch(c.env.DB, id);
   if (!mRow) return c.redirect('/admin/planilla?err=' + encodeURIComponent('Partido inexistente'));
-  // Fase 12C: en finalizado/archivado no se agregan ni quitan eventos.
   const evStatus = await c.env.DB
     .prepare('SELECT status FROM tournaments WHERE id = ?1')
     .bind(mRow.tournament_id)
@@ -1898,6 +2023,14 @@ adminRoutes.post('/planilla/:id/evento', async (c) => {
   await c.env.DB.prepare('INSERT INTO events (match_id, team_id, player_id, type, minute) VALUES (?1, ?2, ?3, ?4, ?5)')
     .bind(id, ev.value.teamId, ev.value.playerId, ev.value.type, ev.value.minute)
     .run();
+  // Bitácora: el evento queda asentado con el nombre del jugador y el minuto.
+  const name = (await getPlayer(c.env.DB, ev.value.playerId))?.name ?? null;
+  await insertMatchChanges(
+    c.env.DB,
+    mRow,
+    [eventChange({ type: ev.value.type, player_id: ev.value.playerId, minute: ev.value.minute }, name, EVENT_TYPE_LABELS[ev.value.type], 'agregado')],
+    ACTOR_ADMIN
+  );
   return c.redirect(`/admin/planilla/${id}`);
 });
 
@@ -1920,12 +2053,32 @@ adminRoutes.post('/planilla/:id/evento/eliminar', async (c) => {
   // otro. La condición va en el DELETE, no sólo en la lectura previa.
   const eventId = Number(f['event_id']);
   const evRow = Number.isInteger(eventId)
-    ? await c.env.DB.prepare('SELECT id, match_id FROM events WHERE id = ?1').bind(eventId).first<{ id: number; match_id: number }>()
+    ? await c.env.DB
+        .prepare('SELECT id, match_id, type, player_id, minute FROM events WHERE id = ?1')
+        .bind(eventId)
+        .first<{ id: number; match_id: number; type: string; player_id: number | null; minute: number | null }>()
     : null;
   if (!eventBelongsToMatch(evRow, id)) {
     return c.redirect(`/admin/planilla/${id}?err=` + encodeURIComponent('Ese evento no pertenece a este partido'));
   }
   await c.env.DB.prepare('DELETE FROM events WHERE id = ?1 AND match_id = ?2').bind(eventId, id).run();
+  // Bitácora: también queda asentado lo que se borró.
+  if (mRow && evRow) {
+    const name = evRow.player_id != null ? (await getPlayer(c.env.DB, evRow.player_id))?.name ?? null : null;
+    await insertMatchChanges(
+      c.env.DB,
+      mRow,
+      [
+        eventChange(
+          { type: evRow.type as EventType, player_id: evRow.player_id, minute: evRow.minute },
+          name,
+          EVENT_TYPE_LABELS[evRow.type as EventType] ?? evRow.type,
+          'eliminado'
+        ),
+      ],
+      ACTOR_ADMIN
+    );
+  }
   return c.redirect(`/admin/planilla/${id}`);
 });
 

@@ -8,7 +8,7 @@
 // No cambia el modelo: los estados y tipos son los mismos que ya acepta la
 // base, y la competencia, el fixture y los playoffs quedan intactos.
 
-import type { EventType, MatchStatus } from './types.ts';
+import type { EventType, MatchStatus, Player } from './types.ts';
 import { MAX_GOALS } from './sheet.ts';
 
 /* ------------------------------ Estados y eventos ------------------------------ */
@@ -323,6 +323,59 @@ export function validateEventForm(fields: EventFormFields, ctx: EventContext): P
   if (!minute.ok) return minute;
   return good({ teamId, playerId, type: typeRaw, minute: minute.value });
 }
+
+/* ------------------------------ Jugadores dados de baja ------------------------------ */
+
+/** Lo mínimo de un jugador para decidir si se puede seguir eligiendo. */
+export interface RosterPlayer {
+  id: number;
+  name: string;
+  active: number;
+}
+
+export interface RosterSplit<T = RosterPlayer> {
+  /** Se pueden elegir para carga nueva: los que no están dados de baja. */
+  selectable: T[];
+  /**
+   * Dados de baja que YA son autores de algo cargado en este partido. Van en
+   * las listas igual (marcados), pero preseleccionados: si no, guardar la
+   * planilla los borraría en silencio.
+   */
+  preserved: T[];
+  /** Todos: lo que se muestra en las listas de la planilla. */
+  all: T[];
+  /** Ids que se pueden usar para un evento NUEVO. */
+  selectableIds: number[];
+  /** Ids aceptados por el servidor: los nuevos más los que ya están cargados. */
+  allowedIds: number[];
+}
+
+/**
+ * Separa la plantilla en dos: los jugadores que se pueden elegir para cargar
+ * algo nuevo y los que ya son autores de un evento de este partido.
+ *
+ * Un jugador dado de baja tiene que SEGUIR apareciendo en la planilla: si
+ * disappears del <select> y era el autor de un gol, al guardar ese gol se
+ * convertiría en "Sin autor" sin avisar. Por eso los que ya están cargados
+ * vuelven a las listas, con la marca de baja. Lo que no puede pasar es elegir
+ * un dado de baja para un evento que todavía no existía.
+ */
+export function splitRoster<T extends RosterPlayer>(players: readonly T[], currentAuthors: ReadonlySet<number>): RosterSplit<T> {
+  const selectable = players.filter((p) => p.active === 1);
+  const selectableIds = selectable.map((p) => p.id);
+  const preserved = players.filter((p) => p.active !== 1 && currentAuthors.has(p.id));
+  const preservedIds = preserved.map((p) => p.id);
+  return {
+    selectable,
+    preserved,
+    all: [...selectable, ...preserved],
+    selectableIds,
+    allowedIds: [...selectableIds, ...preservedIds],
+  };
+}
+
+/** Marca que se le pone a un jugador dado de baja que se conserva en la lista. */
+export const BAJA_MARK = ' · dado de baja (se conserva)';
 
 /**
  * ¿Este evento es de este partido? El borrado se hacía por `id` de evento sin

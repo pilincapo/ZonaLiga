@@ -193,15 +193,39 @@ describe('help: búsqueda', () => {
 });
 
 describe('help: no documenta funciones que no existen', () => {
-  it('aclara explícitamente que "Cancelado" no es un estado del sistema', () => {
+  it('aclara que no hay estado "Cancelado" (se usa Libre, con motivo obligatorio)', () => {
     const { section } = helpSection('que-no-existe')!;
     const texto = sectionText(section);
-    expect(texto).toContain('No existe un estado de partido "Cancelado"');
+    expect(texto).toContain('no existe con ese nombre');
+    expect(texto).toContain('"Libre"');
+    expect(texto).toContain('motivo');
+    // Y aclara que la auditoría es solo de partidos.
+    expect(texto).toContain('bitácora de cada planilla');
+    expect(texto).not.toContain('No existe un estado de partido "Cancelado"');
   });
 
   it('aclara que los jugadores dados de baja pueden seguir en algunas listas', () => {
     const { section } = helpSection('baja-y-reactivacion')!;
-    expect(sectionText(section)).toContain('puede seguir apareciendo');
+    const texto = sectionText(section);
+    expect(texto).toContain('puede seguir apareciendo');
+    // Y que se conservan con su gol, no se pueden elegir para algo nuevo.
+    expect(texto).toContain('no se puede elegir para cargar algo nuevo');
+    expect(texto).toContain('dado de baja (se conserva)');
+  });
+
+  it('documenta la bitácora del partido y que guardar sin tocar nada no ensucia', () => {
+    const { section } = helpSection('bitacora-del-partido')!;
+    const texto = sectionText(section);
+    expect(texto).toContain('Bitácora del partido');
+    expect(texto).toContain('NO escribe nada');
+    expect(texto).toContain('solo partidos');
+  });
+
+  it('el motivo obligatorio para cancelar se explica en los estados del partido', () => {
+    const { section } = helpSection('estados-del-partido')!;
+    const texto = sectionText(section);
+    expect(texto).toContain('Libre');
+    expect(texto).toContain('te pide el motivo');
   });
 
   it('documenta el límite real de los puntos manuales (30, por los penales)', () => {

@@ -213,7 +213,9 @@ delegateRoutes.post('/partido/:id/evento', async (c) => {
   }
 
   const roster = await listPlayers(c.env.DB, team.id, true);
-  const allowed = new Set(roster.map((p) => p.id));
+  // Un jugador dado de baja no genera eventos nuevos (el servidor no lo deja,
+  // aunque el formulario se cuelgue). Los que ya están en la entrega se conservan.
+  const allowed = new Set(roster.filter((p) => p.active === 1).map((p) => p.id));
   const existing = await submissionEvents(c.env.DB, pending.id);
   if (existing.length >= maxEvents()) {
     return c.redirect(redirect(`/delegado/partido/${match.id}`, undefined, `Máximo ${maxEvents()} eventos por partido`));

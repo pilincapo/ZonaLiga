@@ -455,7 +455,7 @@ export const HELP_CATEGORIES: readonly HelpCategory[] = [
           {
             kind: 'warn',
             t: 'Un detalle que conviene saber',
-            d: 'Cuando un jugador está dado de baja, sus datos NO se borran: el dorsal, el nombre y el historial siguen ahí. En algunas listas (por ejemplo las listas de autores de gol y de eventos dentro de la planilla) el jugador puede seguir apareciendo, porque el sistema guarda la historia completa del partido. Si no querés que aparezca en una lista concreta, no hay una forma de ocultarlo: es a propósito para no perder el historial.',
+            d: 'Cuando un jugador está dado de baja, sus datos NO se borran: el dorsal, el nombre y el historial siguen ahí. En la planilla el jugador puede seguir apareciendo, porque el sistema guarda la historia completa del partido. Ese jugador no se puede elegir para cargar algo nuevo, pero el gol o la tarjeta que ya tiene sigue con su nombre: si desapareciera de la lista, al guardar la planilla ese gol se volvería "Sin autor" sin avisar. Por eso vuelve a las listas de autores marcado con "dado de baja (se conserva)". Si lo reactivás, vuelve a ser elegible como cualquier otro.',
           },
         ],
       },
@@ -640,13 +640,18 @@ export const HELP_CATEGORIES: readonly HelpCategory[] = [
             rows: [
               ['Programado', 'El partido está agendado pero todavía no se jugó.'],
               ['Jugado', 'Tiene resultado cargado: cuenta para la tabla.'],
-              ['Libre', 'El partido no se juega (exento de la tabla). Es el estado para cuando un equipo libra.'],
-              ['Postergado', 'No se pudo jugar en su fecha y hay que buscarle lugar.'],
+              ['Libre', 'El partido NO se juega nunca: queda exento de la tabla, no bloquea las llaves y no se re-agenda. Es el estado para cuando un partido queda cancelado (por ejemplo, se disarmó la cancha).'],
+              ['Postergado', 'No se pudo jugar en su fecha pero todavía puede llegar a jugarse: hay que buscarle lugar.'],
               ['Suspendido', 'No se juega por una causa de disciplina (por ejemplo, un expulsado).'],
               ['Walkover', 'Se decide sin jugar: el ganador recibe el resultado configurado en las reglas del torneo y el perdedor queda en 0.'],
             ],
           },
           { kind: 'p', d: 'Solo cuentan para la tabla los partidos Jugado y Walkover. Postergado, Suspendido, Libre y Programado no suman nada hasta que cambies su estado.' },
+          {
+            kind: 'warn',
+            t: 'Cancelar un partido',
+            d: 'Cuando ponés un partido en "Libre" el sistema te pide el motivo: sin motivo no lo guarda. Ese texto queda escrito en la bitácora del partido, así siempre queda dicho POR QUÉ no se jugó. Si volvés a guardar un partido que ya estaba en Libre, no te lo vuelve a pedir.',
+          },
           {
             kind: 'warn',
             d: 'Si volvés un partido de Jugado a Programado, el resultado deja de contar en la tabla (se recalcula al instante). Los autores de gol que habías cargado siguen guardados.',
@@ -690,6 +695,27 @@ export const HELP_CATEGORIES: readonly HelpCategory[] = [
             d: 'Un evento solo se carga si el jugador es de ese mismo equipo y si ese equipo juega ese partido. Si no, el sistema lo rechaza.',
           },
           { kind: 'note', d: 'Los eventos alimentan las tarjetas por equipo, el fair play, la valla menos vencida, las estadísticas y el cálculo automático de suspensiones.' },
+        ],
+      },
+      {
+        id: 'bitacora-del-partido',
+        title: 'Bitácora del partido (qué se cambió y por qué)',
+        keywords: ['bitacora', 'historial', 'cambio', 'quien cambio', 'motivo', 'auditoria partido'],
+        blocks: [
+          { kind: 'p', d: 'Al pie de la planilla hay un bloque "Bitácora del partido": una fila por cada cosa que cambió de verdad, con la fecha y hora, qué se tocó, quién lo hizo, cómo estaba antes, cómo quedó y el motivo.' },
+          {
+            kind: 'ul',
+            items: [
+              'Estado (por ejemplo, de Programado a Jugado).',
+              'Resultado y a quién se le acreditó cada gol.',
+              'Día, hora y cancha.',
+              'Eventos: cada tarjeta o gol que se agregó o se borró, con su jugador y su minuto.',
+              'Los equipos del partido y su fecha.',
+            ],
+          },
+          { kind: 'p', d: 'El campo "Motivo del cambio" de la planilla es opcional: lo que escribas ahí se repite en todas las filas de ese guardado. Cuando el motivo importa de verdad, es la forma de dejarlo escrito.' },
+          { kind: 'note', d: 'Guardar sin tocar nada NO escribe nada: si abrís la planilla, revisás y volvés a guardar igual, la bitácora queda limpia. Solo se anotan los cambios reales.' },
+          { kind: 'note', d: 'El alcance es solo partidos: los equipos, los jugadores y los ajustes de puntos no llevan bitácora.' },
         ],
       },
       {
@@ -957,17 +983,21 @@ export const HELP_CATEGORIES: readonly HelpCategory[] = [
       {
         id: 'que-no-existe',
         title: 'Lo que hoy no existe (para no buscarlo)',
-        keywords: ['no existe', 'pendiente', 'auditoria', 'cancelado', 'transferencias'],
+        keywords: ['no existe', 'pendiente', 'bandeja', 'auditoria', 'transferencias', 'historial general'],
         blocks: [
           { kind: 'p', d: 'Para evitar sorpresas, esta es la lista de cosas que el sistema NO hace todavía:' },
           {
             kind: 'ul',
             items: [
-              'No existe un estado de partido "Cancelado". Para un partido que no se va a jugar se usa "Libre" (exento de la tabla).',
-              'No hay una auditoría general de quién cambió qué (el único historial es el de reprogramaciones y el de sanciones anuladas).',
+              'No hay una bandeja de pendientes que junte automáticamente los partidos sin resultado o las planillas incompletas: hay que revisarlos desde el calendario y la lista de planillas.',
+              'No hay una auditoría general de TODO el sistema. El historial existe solo de partidos (la bitácora de cada planilla) y de reprogramaciones y sanciones anuladas; los equipos, jugadores y ajustes de puntos no llevan bitácora.',
               'No hay transferencias de jugadores de un equipo a otro.',
               'No hay migración de plantillas de un torneo a otro.',
             ],
+          },
+          {
+            kind: 'note',
+            d: 'Sobre el estado "Cancelado": no existe con ese nombre. Para un partido que no se va a jugar nunca se usa "Libre", y al ponerlo el sistema pide un motivo que queda anotado en la bitácora del partido.',
           },
           { kind: 'note', d: 'Si alguna vez se agregan, esta guía se actualiza en este mismo archivo.' },
         ],

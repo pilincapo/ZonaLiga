@@ -228,7 +228,11 @@ export function delegateMatchPage(opts: {
       ? `<div class="error-box" data-team-discipline>⚠ <strong>Disciplina de equipo:</strong> ${esc(opts.teamDisciplineReasons!.join(' · '))}. No suspende a los jugadores, pero queda sujeto a lo que resuelva el tribunal.</div>`
       : '';
 
+  // Solo los activos se pueden elegir para eventos NUEVOS. Un jugador dado de
+  // baja sigue apareciendo en la tabla de los eventos ya cargados (fila de
+  // arriba): el historial no se toca, pero no se puede volver a elegir.
   const playerOptions = roster
+    .filter((p) => p.active === 1)
     .map(
       (p) =>
         `<option value="${p.id}">${p.number != null ? `#${p.number} ` : ''}${esc(p.name)}${suspendedBadge(p.id)}</option>`

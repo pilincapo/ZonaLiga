@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BAJA_MARK,
   EVENT_TYPES,
   MATCH_STATUSES,
   eventBelongsToMatch,
@@ -17,6 +18,7 @@ import {
   parsePlayedOn,
   parsePointsOverride,
   parseVenue,
+  splitRoster,
   validateEventForm,
   validateSheetForm,
 } from '../src/lib/matchOps.ts';
@@ -232,5 +234,49 @@ describe('matchOps: el evento tiene que ser del partido que se está editando', 
     expect(eventBelongsToMatch({ match_id: 8 }, 7)).toBe(false);
     expect(eventBelongsToMatch(null, 7)).toBe(false);
     expect(eventBelongsToMatch(undefined, 7)).toBe(false);
+  });
+});
+describe('matchOps: jugadores dados de baja en las listas de la planilla', () => {
+  const PLANTILLA = [
+    { id: 1, name: 'Soto', active: 1 },
+    { id: 2, name: 'Díaz', active: 1 },
+    { id: 3, name: 'Gómez', active: 0 },
+  ];
+
+  it('a los dados de baja no se los puede elegir para un evento nuevo', () => {
+    const { selectableIds } = splitRoster(PLANTILLA, new Set());
+    expect(selectableIds).toEqual([1, 2]);
+  });
+
+  it('un dado de baja que ya es autor se conserva en la lista (si no, su gol se borra en silencio)', () => {
+    const split = splitRoster(PLANTILLA, new Set([3]));
+    expect(split.preserved.map((p) => p.id)).toEqual([3]);
+    expect(split.all.map((p) => p.id)).toEqual([1, 2, 3]);
+  });
+
+  it('un dado de baja que NO es autor no vuelve a las listas', () => {
+    const split = splitRoster(PLANTILLA, new Set([1]));
+    expect(split.all.map((p) => p.id)).toEqual([1, 2]);
+  });
+
+  it('el servidor acepta los nuevos y los que ya estaban cargados, y nada más', () => {
+    expect(splitRoster(PLANTILLA, new Set([3])).allowedIds).toEqual([1, 2, 3]);
+    expect(splitRoster(PLANTILLA, new Set([3])).allowedIds).not.toContain(99);
+  });
+
+  it('un reactivado (active = 1) vuelve a ser elegible sin tocar nada más', () => {
+    const reactivado = [{ id: 3, name: 'Gómez', active: 1 }];
+    const split = splitRoster(reactivado, new Set([3]));
+    expect(split.selectable.map((p) => p.id)).toEqual([3]);
+    expect(split.preserved).toEqual([]);
+  });
+
+  it('la lista de la planilla no repite a nadie', () => {
+    const split = splitRoster(PLANTILLA, new Set([1, 3]));
+    expect(new Set(split.all.map((p) => p.id)).size).toBe(split.all.length);
+  });
+
+  it('la marca de baja se lee en language llano', () => {
+    expect(BAJA_MARK).toContain('dado de baja');
   });
 });

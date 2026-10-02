@@ -3965,6 +3965,375 @@ describe.skipIf(!has)('e2e: operación de partidos (Fase 17)', () => {
     for (const [team] of bajas) await admin.post(`/admin/equipos/${team}/eliminar`, {});
     expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
   });
+
+  it('la bitácora anota qué cambió, cuándo, quién y por qué', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const marca = `17b${Date.now().toString(36)}`;
+    const nombre = `17 Bitacora ${marca}`;
+    const slug = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+    // Equipos y torneo propios, para no depender del test anterior.
+    for (const [n, s, c] of [
+      [`17b Local ${marca}`, 'BLO', '#22c55e'],
+      [`17b Visita ${marca}`, 'BVI', '#0ea5e9'],
+    ] as const) {
+      expect((await admin.post('/admin/equipos', { name: n, short_name: s, color: c, active: 'on' })).status).toBe(302);
+    }
+    const equipos = await (await admin.get('/admin/equipos')).text();
+    const eqLoc = new RegExp(`17b Local ${marca}[\\s\\S]*?/admin/equipos/(\\d+)">Editar`).exec(equipos)?.[1] ?? '';
+    const eqVis = new RegExp(`17b Visita ${marca}[\\s\\S]*?/admin/equipos/(\\d+)">Editar`).exec(equipos)?.[1] ?? '';
+    expect(eqLoc && eqVis, 'los dos equipos tienen que estar en la lista').toBeTruthy();
+
+    expect((await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      [`participate_${eqLoc}`]: 'on',
+      [`participate_${eqVis}`]: 'on',
+    })).status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((c) => c.includes(nombre))
+      .map((c) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(c)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid, 'el torneo de la bitácora tiene que existir').toBeTruthy();
+
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    expect(loc(await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: `17b-fixture-${marca}` }))).toContain(
+      'Fixture guardado'
+    );
+    const fixtureHtml = await (await admin.get(`/admin/fixture?t=${slug}`)).text();
+    const mid = [...new Set([...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!))][0] ?? '';
+    expect(mid, 'el torneo de la bitácora tiene que tener un partido').toBeTruthy();
+
+    // Un jugador en cada lado, para poder cargar un evento.
+    for (const [team, n] of [
+      [eqLoc, `17b Local ${marca}`],
+      [eqVis, `17b Visita ${marca}`],
+    ] as const) {
+      expect((await admin.post('/admin/jugadores', { team_id: team, name: n, number: '', position: 'DEL' })).status).toBe(302);
+    }
+    const jugLocal = idJugador(await (await admin.get(`/admin/jugadores?team=${eqLoc}`)).text(), `17b local ${marca}`);
+    const jugVisita = idJugador(await (await admin.get(`/admin/jugadores?team=${eqVis}`)).text(), `17b visita ${marca}`);
+    expect(jugLocal && jugVisita, 'los dos jugadores tienen que estar en la plantilla').toBeTruthy();
+
+    /* ---------- 1. Arranca vacía y explica qué es ---------- */
+    const inicial = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    expect(inicial).toContain('Bitácora del partido');
+    expect(inicial).toContain('Todavía no se registró ningún cambio');
+    // El motivo del cambio está en la propia planilla.
+    expect(inicial).toContain('name="change_reason"');
+    expect(inicial).toContain('Motivo del cambio');
+
+    /* ---------- 2. Cargar el resultado asienta estado y resultado ---------- */
+    expect(loc(await admin.post(`/admin/planilla/${mid}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '1',
+      away_goals: '0',
+      hg1: jugLocal,
+      notes: '',
+      change_reason: 'se cargo tarde',
+    }))).toContain('Planilla guardada');
+
+    const trasResultado = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    // Estado, resultado y a quién se le acreditó el gol.
+    expect(trasResultado).toContain('3 cambios');
+    expect(trasResultado).toContain('>Estado<');
+    expect(trasResultado).toContain('scheduled');
+    expect(trasResultado).toContain('played');
+    expect(trasResultado).toContain('>Resultado<');
+    expect(trasResultado).toContain('1-0');
+    expect(trasResultado).toContain('se cargo tarde');
+    // Quién lo hizo.
+    expect(trasResultado).toContain('Administración');
+
+    /* ---------- 3. Guardar sin tocar nada NO ensucia el historial ---------- */
+    expect(loc(await admin.post(`/admin/planilla/${mid}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '1',
+      away_goals: '0',
+      hg1: jugLocal,
+      notes: '',
+    }))).toContain('Planilla guardada');
+    expect(await (await admin.get(`/admin/planilla/${mid}`)).text()).toContain('3 cambios');
+
+    /* ---------- 4. Cada evento que se agrega o se borra queda asentado ---------- */
+    expect((await admin.post(`/admin/planilla/${mid}/evento`, { team_id: eqVis, player_id: jugVisita, type: 'yellow', minute: '30' })).status).toBe(302);
+    const conEvento = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    expect(conEvento).toContain('4 cambios');
+    expect(conEvento).toContain('>Evento<');
+    expect(conEvento).toContain('Amarilla');
+    const eventId = /name="event_id" value="(\d+)"/.exec(conEvento)?.[1] ?? '';
+    expect(eventId, 'el evento tiene que quedar cargado').toBeTruthy();
+
+    expect((await admin.post(`/admin/planilla/${mid}/evento/eliminar`, { event_id: eventId })).status).toBe(302);
+    const sinEvento = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    expect(sinEvento).toContain('5 cambios');
+    // El evento borrado queda con su texto en la columna "antes" y un "—" en la de "después".
+    expect(sinEvento).toMatch(/<td>Amarilla · [^<]+ 30(?:&#39;|')<\/td>\s*<td>—<\/td>/);
+    // Y en la base ya no está.
+    const trasBorrado = await (await admin.get(`/admin/fixture/${mid}/bitacora`)).json() as { field: string }[];
+    expect(trasBorrado.map((r) => r.field)).toEqual(['eliminado', 'agregado', 'autores', 'resultado', 'status']);
+
+    /* ---------- 5. Cambiar el estado desde el fixture también se anota ---------- */
+    expect(loc(await admin.post(`/admin/fixture/${mid}`, {
+      tournament_id: tid,
+      round: '1',
+      zone: 'A',
+      home_team_id: eqLoc,
+      away_team_id: eqVis,
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      status: 'postponed',
+    }))).toContain('Partido actualizado');
+    const trasEstado = await (await admin.get(`/admin/fixture/${mid}/bitacora`)).json() as {
+      action: string;
+      old_value: string;
+      new_value: string;
+      actor: string;
+      reason: string;
+    }[];
+    // Entre lo último que se asentó está el cambio de estado.
+    const cambioEstado = trasEstado.find((r) => r.action === 'estado' && r.new_value === 'postponed');
+    expect(cambioEstado, 'el estado tiene que quedar asentado').toBeTruthy();
+    expect(cambioEstado!.old_value).toBe('played');
+    expect(await (await admin.get(`/admin/planilla/${mid}`)).text()).toContain(`${trasEstado.length} cambios`);
+
+    /* ---------- 6. La bitácora también se puede leer como datos (JSON) ---------- */
+    const json = trasEstado;
+    expect(Array.isArray(json)).toBe(true);
+    // Todo lo hizo la administración (el panel tiene una sola contraseña).
+    expect(json.every((r) => r.actor === 'admin')).toBe(true);
+    expect(json.some((r) => r.reason === 'se cargo tarde')).toBe(true);
+    // Y se puede filtrar por tipo de cambio (una fila por campo que cambió).
+    const porAccion = (a: string): number => json.filter((r) => r.action === a).length;
+    expect(porAccion('estado')).toBe(2);
+    expect(porAccion('resultado')).toBe(1);
+    expect(porAccion('evento')).toBe(3);
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+    await admin.post(`/admin/equipos/${eqLoc}/eliminar`, {});
+    await admin.post(`/admin/equipos/${eqVis}/eliminar`, {});
+  });
+
+  it('dar de baja un jugador: no se ofrece para eventos nuevos, pero su gol no se borra', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const marca = `17c${Date.now().toString(36)}`;
+    const nombre = `17 Baja ${marca}`;
+    const slug = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+    for (const [n, s, c] of [
+      [`17c Local ${marca}`, 'CLO', '#22c55e'],
+      [`17c Visita ${marca}`, 'CVI', '#0ea5e9'],
+    ] as const) {
+      expect((await admin.post('/admin/equipos', { name: n, short_name: s, color: c, active: 'on' })).status).toBe(302);
+    }
+    const equipos = await (await admin.get('/admin/equipos')).text();
+    const eqLoc = new RegExp(`17c Local ${marca}[\\s\\S]*?/admin/equipos/(\\d+)">Editar`).exec(equipos)?.[1] ?? '';
+    const eqVis = new RegExp(`17c Visita ${marca}[\\s\\S]*?/admin/equipos/(\\d+)">Editar`).exec(equipos)?.[1] ?? '';
+    expect(eqLoc && eqVis).toBeTruthy();
+
+    expect((await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      [`participate_${eqLoc}`]: 'on',
+      [`participate_${eqVis}`]: 'on',
+    })).status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((c) => c.includes(nombre))
+      .map((c) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(c)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    expect(loc(await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: `17c-fixture-${marca}` }))).toContain(
+      'Fixture guardado'
+    );
+    const fixtureHtml = await (await admin.get(`/admin/fixture?t=${slug}`)).text();
+    const mid = [...new Set([...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!))][0] ?? '';
+    expect(mid).toBeTruthy();
+
+    // Dos jugadores locales: el que va a ser goLEADOR y el que queda de baja sin historia.
+    const nombreGol = `17c Goleador ${marca}`;
+    const nombreBaja = `17c Baja ${marca}`;
+    for (const n of [nombreGol, nombreBaja]) {
+      expect((await admin.post('/admin/jugadores', { team_id: eqLoc, name: n, number: '', position: 'DEL' })).status).toBe(302);
+    }
+    const jugGol = idJugador(await (await admin.get(`/admin/jugadores?team=${eqLoc}`)).text(), nombreGol.toLowerCase());
+    const jugBaja = idJugador(await (await admin.get(`/admin/jugadores?team=${eqLoc}`)).text(), nombreBaja.toLowerCase());
+    expect(jugGol && jugBaja).toBeTruthy();
+
+    // Un gol del jugador que después va a estar dado de baja.
+    expect(loc(await admin.post(`/admin/planilla/${mid}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '1',
+      away_goals: '0',
+      hg1: jugGol,
+      notes: '',
+    }))).toContain('Planilla guardada');
+
+    // Se da de baja al que tiene el gol (baja lógica: conserva el historial).
+    const bajaGol = await admin.post(`/admin/jugadores/${jugGol}/eliminar`, {});
+    expect(loc(bajaGol)).toContain('dado de baja');
+    // Y al que no tiene nada (se borra de verdad).
+    expect(loc(await admin.post(`/admin/jugadores/${jugBaja}/eliminar`, {}))).toContain('eliminado');
+
+    /* ---------- El dado de baja NO se ofrece para eventos nuevos ---------- */
+    const planilla = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    // Sigue en las listas, marcado y elegido.
+    expect(planilla).toContain('dado de baja (se conserva)');
+    expect(planilla).toContain(`<option value="${jugGol}" selected>`);
+    // El <select> de eventos nuevos NO lo tiene.
+    const selectEvento = /<select name="player_id"[^>]*>([\s\S]*?)<\/select>/.exec(planilla)?.[1] ?? '';
+    expect(selectEvento, 'tiene que haber un select de jugador para eventos').toContain('Elegí');
+    expect(selectEvento, 'un dado de baja no se puede elegir para un evento nuevo').not.toContain(`value="${jugGol}"`);
+    // Y hay aviso explicándolo.
+    expect(planilla).toContain('Dados de baja (no se pueden elegir para eventos nuevos)');
+    // El gol sigue con su autor.
+    expect(planilla).toContain(nombreGol);
+
+    /* ---------- Guardar la planilla no convierte ese gol en "Sin autor" ---------- */
+    expect(loc(await admin.post(`/admin/planilla/${mid}`, {
+      status: 'played',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '1',
+      away_goals: '0',
+      hg1: jugGol,
+      notes: '',
+    }))).toContain('Planilla guardada');
+    const ficha = await (await fetch(`${BASE}/partido/${mid}`)).text();
+    expect(ficha, 'el gol tiene que seguir con su autor en la ficha pública').toContain(nombreGol);
+
+    /* ---------- Un reactivado vuelve a ser elegible ---------- */
+    expect((await admin.post(`/admin/jugadores/${jugGol}/reactivar`, {})).status).toBe(302);
+    const reactivado = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    const selectTras = /<select name="player_id"[^>]*>([\s\S]*?)<\/select>/.exec(reactivado)?.[1] ?? '';
+    expect(selectTras, 'un reactivado se puede volver a elegir').toContain(`value="${jugGol}"`);
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+    await admin.post(`/admin/equipos/${eqLoc}/eliminar`, {});
+    await admin.post(`/admin/equipos/${eqVis}/eliminar`, {});
+  });
+
+  it('marcar un partido como Libre (cancelado) exige decir por qué', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    const marca = `17d${Date.now().toString(36)}`;
+    const nombre = `17 Libre ${marca}`;
+    const slug = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+    for (const [n, s, c] of [
+      [`17d Local ${marca}`, 'DLO', '#22c55e'],
+      [`17d Visita ${marca}`, 'DVI', '#0ea5e9'],
+    ] as const) {
+      expect((await admin.post('/admin/equipos', { name: n, short_name: s, color: c, active: 'on' })).status).toBe(302);
+    }
+    const equipos = await (await admin.get('/admin/equipos')).text();
+    const eqLoc = new RegExp(`17d Local ${marca}[\\s\\S]*?/admin/equipos/(\\d+)">Editar`).exec(equipos)?.[1] ?? '';
+    const eqVis = new RegExp(`17d Visita ${marca}[\\s\\S]*?/admin/equipos/(\\d+)">Editar`).exec(equipos)?.[1] ?? '';
+    expect(eqLoc && eqVis).toBeTruthy();
+
+    expect((await admin.post('/admin/torneos', {
+      name: nombre,
+      season: '2026',
+      status: 'active',
+      venues: 'Cancha Norte',
+      kickoffs: '10:00',
+      start_date: '2026-10-05',
+      round_gap: '7',
+      comp_format: 'UNA_RUEDA',
+      [`participate_${eqLoc}`]: 'on',
+      [`participate_${eqVis}`]: 'on',
+    })).status).toBe(302);
+    const listado = await (await admin.get('/admin/torneos')).text();
+    const tid = listado
+      .split('<article')
+      .filter((c) => c.includes(nombre))
+      .map((c) => /href="\/admin\/torneos\/(\d+)">Editar/.exec(c)?.[1] ?? '')
+      .find(Boolean) ?? '';
+    expect(tid).toBeTruthy();
+
+    expect((await admin.post('/admin/fixture/previsualizar', { tournament_id: tid, mode: 'single' })).status).toBe(302);
+    expect(loc(await admin.post('/admin/fixture/confirmar', { tournament_id: tid, t: `17d-fixture-${marca}` }))).toContain(
+      'Fixture guardado'
+    );
+    const fixtureHtml = await (await admin.get(`/admin/fixture?t=${slug}`)).text();
+    const mid = [...new Set([...fixtureHtml.matchAll(/\/admin\/planilla\/(\d+)/g)].map((m) => m[1]!))][0] ?? '';
+    expect(mid).toBeTruthy();
+
+    /* ---------- El selector ofrece "Libre" y explica que es el cancelado ---------- */
+    const inicial = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    expect(inicial).toMatch(/<option value="bye"[^>]*>Libre<\/option>/);
+    expect(inicial).toContain('cancelado');
+
+    const base: Record<string, string> = {
+      status: 'bye',
+      played_on: '2026-10-05',
+      kickoff_time: '10:00',
+      venue: 'Cancha Norte',
+      home_goals: '0',
+      away_goals: '0',
+      notes: '',
+    };
+
+    /* ---------- Sin motivo no guarda ---------- */
+    const sinMotivo = await admin.post(`/admin/planilla/${mid}`, base);
+    expect(sinMotivo.status).toBe(302);
+    expect(loc(sinMotivo)).toContain('contá por qué no se juega');
+    const sigueProgramado = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    expect(sigueProgramado, 'sin motivo el partido NO se cancela').toMatch(/<option value="scheduled" selected>/);
+
+    /* ---------- Con motivo sí ---------- */
+    expect(loc(await admin.post(`/admin/planilla/${mid}`, { ...base, change_reason: 'se disarmó la cancha' }))).toContain(
+      'Planilla guardada'
+    );
+    expect(await (await admin.get(`/admin/planilla/${mid}`)).text()).toMatch(/<option value="bye" selected>/);
+
+    /* ---------- Queda asentado POR QUÉ se canceló ---------- */
+    const bitacora = await (await admin.get(`/admin/planilla/${mid}`)).text();
+    expect(bitacora).toContain('se disarmó la cancha');
+
+    /* ---------- Volver a guardar en Libre no vuelve a pedir el motivo ---------- */
+    expect(loc(await admin.post(`/admin/planilla/${mid}`, base))).toContain('Planilla guardada');
+
+    // Limpieza.
+    expect((await admin.post(`/admin/torneos/${tid}/eliminar`, {})).status).toBe(302);
+    await admin.post(`/admin/equipos/${eqLoc}/eliminar`, {});
+    await admin.post(`/admin/equipos/${eqVis}/eliminar`, {});
+  });
 });
 describe.skipIf(!has)('e2e: ayuda del panel (documentación)', () => {
   it('la guía carga con índice, categorías y búsqueda que encuentra cosas', async () => {
