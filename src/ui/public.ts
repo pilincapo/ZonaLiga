@@ -27,8 +27,10 @@ import {
 import {
   listTournaments,
   getTeamBySlug,
+  getTournament,
   listPlayers,
   getPlayer,
+  playersByIds,
   getMatch,
   listEvents,
   listTeams,
@@ -1016,7 +1018,9 @@ export async function matchPage(db: D1Database, id: number, origin: string): Pro
   const m = await getMatch(db, id);
   if (!m) return notFoundPage();
   const [tournament, teams, events] = await Promise.all([
-    listTournaments(db).then((ts) => ts.find((t) => t.id === m.tournament_id) ?? null),
+    // Solo el torneo de este partido: antes se traía la lista entera de
+    // torneos para buscarlo adentro.
+    getTournament(db, m.tournament_id),
     listTeams(db),
     listEvents(db, m.id),
   ]);
@@ -1024,13 +1028,13 @@ export async function matchPage(db: D1Database, id: number, origin: string): Pro
   const home = m.home_team_id != null ? teamMap.get(m.home_team_id) : undefined;
   const away = m.away_team_id != null ? teamMap.get(m.away_team_id) : undefined;
 
+  // Los autores de todos los eventos, en una sola consulta.
+  const autores = await playersByIds(
+    db,
+    events.map((e) => e.player_id).filter((id): id is number => id != null)
+  );
   const players = new Map<number, { name: string; team_id: number }>();
-  for (const e of events) {
-    if (e.player_id != null && !players.has(e.player_id)) {
-      const p = await getPlayer(db, e.player_id);
-      if (p) players.set(p.id, { name: p.name, team_id: p.team_id });
-    }
-  }
+  for (const [id, p] of autores) players.set(id, { name: p.name, team_id: p.team_id });
 
   // Elegibilidad para este partido: disciplina combinada (auto + manual),
   // sin recalcular suspensiones. Solo se muestran datos reales existentes.

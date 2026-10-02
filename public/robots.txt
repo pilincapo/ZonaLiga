@@ -1,0 +1,22 @@
+# ZonaLiga — robots.txt
+#
+# Las páginas públicas (inicio, posiciones, fixture, equipos, goleadores,
+# partidos) se pueden indexar: son las que un hincha busca en Google.
+#
+# Las de abajo NO aportan nada en un buscador pero cada visita igual consulta
+# la base de datos, y la cuota diaria de Cloudflare D1 es limitada (5 millones
+# de filas leídas por día, con corte duro a las 00:00 UTC). Cada visita que un
+# robot hace a /buscar o /changelog es una visita que no le sirve a nadie y que
+# consume el presupuesto de los que sí.
+
+User-agent: *
+Disallow: /admin
+Disallow: /delegado
+Disallow: /buscar
+Disallow: /changelog
+Disallow: /en-vivo
+Disallow: /api/
+
+# La búsqueda interna del sitio no está hecha para indexadores: cada consulta
+# con ?q= recorre la base y devuelve resultados distintos cada vez.
+Disallow: /*?q=

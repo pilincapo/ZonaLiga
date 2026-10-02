@@ -72,6 +72,24 @@ export async function getPlayer(db: D1Database, id: number): Promise<Player | nu
   return (await db.prepare('SELECT * FROM players WHERE id = ?1').bind(id).first<Player>()) ?? null;
 }
 
+/**
+ * Varios jugadores en UNA consulta. Antes, la ficha de un partido hacía una
+ * consulta por evento para buscar el nombre de cada autor: con 12 eventos eran
+ * 12 viajes de ida y vuelta a la base. Acá es una sola.
+ */
+export async function playersByIds(db: D1Database, ids: readonly number[]): Promise<Map<number, Player>> {
+  const unicos = [...new Set(ids.filter((id) => Number.isInteger(id)))];
+  const out = new Map<number, Player>();
+  if (unicos.length === 0) return out;
+  const ph = unicos.map((_, i) => `?${i + 1}`).join(', ');
+  const { results } = await db
+    .prepare(`SELECT * FROM players WHERE id IN (${ph})`)
+    .bind(...unicos)
+    .all<Player>();
+  for (const p of results ?? []) out.set(p.id, p);
+  return out;
+}
+
 export async function listMatches(db: D1Database, tournamentId: number): Promise<Match[]> {
   const { results } = await db
     .prepare('SELECT * FROM matches WHERE tournament_id = ?1 ORDER BY COALESCE(round, 999), id')

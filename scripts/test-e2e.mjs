@@ -99,6 +99,9 @@ try {
       '--local',
       '--persist-to', persistDir,
       '--var', `ADMIN_PASSWORD:${adminPassword}`,
+      // La caché de páginas públicas apagada: los tests crean datos por HTTP y
+      // comprueban el resultado enseguida, con caché verían la versión vieja.
+      '--var', 'CACHE_PUBLICA_TTL:0',
     ],
     {
       cwd: root,

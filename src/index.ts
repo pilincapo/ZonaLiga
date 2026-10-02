@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { Env } from './types.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { delegateRoutes } from './routes/delegate.ts';
+import { responderCacheado, ttlSegundos } from './lib/cache.ts';
 import * as pub from './ui/public.ts';
 import * as live from './ui/live.ts';
 
@@ -12,7 +13,20 @@ const app = new Hono<{ Bindings: Env }>();
 app.route('/admin', adminRoutes);
 app.route('/delegado', delegateRoutes);
 
-/* ---------- Público ---------- */
+/* ---------- Público ----------
+ *
+ * Las páginas públicas se sirven desde la caché de Cloudflare: es la diferencia
+ * entre 380 y miles de visitas por día con el mismo presupuesto de base de
+ * datos. El TTL sale de CACHE_PUBLICA_TTL (0 = apagada, que es lo que usan los
+ * tests). Ver src/lib/cache.ts para qué rutas quedan afuera y por qué.
+ *
+ * Va DESPUÉS de registrar /admin y /delegado a propósito: en Hono los handlers
+ * se ejecutan en orden de registro, así que el panel nunca pasa por la caché.
+ */
+app.use('*', async (c, next) => {
+  const ttl = ttlSegundos(c.env.CACHE_PUBLICA_TTL);
+  await responderCacheado(c, next, ttl);
+});
 
 app.get('/', async (c) => c.html(await pub.homePage(c.env.DB, new URL(c.req.url).origin, c.req.query('t'))));
 

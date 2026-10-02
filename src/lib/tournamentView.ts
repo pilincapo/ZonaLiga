@@ -68,9 +68,18 @@ export async function loadTournamentView(
 
 /** La misma vista para todos los torneos, sin consultas N+1. */
 export async function listTournamentViews(db: D1Database): Promise<TournamentView[]> {
-  const [tournaments, matches, teams] = await Promise.all([
-    listTournaments(db),
-    db.prepare('SELECT * FROM matches ORDER BY id').all<Match>(),
+  const tournaments = await listTournaments(db);
+  // Los partidos se piden SOLO de los torneos que existen. Antes era
+  // `SELECT * FROM matches ORDER BY id`: con cinco torneos dearga y uno solo
+  // vivo, se leía la temporada entera de los otros cuatro sin motivo.
+  const ids = tournaments.map((t) => t.id);
+  if (ids.length === 0) return [];
+  const ph = ids.map((_, i) => `?${i + 1}`).join(', ');
+  const [matches, teams] = await Promise.all([
+    db
+      .prepare(`SELECT * FROM matches WHERE tournament_id IN (${ph}) ORDER BY id`)
+      .bind(...ids)
+      .all<Match>(),
     listTeams(db, true),
   ]);
 
@@ -81,7 +90,7 @@ export async function listTournamentViews(db: D1Database): Promise<TournamentVie
     else byTournament.set(m.tournament_id, [m]);
   }
 
-  return (tournaments ?? []).map((tournament) => ({
+  return tournaments.map((tournament) => ({
     tournament,
     matches: byTournament.get(tournament.id) ?? [],
     teams,

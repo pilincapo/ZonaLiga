@@ -12,6 +12,13 @@ database_id = "8f8b91c7-7473-4d50-88fd-d996dbd2583e"
 directory = "./public"
 binding = "ASSETS"
 
+[vars]
+# Cuánto se guarda en caché cada página pública (ver src/lib/cache.ts).
+# Un minuto alcanza: las posiciones y el fixture cambian cuando se carga un
+# resultado, no antes, y con esto el consumo diario de filas leídas de D1 baja
+# de ~380 a miles de visitas por día. Con "0" la caché queda apagada.
+CACHE_PUBLICA_TTL = "60"
+
 # El CHANGELOG.md se importa como texto desde src/changelog.ts (fuente única).
 # Sin esta regla, esbuild no sabría cómo cargar un .md.
 [[rules]]

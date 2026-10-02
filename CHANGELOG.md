@@ -13,6 +13,53 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.2] — 2026-10-02 — Cuota de base de datos: caché e índices
+
+### Nuevo
+
+- **Las páginas públicas se guardan en caché un minuto.** Es el cambio que evita que el sitio se caiga: Cloudflare D1 da 5 millones de filas leídas por día y, con el tamaño actual de la base, cada visita gastaba unas 13.000 filas. Eso daba para unas 380 visitas por día, y cuando se agota el corte es duro (se cae todo el sitio con error 500). Ahora la segunda visita —que es la mayoría— se sirve sin tocar la base de datos.
+  - No se cachean el panel, el espacio del delegado, la búsqueda interna ni la fecha en vivo, y nunca se cachea a alguien que tenga sesión iniciada.
+  - El tiempo de vida se ajusta con una configuración (`CACHE_PUBLICA_TTL`). Con un minuto apagado, las posiciones y el fixture se ven al instante.
+- **Índices nuevos** en la base (migración 0011) para que las consultas no recorran tablas enteras:
+  - `Equipos` pasó de leer 4.536 filas a 136 (un 97% menos) al contar los partidos de cada equipo.
+  - `Jugadores` pasó de 750 a 134.
+  - La ficha de un equipo y la de un partido bajaron entre un 25% y un 56%.
+- **Archivo `robots.txt`**: se le pide a los rastreadores que no visited el panel, la búsqueda, el changelog y la fecha en vivo. Esas páginas no aportan nada en un buscador y cada visita igual gastaba cuota.
+
+### Mejora
+
+- La ficha de un partido ya no trae la lista entera de torneos ni hace una consulta por cada autor del evento: ahora trae solo su torneo y todos los autores en una sola consulta.
+- La portada ya no lee los partidos de los torneos archivados.
+- Nuevo informe de consumo en los tests: mide cuántas filas lee de verdad cada pantalla sobre una base del tamaño real de producción y avisa si alguna se pasa del tope. Sirve para no volver a gastar de más sin darse cuenta.
+
+---
+
+## [0.4.1] — 2026-10-02 — Cierre de la Fase 17: bitácora del partido y bajas
+
+### Nuevo
+
+- **Bitácora del partido**: al pie de cada planilla hay ahora una tabla con todo lo que se cambió de verdad, con la fecha y hora, qué se tocó, quién lo hizo, cómo estaba antes, cómo quedó y el motivo. Se anota:
+  - el estado del partido (por ejemplo, de Programado a Jugado);
+  - el resultado y a quién se le acreditó cada gol;
+  - el día, la hora y la cancha;
+  - cada evento que se agrega o se borra, con su jugador y su minuto;
+  - los equipos y la fecha del partido.
+- Un campo nuevo **“Motivo del cambio”** en la planilla: es opcional y lo que se escriba ahí queda junto a cada cosa que cambió en ese guardado. Sirve para dejar escrito por qué se corrigió algo, sin ensuciar la base con comentarios sueltos.
+- **Cancelar un partido ahora exige decir por qué**: cuando un partido pasa a **“Libre”** (que es como se marca uno cancelado: no se juega nunca), el sistema no lo guarda si no viene un motivo. Ese motivo queda escrito en la bitácora del partido. Si volvés a guardar un partido que ya estaba en Libre, no te lo vuelve a pedir.
+- El selector de estado de la pantalla **Editar partido** ahora incluye “Libre”. Antes ese estado no estaba en la lista, así que un partido cancelado volvía solo a “Programado” al guardar.
+
+### Mejora
+
+- **Un jugador dado de baja ya no se ofrece para cargar cosas nuevas**, pero su historia no se pierde: no aparece en las listas de eventos nuevos ni en las de autores de la planilla ni del delegado, y en cambio sigue apareciendo en las listas de autores de gol que ya lo tienen, marcado como “dado de baja (se conserva)”. Sin eso, al guardar la planilla un gol suyo se habría convertido en “Sin autor” sin avisar. Si lo reactivás, vuelve a ser elegible como cualquier otro.
+- La guía de Ayuda se actualizó con los tres cambios anteriores: la sección de estados del partido ahora explica que “Libre” es el partido cancelado y que su motivo es obligatorio, hay una sección nueva de bitácora, y la sección “Lo que hoy no existe” aclara que el historial es solo de partidos (no hay auditoría general de todo el sistema) y que todavía no hay una bandeja que junte los pendientes.
+- **Guardar sin tocar nada no ensucia el historial**: si abrís la planilla, revisás y volvés a guardar igual, no se escribe ninguna fila. Solo quedan asentados los cambios reales.
+
+### Arreglo
+
+- La pantalla **Editar partido** ya no rompe (error 500) si se guarda un estado que no existe: ahora lo rechaza con un mensaje que dice cuáles son los estados válidos.
+
+---
+
 ## [0.4.0] — 2026-10-02 — Ayuda y documentación del panel
 
 ### Nuevo
