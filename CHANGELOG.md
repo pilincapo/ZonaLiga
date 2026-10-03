@@ -13,6 +13,24 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.4] — 2026-10-03 — Usuarios propios del panel (corrección de 18.1)
+
+### Nuevo
+
+- **Community Manager es ahora un usuario real con credenciales propias.** Se crean en **Administración → Accesos**: usuario, nombre, contraseña (guardada cifrada) y sus permisos. Ya no existe la clave compartida `COMMUNITY_MANAGER_PASSWORD`, que permitía que cualquiera entrara con la misma contraseña y no identificaba a nadie.
+- La pantalla **Accesos** (solo para el administrador) da de alta, suspende, reactiva y borra usuarios, y les asigna permisos uno por uno. El administrador histórico sigue entrando con la clave del panel, sin cuenta, como hasta ahora.
+- **Permisos deportivos independientes**: las capacidades que el panel ya tenía (Torneos, Equipos y jugadores, Fixture y fechas, Resultados y entregas, Estadísticas, Disciplina) son permisos individuales. Un Community Manager con un solo permiso entra solo a esa sección de `/admin`; sin ningún permiso deportivo no entra a `/admin` en absoluto. No hay roles deportivos nuevos: se conservan los que existen.
+
+### Mejora
+
+- Los permisos de portal (`PORTAL_*`) se guardan por usuario en la base de datos, no en la configuración del sitio: cada persona ve las secciones del portal que le corresponden, y si no tiene ninguna, aunque conozca la URL no puede abrirla (se responde 403 desde el servidor).
+
+### Arreglo
+
+- Se elimina el interruptor `COMMUNITY_MANAGER_SPORTS_ADMIN`, que concedía acceso completo a `/admin` a cualquiera con la clave compartida.
+
+---
+
 ## [0.4.3] — 2026-10-03 — Base del portal informativo
 
 ### Nuevo

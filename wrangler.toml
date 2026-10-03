@@ -18,9 +18,6 @@ binding = "ASSETS"
 # resultado, no antes, y con esto el consumo diario de filas leídas de D1 baja
 # de ~380 a miles de visitas por día. Con "0" la caché queda apagada.
 CACHE_PUBLICA_TTL = "60"
-# Permisos del Community Manager separados de los deportivos.
-COMMUNITY_MANAGER_PORTAL_PERMISSIONS = "PORTAL_NOTICIAS,PORTAL_FOTOS,PORTAL_COMPLEJO,PORTAL_TORNEO,PORTAL_DESTACADOS,PORTAL_CONFIGURACION"
-COMMUNITY_MANAGER_SPORTS_ADMIN = "0"
 
 # El CHANGELOG.md se importa como texto desde src/changelog.ts (fuente única).
 # Sin esta regla, esbuild no sabría cómo cargar un .md.

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDelegateToken,
   createSessionToken,
+  getSessionPrincipal,
   getSessionRole,
   safeEqual,
   verifyDelegateToken,
@@ -17,13 +18,20 @@ describe('auth', () => {
     const token = await createSessionToken(secret);
     expect(await verifySessionToken(token, secret)).toBe(true);
     expect(await getSessionRole(token, secret)).toBe('ADMIN');
+    expect(await getSessionPrincipal(token, secret)).toEqual({ role: 'ADMIN' });
   });
 
-  it('crea una sesión COMMUNITY_MANAGER firmada sin cambiar la sesión deportiva', async () => {
-    const token = await createSessionToken(secret, 'COMMUNITY_MANAGER');
+  it('crea una sesión COMMUNITY_MANAGER con el id del usuario de la base', async () => {
+    const token = await createSessionToken(secret, 'COMMUNITY_MANAGER', 7);
     expect(await verifySessionToken(token, secret)).toBe(true);
     expect(await getSessionRole(token, secret)).toBe('COMMUNITY_MANAGER');
-    expect(await getSessionRole(token, 'otro')).toBeNull();
+    expect(await getSessionPrincipal(token, secret)).toEqual({ role: 'COMMUNITY_MANAGER', userId: 7 });
+    expect(await getSessionPrincipal(token, 'otro')).toBeNull();
+  });
+
+  it('una sesión firmada sin usuario no da rol de Community Manager', async () => {
+    const token = await createSessionToken(secret, 'COMMUNITY_MANAGER');
+    expect(await getSessionRole(token, secret)).toBeNull();
   });
 
   it('sesión con otro secreto es inválida', async () => {

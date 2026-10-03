@@ -11,8 +11,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 const BASE = process.env.ZONALIGA_E2E_BASE ?? '';
 const ADMIN_PASSWORD = process.env.ZONALIGA_E2E_PASS ?? '';
-const COMMUNITY_MANAGER_PASSWORD = process.env.ZONALIGA_E2E_COMMUNITY_PASS ?? '';
 const has = Boolean(BASE && ADMIN_PASSWORD);
+
+/** Contraseñas de los usuarios creados por el test en /admin/accesos. */
+const CM_PORTAL_PASSWORD = 'cm-portal-pw-2026';
+const CM_DEPORTES_PASSWORD = 'cm-deportes-pw-2026';
 
 /** Cliente HTTP con sesiones: un solo factory para el rol admin y el de delegado. */
 function client() {
@@ -21,12 +24,17 @@ function client() {
     get(path: string) {
       return fetch(`${BASE}${path}`, { redirect: 'manual', headers: cookie ? { cookie } : {} });
     },
-    async post(path: string, body: Record<string, string> = {}) {
+    async post(path: string, body: Record<string, string | string[]> = {}) {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(body)) {
+        if (Array.isArray(value)) for (const item of value) params.append(key, item);
+        else params.append(key, value);
+      }
       return fetch(`${BASE}${path}`, {
         method: 'POST',
         redirect: 'manual',
         headers: { 'content-type': 'application/x-www-form-urlencoded', ...(cookie ? { cookie } : {}) },
-        body: new URLSearchParams(body),
+        body: params,
       });
     },
     async loginAdmin(password: string, next = '/admin') {
@@ -34,8 +42,9 @@ function client() {
       cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
       return res;
     },
-    async loginCommunityManager(password: string, next = '/portal-admin') {
-      const res = await this.post('/admin/login', { password, next });
+    /** Ingreso con cuenta propia de usuario (Community Manager). */
+    async loginUser(username: string, password: string, next = '/portal-admin') {
+      const res = await this.post('/admin/login', { username, password, next });
       cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
       return res;
     },
@@ -470,10 +479,53 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
 });
 
 describe.skipIf(!has)('e2e: administración del portal (Fase 18.1)', () => {
-  it('Community Manager entra al portal, queda fuera de /admin y ve solo permisos asignados', async () => {
-    expect(COMMUNITY_MANAGER_PASSWORD).toBeTruthy();
+  const CM_PORTAL = 'cm.portal';
+  const CM_DEPORTES = 'cm.deportes';
+
+  it('el administrador crea usuarios propios con sus permisos', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+
+    // Pantalla de accesos: visible para el administrador.
+    const page = await (await admin.get('/admin/accesos')).text();
+    expect(page).toContain('Crear usuario');
+    expect(page).toContain('Permisos deportivos');
+
+    // Usuario sin permisos deportivos: solo noticias del portal.
+    const okPortal = await admin.post('/admin/accesos', {
+      username: CM_PORTAL,
+      name: 'Comunicación',
+      password: CM_PORTAL_PASSWORD,
+      permission: ['PORTAL_NOTICIAS'],
+    });
+    expect(okPortal.status).toBe(302);
+
+    // Usuario con un permiso deportivo, sin nada del portal.
+    const okDeportes = await admin.post('/admin/accesos', {
+      username: CM_DEPORTES,
+      name: 'Estadística',
+      password: CM_DEPORTES_PASSWORD,
+      permission: ['SPORTS_ESTADISTICAS'],
+    });
+    expect(okDeportes.status).toBe(302);
+
+    // El usuario ya figura en el listado.
+    const list = await (await admin.get('/admin/accesos')).text();
+    expect(list).toContain(CM_PORTAL);
+    expect(list).toContain(CM_DEPORTES);
+
+    // Usuario repetido: rechazado, sin crearlo de nuevo.
+    const dup = await admin.post('/admin/accesos', {
+      username: CM_PORTAL,
+      password: CM_PORTAL_PASSWORD,
+      permission: ['PORTAL_NOTICIAS'],
+    });
+    expect(dup.status).toBe(400);
+  });
+
+  it('1) Community Manager válido ingresa con su cuenta y entra al portal', async () => {
     const manager = client();
-    const login = await manager.loginCommunityManager(COMMUNITY_MANAGER_PASSWORD);
+    const login = await manager.loginUser(CM_PORTAL, CM_PORTAL_PASSWORD);
     expect(login.status).toBe(302);
     expect(login.headers.get('location')).toBe('/portal-admin');
 
@@ -483,17 +535,73 @@ describe.skipIf(!has)('e2e: administración del portal (Fase 18.1)', () => {
     expect(html).toContain('Portal informativo');
     expect(html).toContain('Noticias');
     expect(html).not.toContain('href="/portal-admin/fotos"');
+    expect(html).toContain('Cerrar sesión');
 
     const news = await manager.get('/portal-admin/noticias');
     expect(news.status).toBe(200);
     expect(await news.text()).toContain('próxima etapa');
-    expect((await manager.get('/portal-admin/fotos')).status).toBe(403);
+  });
 
-    const sports = await manager.get('/admin');
-    expect(sports.status).toBe(302);
-    expect(sports.headers.get('location')).toContain('/admin/login?next=%2Fadmin');
-    expect((await manager.get('/admin/torneos')).status).toBe(302);
+  it('2) Community Manager sin permisos deportivos no entra a /admin', async () => {
+    const manager = client();
+    await manager.loginUser(CM_PORTAL, CM_PORTAL_PASSWORD);
 
+    const dashboard = await manager.get('/admin');
+    expect(dashboard.status).toBe(302);
+    expect(dashboard.headers.get('location')).toBe('/portal-admin');
+    const torneos = await manager.get('/admin/torneos');
+    expect(torneos.status).toBe(302);
+    expect(torneos.headers.get('location')).toBe('/portal-admin');
+    // Tampoco llega a la pantalla de altas de usuarios.
+    const accesos = await manager.get('/admin/accesos');
+    expect(accesos.status).toBe(302);
+    expect(accesos.headers.get('location')).toBe('/portal-admin');
+  });
+
+  it('3) el usuario normal (administrador) no obtiene acceso al portal', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const res = await admin.get('/portal-admin');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/admin');
+  });
+
+  it('4) con un permiso deportivo específico accede solamente a esa sección', async () => {
+    const manager = client();
+    await manager.loginUser(CM_DEPORTES, CM_DEPORTES_PASSWORD);
+
+    const estadisticas = await manager.get('/admin/estadisticas');
+    expect(estadisticas.status).toBe(200);
+    expect(await estadisticas.text()).toContain('Estadísticas');
+
+    for (const ruta of ['/admin/torneos', '/admin/fixture', '/admin/planilla', '/admin/equipos']) {
+      const res = await manager.get(ruta);
+      expect(res.status, `${ruta} debe quedar cerrada`).toBe(302);
+      expect(res.headers.get('location')).toBe('/portal-admin');
+    }
+  });
+
+  it('5) sin permiso de portal no abre la sección aunque conozca la URL', async () => {
+    const manager = client();
+    await manager.loginUser(CM_DEPORTES, CM_DEPORTES_PASSWORD);
+    const denied = await manager.get('/portal-admin/noticias');
+    expect(denied.status).toBe(403);
+    expect(await denied.text()).toContain('No tenés permiso');
+    const config = await manager.get('/portal-admin/configuracion');
+    expect(config.status).toBe(403);
+  });
+
+  it('el ingreso con la clave equivocada no deja sesión', async () => {
+    const manager = client();
+    const res = await manager.loginUser(CM_PORTAL, 'clave-equivocada');
+    expect(res.status).toBe(401);
+    expect(res.headers.get('set-cookie') ?? '').not.toContain('zl_session=');
+  });
+
+  it('la sesión del Community Manager se corta al cerrar sesión', async () => {
+    const manager = client();
+    await manager.loginUser(CM_PORTAL, CM_PORTAL_PASSWORD);
+    expect((await manager.get('/portal-admin')).status).toBe(200);
     const logout = await manager.logoutPortal();
     expect(logout.status).toBe(302);
     expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
@@ -506,7 +614,7 @@ describe.skipIf(!has)('e2e: administración del portal (Fase 18.1)', () => {
     expect(login.status).toBe(302);
     expect(login.headers.get('location')).toBe('/admin');
     expect((await admin.get('/admin')).status).toBe(200);
-    expect((await admin.get('/portal-admin')).status).toBe(302);
+    expect((await admin.get('/admin/accesos')).status).toBe(200);
   });
 });
 

@@ -135,7 +135,7 @@ export const HELP_CATEGORIES: readonly HelpCategory[] = [
         title: 'Entrar al panel',
         keywords: ['login', 'contrasena', 'sesion', 'acceso'],
         blocks: [
-          { kind: 'p', d: 'La administración deportiva usa el secreto ADMIN_PASSWORD y el acceso al portal puede usar COMMUNITY_MANAGER_PASSWORD. Son accesos separados: Community Manager entra por defecto solo a /portal-admin; sus permisos deportivos, si se habilitan, se configuran aparte.' },
+          { kind: 'p', d: 'La administración deportiva usa el secreto ADMIN_PASSWORD. Las personas del panel pueden tener cuenta propia con su usuario y contraseña, creadas en Accesos: por defecto ingresan al portal informativo y cada permiso de portal o deportivo se asigna aparte.' },
           { kind: 'ul', items: ['La sesión dura lo que la cookie del navegador.', 'Cerrar sesión está arriba a la derecha, junto al selector de tema.', 'No hay usuarios ni contraseñas separadas: quien tiene la contraseña administra todo.'] },
         ],
       },

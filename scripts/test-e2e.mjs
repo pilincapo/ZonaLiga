@@ -5,7 +5,7 @@
 //
 // 1. Crea un directorio temporal aislado (--persist-to), aplica las
 //    migraciones en esa D1 vacía y levanta `wrangler dev` en un puerto libre
-//    con claves efímeras para ADMIN y Community Manager.
+//    con ADMIN_PASSWORD propio.
 // 2. Corre el suite de Vitest (test/e2e-login.test.ts) con la URL y la
 //    contraseña en variables de entorno.
 // 3. Mata el árbol de procesos del server y borra el directorio, siempre,
@@ -70,7 +70,6 @@ function killTree(pid) {
 const port = await getFreePort();
 const persistDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zonaliga-e2e-'));
 const adminPassword = `e2e-pass-${Date.now().toString(36)}`;
-const communityManagerPassword = `e2e-community-${Date.now().toString(36)}`;
 const base = `http://127.0.0.1:${port}`;
 const logPath = path.join(persistDir, 'wrangler-dev.log');
 const logStream = fs.openSync(logPath, 'a');
@@ -89,7 +88,7 @@ try {
     throw new Error('fallaron las migraciones');
   }
 
-  // 2) Server con claves propias (bindings via --var; wrangler dev no
+  // 2) Server con clave propia (binding via --var; wrangler dev no
   //    propaga variables de proceso al worker, y así no tocamos .dev.vars).
   const child = spawn(
     process.execPath,
@@ -100,9 +99,6 @@ try {
       '--local',
       '--persist-to', persistDir,
       '--var', `ADMIN_PASSWORD:${adminPassword}`,
-      '--var', `COMMUNITY_MANAGER_PASSWORD:${communityManagerPassword}`,
-      '--var', 'COMMUNITY_MANAGER_PORTAL_PERMISSIONS:PORTAL_NOTICIAS',
-      '--var', 'COMMUNITY_MANAGER_SPORTS_ADMIN:0',
       // La caché de páginas públicas apagada: los tests crean datos por HTTP y
       // comprueban el resultado enseguida, con caché verían la versión vieja.
       '--var', 'CACHE_PUBLICA_TTL:0',
@@ -129,7 +125,7 @@ try {
     if (process.env.E2E_TEST_NAME) vitestArgs.push('-t', process.env.E2E_TEST_NAME);
     const run = spawnSync(process.execPath, vitestArgs, {
       cwd: root,
-      env: { ...env, ZONALIGA_E2E_BASE: base, ZONALIGA_E2E_PASS: adminPassword, ZONALIGA_E2E_COMMUNITY_PASS: communityManagerPassword },
+      env: { ...env, ZONALIGA_E2E_BASE: base, ZONALIGA_E2E_PASS: adminPassword },
       stdio: 'inherit',
     });
     failed = run.status !== 0;

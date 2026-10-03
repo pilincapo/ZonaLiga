@@ -254,6 +254,7 @@ export function adminGroupsNav(opts: { pending?: number; unassigned?: number }):
       items: [
         { href: '/admin/ajustes', label: 'Ajustes de puntos', match: 'ajustes' },
         { href: '/admin/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
+        { href: '/admin/accesos', label: 'Accesos', match: 'accesos' },
       ],
     },
     { label: 'Ayuda', href: '/admin/ayuda', match: 'ayuda', items: [] },
@@ -339,9 +340,13 @@ export async function loginPage(error?: string, next?: string): Promise<string> 
     <form method="post" action="/admin/login">
       <input type="hidden" name="next" value="${escUrl(next ?? '/admin')}">
       <div class="field">
+        <label for="username">Usuario <span class="muted small">(opcional)</span></label>
+        <input type="text" id="username" name="username" autocomplete="username" placeholder="Si tenés cuenta propia">
+      </div>
+      <div class="field">
         <label for="password">Contraseña</label>
-        <input type="password" id="password" name="password" required autofocus autocomplete="current-password">
-        <p class="hint">La clave determina a qué administración podés entrar.</p>
+        <input type="password" id="password" name="password" required autocomplete="current-password">
+        <p class="hint">Dejá el usuario vacío si ingresás con la clave del panel. Si tenés cuenta propia, escribí usuario y contraseña.</p>
       </div>
       <button class="btn btn-primary" type="submit" style="width:100%">Entrar</button>
     </form>

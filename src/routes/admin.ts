@@ -6,14 +6,28 @@ import {
   clearSessionCookieHeader,
   createSessionToken,
   getSessionCookie,
-  getSessionRole,
+  getSessionPrincipal,
   hashPassword,
   safeEqual,
   sessionCookieHeader,
   sessionSecret,
 } from '../lib/auth.ts';
 import { slugify } from '../lib/slug.ts';
-import { canAccessSportsAdmin } from '../lib/portalAccess.ts';
+import {
+  canUseSportsDashboard,
+  sportsPermissionForPath,
+  parsePanelPermissions,
+} from '../lib/portalAccess.ts';
+import {
+  authenticatePanelUser,
+  createPanelUser,
+  deletePanelUser,
+  getPanelUserById,
+  listPanelUsers,
+  replacePanelUserPermissions,
+  setPanelUserActive,
+  userSportsPermissions,
+} from '../lib/users.ts';
 import type { EventType, Match } from '../lib/types.ts';
 import { regeneratePairings, verifyPairings, slotConflicts, playedCount } from '../lib/fixture.ts';
 import { resolveGoalPlan, picksWithoutRoster, MAX_GOALS, type GoalPick } from '../lib/sheet.ts';
@@ -138,15 +152,30 @@ import {
 import { adjustmentsAdminPage } from '../ui/adminAjustes.ts';
 import { calendarioAdminPage } from '../ui/adminCalendario.ts';
 import { delegadosAdminPage, estadisticasAdminPage } from '../ui/adminStats.ts';
+import { accesosAdminPage } from '../ui/adminAccesos.ts';
 import * as admin from '../ui/admin.ts';
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
 
+/**
+ * Guardia de /admin. ADMIN (acceso histórico por contraseña única) pasa
+ * siempre. Un Community Manager es un usuario con cuenta propia: carga sus
+ * permisos de la base y solo entra a la sección que le corresponde. Sin
+ * permiso deportivo no entra a /admin en absoluto.
+ */
 export async function isAdmin(c: any): Promise<boolean> {
-  const role = await getSessionRole(getSessionCookie(c.req.raw), sessionSecret(c.env));
-  if (!role) return false;
-  if (role === 'ADMIN') return true;
-  return canAccessSportsAdmin(role, c.env.COMMUNITY_MANAGER_SPORTS_ADMIN);
+  const principal = await getSessionPrincipal(getSessionCookie(c.req.raw), sessionSecret(c.env));
+  if (!principal) return false;
+  if (principal.role === 'ADMIN') return true;
+  if (principal.userId == null) return false;
+  const user = await getPanelUserById(c.env.DB, principal.userId);
+  if (!user || user.active !== 1) return false;
+  const perms = await userSportsPermissions(c.env.DB, user.id);
+  const path = c.req.path;
+  if (path === '/admin' || path === '/admin/') return canUseSportsDashboard(perms);
+  if (path === '/admin/ayuda') return true;
+  const need = sportsPermissionForPath(path);
+  return need != null && perms.includes(need);
 }
 
 /** Torneo del selector de Ajustes (por slug, o el activo). */
@@ -159,6 +188,11 @@ adminRoutes.use('*', async (c, next) => {
   const isLogin = path === '/admin/login' || path === '/admin/logout';
   if (isLogin) return next();
   if (await isAdmin(c)) return next();
+  // Sesión sin acceso a esta sección: si no hay sesión, al login; si es un
+  // usuario sin ese permiso, al portal (ya ingresó, no es un problema de clave).
+  const principal = await getSessionPrincipal(getSessionCookie(c.req.raw), sessionSecret(c.env));
+  if (!principal) return c.redirect(`/admin/login?next=${encodeURIComponent(path)}`);
+  if (principal.role === 'COMMUNITY_MANAGER') return c.redirect('/portal-admin');
   return c.redirect(`/admin/login?next=${encodeURIComponent(path)}`);
 });
 
@@ -169,33 +203,37 @@ adminRoutes.get('/login', async (c) => {
 
 adminRoutes.post('/login', async (c) => {
   const form = await c.req.parseBody();
+  const username = typeof form['username'] === 'string' ? form['username'].trim() : '';
   const password = String(form['password'] ?? '');
   const next = typeof form['next'] === 'string' ? form['next'] : '/admin';
   const adminPassword = sessionSecret(c.env);
-  const communityPassword = c.env.COMMUNITY_MANAGER_PASSWORD;
-  const [hashA, hashAdmin, hashCommunity] = await Promise.all([
-    hashPassword(password),
-    hashPassword(adminPassword),
-    hashPassword(communityPassword || '\u0000community-manager-disabled'),
-  ]);
-  const role = safeEqual(hashA, hashAdmin)
-    ? 'ADMIN'
-    : communityPassword && safeEqual(hashA, hashCommunity)
-      ? 'COMMUNITY_MANAGER'
-      : null;
-  if (!role) {
-    return c.html(admin.loginPage('Contraseña incorrecta', next), 401);
-  }
-  const token = await createSessionToken(adminPassword, role);
-  c.header('Set-Cookie', sessionCookieFor(token));
   const portalNext = next === '/portal-admin' || next.startsWith('/portal-admin/');
   const sportsNext = next === '/admin' || next.startsWith('/admin/');
-  if (role === 'COMMUNITY_MANAGER') {
-    const canUseRequestedArea =
-      portalNext || (sportsNext && canAccessSportsAdmin(role, c.env.COMMUNITY_MANAGER_SPORTS_ADMIN));
-    return c.redirect(canUseRequestedArea ? next : '/portal-admin');
+
+  // 1) Acceso histórico del administrador: la clave única del panel.
+  const [hashA, hashAdmin] = await Promise.all([hashPassword(password), hashPassword(adminPassword)]);
+  if (safeEqual(hashA, hashAdmin)) {
+    const token = await createSessionToken(adminPassword, 'ADMIN');
+    c.header('Set-Cookie', sessionCookieFor(token));
+    return c.redirect(sportsNext ? next : '/admin');
   }
-  return c.redirect(sportsNext ? next : '/admin');
+
+  // 2) Cuenta propia de usuario (Community Manager): se fija en la base.
+  const user = username ? await authenticatePanelUser(c.env.DB, username, password) : null;
+  if (!user) return c.html(admin.loginPage('Usuario o contraseña incorrectos', next), 401);
+  const token = await createSessionToken(adminPassword, user.role, user.id);
+  c.header('Set-Cookie', sessionCookieFor(token));
+  // El usuario va al portal salvo que pida una sección deportiva que tenga.
+  if (portalNext) return c.redirect(next);
+  if (sportsNext) {
+    const perms = await userSportsPermissions(c.env.DB, user.id);
+    if (next === '/admin' || next === '/admin/') {
+      return c.redirect(perms.length > 0 ? next : '/portal-admin');
+    }
+    const need = sportsPermissionForPath(next);
+    if (need != null && perms.includes(need)) return c.redirect(next);
+  }
+  return c.redirect('/portal-admin');
 });
 
 function sessionCookieFor(token: string): string {
@@ -210,6 +248,81 @@ adminRoutes.get('/ayuda', (c) =>
 adminRoutes.get('/logout', (c) => {
   c.header('Set-Cookie', clearSessionCookieHeader());
   return c.redirect('/admin/login');
+});
+
+/* ---------- Accesos: usuarios propios del panel (Community Manager) ---------- */
+
+/** Los permisos llegan como checkboxes repetidos; solo nos sirven los textos. */
+function permissionValues(form: Record<string, unknown>): string[] {
+  const raw = form['permission'];
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return list.filter((v): v is string => typeof v === 'string');
+}
+
+/** Valida el nombre de usuario del alta. */
+function normalizeUsername(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!/^[a-zA-Z0-9._-]{3,40}$/.test(value)) {
+    throw new Error('El usuario puede tener letras, números, punto, guion o guion bajo (3 a 40 caracteres).');
+  }
+  return value;
+}
+
+adminRoutes.get('/accesos', async (c) => {
+  const users = await listPanelUsers(c.env.DB);
+  return c.html(await accesosAdminPage(users, c.req.query('msg'), c.req.query('err')));
+});
+
+adminRoutes.post('/accesos', async (c) => {
+  const form = await c.req.parseBody();
+  const permissions = parsePanelPermissions(permissionValues(form));
+  let username: string;
+  try {
+    username = normalizeUsername(form['username']);
+  } catch (e) {
+    const users = await listPanelUsers(c.env.DB);
+    return c.html(await accesosAdminPage(users, undefined, e instanceof Error ? e.message : 'Usuario inválido'), 400);
+  }
+  const password = String(form['password'] ?? '');
+  const created = await createPanelUser(c.env.DB, {
+    username,
+    name: String(form['name'] ?? ''),
+    password,
+    permissions,
+  });
+  if (!created.ok) {
+    const users = await listPanelUsers(c.env.DB);
+    return c.html(await accesosAdminPage(users, undefined, created.error), 400);
+  }
+  return c.redirect('/admin/accesos?msg=' + encodeURIComponent(`Usuario ${username} creado`));
+});
+
+adminRoutes.post('/accesos/:id/permisos', async (c) => {
+  const id = Number(c.req.param('id'));
+  const form = await c.req.parseBody();
+  const permissions = parsePanelPermissions(permissionValues(form));
+  const user = await getPanelUserById(c.env.DB, id);
+  if (!user) return c.redirect('/admin/accesos?err=' + encodeURIComponent('Ese usuario no existe'));
+  await replacePanelUserPermissions(c.env.DB, id, permissions);
+  return c.redirect('/admin/accesos?msg=' + encodeURIComponent('Permisos actualizados'));
+});
+
+adminRoutes.post('/accesos/:id/activar', async (c) => {
+  const id = Number(c.req.param('id'));
+  await setPanelUserActive(c.env.DB, id, true);
+  return c.redirect('/admin/accesos?msg=' + encodeURIComponent('Usuario activo'));
+});
+
+adminRoutes.post('/accesos/:id/suspender', async (c) => {
+  const id = Number(c.req.param('id'));
+  await setPanelUserActive(c.env.DB, id, false);
+  return c.redirect('/admin/accesos?msg=' + encodeURIComponent('Usuario suspendido'));
+});
+
+adminRoutes.post('/accesos/:id/eliminar', async (c) => {
+  const id = Number(c.req.param('id'));
+  await deletePanelUser(c.env.DB, id);
+  return c.redirect('/admin/accesos?msg=' + encodeURIComponent('Usuario eliminado'));
 });
 
 adminRoutes.get('/', (c) => admin.dashboardPage(c.env.DB, c.req.query('msg') ?? undefined, c.req.query('err') ?? undefined).then((html) => c.html(html)));

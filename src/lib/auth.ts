@@ -74,25 +74,47 @@ function fromHex(hex: string): Uint8Array | null {
   return out;
 }
 
+/** Sesión del panel: quién es (rol) y, si es un usuario con cuenta propia, su id. */
+export interface SessionPrincipal {
+  role: SessionRole;
+  userId?: number;
+}
+
 /** Cookie de sesión: "exp:<unix>.<nonce-hex>", firmada. */
-export async function createSessionToken(secret: string, role: SessionRole = 'ADMIN'): Promise<string> {
+export async function createSessionToken(secret: string, role: SessionRole = 'ADMIN', userId?: number): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
   const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)));
   // Las sesiones ADMIN conservan el formato histórico y siguen siendo válidas.
-  const payload = role === 'ADMIN' ? `exp:${exp}.${nonce}` : `role:${role}:${exp}.${nonce}`;
+  // Las de un usuario con cuenta propia llevan su id: así los permisos se
+  // leen de esa persona y no de una clave compartida.
+  const payload =
+    role === 'ADMIN'
+      ? `exp:${exp}.${nonce}`
+      : userId == null
+        ? `role:${role}:${exp}.${nonce}`
+        : `user:${role}:${userId}:${exp}.${nonce}`;
   return sign(payload, secret);
+}
+
+/** Devuelve el rol y el usuario incluidos en una sesión firmada, o null. */
+export async function getSessionPrincipal(token: string | undefined, secret: string): Promise<SessionPrincipal | null> {
+  if (!token) return null;
+  const payload = await verify(token, secret);
+  if (!payload) return null;
+  // Formato viejo de 18.1 (clave compartida): ya no se usa, queda inválido.
+  const legacy = /^exp:(\d+)\.[0-9a-f]+$/.exec(payload);
+  const user = /^user:(ADMIN|COMMUNITY_MANAGER):(\d+):(\d+)\.[0-9a-f]+$/.exec(payload);
+  const exp = Number(legacy?.[1] ?? user?.[3]);
+  if (!Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000)) return null;
+  if (user) {
+    return { role: user[1] as SessionRole, userId: Number(user[2]) };
+  }
+  return legacy ? { role: 'ADMIN' } : null;
 }
 
 /** Devuelve el rol incluido en una sesión firmada, o null si expiró/no es válida. */
 export async function getSessionRole(token: string | undefined, secret: string): Promise<SessionRole | null> {
-  if (!token) return null;
-  const payload = await verify(token, secret);
-  if (!payload) return null;
-  const legacy = /^exp:(\d+)\.[0-9a-f]+$/.exec(payload);
-  const community = /^role:COMMUNITY_MANAGER:(\d+)\.[0-9a-f]+$/.exec(payload);
-  const exp = Number(legacy?.[1] ?? community?.[1]);
-  if (!Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000)) return null;
-  return community ? 'COMMUNITY_MANAGER' : 'ADMIN';
+  return (await getSessionPrincipal(token, secret))?.role ?? null;
 }
 
 /** Devuelve true si el token de sesión es válido y no expiró. */
