@@ -6,13 +6,14 @@ import {
   clearSessionCookieHeader,
   createSessionToken,
   getSessionCookie,
+  getSessionRole,
   hashPassword,
   safeEqual,
   sessionCookieHeader,
   sessionSecret,
-  verifySessionToken,
 } from '../lib/auth.ts';
 import { slugify } from '../lib/slug.ts';
+import { canAccessSportsAdmin } from '../lib/portalAccess.ts';
 import type { EventType, Match } from '../lib/types.ts';
 import { regeneratePairings, verifyPairings, slotConflicts, playedCount } from '../lib/fixture.ts';
 import { resolveGoalPlan, picksWithoutRoster, MAX_GOALS, type GoalPick } from '../lib/sheet.ts';
@@ -142,7 +143,10 @@ import * as admin from '../ui/admin.ts';
 export const adminRoutes = new Hono<{ Bindings: Env }>();
 
 export async function isAdmin(c: any): Promise<boolean> {
-  return verifySessionToken(getSessionCookie(c.req.raw), sessionSecret(c.env));
+  const role = await getSessionRole(getSessionCookie(c.req.raw), sessionSecret(c.env));
+  if (!role) return false;
+  if (role === 'ADMIN') return true;
+  return canAccessSportsAdmin(role, c.env.COMMUNITY_MANAGER_SPORTS_ADMIN);
 }
 
 /** Torneo del selector de Ajustes (por slug, o el activo). */
@@ -167,14 +171,31 @@ adminRoutes.post('/login', async (c) => {
   const form = await c.req.parseBody();
   const password = String(form['password'] ?? '');
   const next = typeof form['next'] === 'string' ? form['next'] : '/admin';
-  const expected = sessionSecret(c.env);
-  const [hashA, hashB] = await Promise.all([hashPassword(password), hashPassword(expected)]);
-  if (!safeEqual(hashA, hashB)) {
+  const adminPassword = sessionSecret(c.env);
+  const communityPassword = c.env.COMMUNITY_MANAGER_PASSWORD;
+  const [hashA, hashAdmin, hashCommunity] = await Promise.all([
+    hashPassword(password),
+    hashPassword(adminPassword),
+    hashPassword(communityPassword || '\u0000community-manager-disabled'),
+  ]);
+  const role = safeEqual(hashA, hashAdmin)
+    ? 'ADMIN'
+    : communityPassword && safeEqual(hashA, hashCommunity)
+      ? 'COMMUNITY_MANAGER'
+      : null;
+  if (!role) {
     return c.html(admin.loginPage('Contraseña incorrecta', next), 401);
   }
-  const token = await createSessionToken(expected);
+  const token = await createSessionToken(adminPassword, role);
   c.header('Set-Cookie', sessionCookieFor(token));
-  return c.redirect(next.startsWith('/admin') ? next : '/admin');
+  const portalNext = next === '/portal-admin' || next.startsWith('/portal-admin/');
+  const sportsNext = next === '/admin' || next.startsWith('/admin/');
+  if (role === 'COMMUNITY_MANAGER') {
+    const canUseRequestedArea =
+      portalNext || (sportsNext && canAccessSportsAdmin(role, c.env.COMMUNITY_MANAGER_SPORTS_ADMIN));
+    return c.redirect(canUseRequestedArea ? next : '/portal-admin');
+  }
+  return c.redirect(sportsNext ? next : '/admin');
 });
 
 function sessionCookieFor(token: string): string {

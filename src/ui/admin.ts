@@ -341,7 +341,7 @@ export async function loginPage(error?: string, next?: string): Promise<string> 
       <div class="field">
         <label for="password">Contraseña</label>
         <input type="password" id="password" name="password" required autofocus autocomplete="current-password">
-        <p class="hint">Es la contraseña configurada como secreto ADMIN_PASSWORD en Cloudflare.</p>
+        <p class="hint">La clave determina a qué administración podés entrar.</p>
       </div>
       <button class="btn btn-primary" type="submit" style="width:100%">Entrar</button>
     </form>

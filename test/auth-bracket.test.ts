@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDelegateToken,
   createSessionToken,
+  getSessionRole,
   safeEqual,
   verifyDelegateToken,
   verifySessionToken,
@@ -12,9 +13,17 @@ import type { Match } from '../src/lib/types.ts';
 describe('auth', () => {
   const secret = 'test-secret';
 
-  it('sesión creada ahora es válida', async () => {
+  it('sesión creada ahora es válida y conserva el rol ADMIN histórico por defecto', async () => {
     const token = await createSessionToken(secret);
     expect(await verifySessionToken(token, secret)).toBe(true);
+    expect(await getSessionRole(token, secret)).toBe('ADMIN');
+  });
+
+  it('crea una sesión COMMUNITY_MANAGER firmada sin cambiar la sesión deportiva', async () => {
+    const token = await createSessionToken(secret, 'COMMUNITY_MANAGER');
+    expect(await verifySessionToken(token, secret)).toBe(true);
+    expect(await getSessionRole(token, secret)).toBe('COMMUNITY_MANAGER');
+    expect(await getSessionRole(token, 'otro')).toBeNull();
   });
 
   it('sesión con otro secreto es inválida', async () => {

@@ -11,6 +11,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 const BASE = process.env.ZONALIGA_E2E_BASE ?? '';
 const ADMIN_PASSWORD = process.env.ZONALIGA_E2E_PASS ?? '';
+const COMMUNITY_MANAGER_PASSWORD = process.env.ZONALIGA_E2E_COMMUNITY_PASS ?? '';
 const has = Boolean(BASE && ADMIN_PASSWORD);
 
 /** Cliente HTTP con sesiones: un solo factory para el rol admin y el de delegado. */
@@ -28,8 +29,13 @@ function client() {
         body: new URLSearchParams(body),
       });
     },
-    async loginAdmin(password: string) {
-      const res = await this.post('/admin/login', { password, next: '/admin' });
+    async loginAdmin(password: string, next = '/admin') {
+      const res = await this.post('/admin/login', { password, next });
+      cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+      return res;
+    },
+    async loginCommunityManager(password: string, next = '/portal-admin') {
+      const res = await this.post('/admin/login', { password, next });
       cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
       return res;
     },
@@ -40,6 +46,11 @@ function client() {
     },
     async logoutAdmin() {
       const res = await this.get('/admin/logout');
+      cookie = '';
+      return res;
+    },
+    async logoutPortal() {
+      const res = await this.get('/portal-admin/logout');
       cookie = '';
       return res;
     },
@@ -455,6 +466,47 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
     const restored = await (await admin.get('/admin/fechas')).text();
     expect(parseRow(restored, ra.id).t).toBe(ra.t);
     expect(parseRow(restored, rb.id).v).toBe(rb.v);
+  });
+});
+
+describe.skipIf(!has)('e2e: administración del portal (Fase 18.1)', () => {
+  it('Community Manager entra al portal, queda fuera de /admin y ve solo permisos asignados', async () => {
+    expect(COMMUNITY_MANAGER_PASSWORD).toBeTruthy();
+    const manager = client();
+    const login = await manager.loginCommunityManager(COMMUNITY_MANAGER_PASSWORD);
+    expect(login.status).toBe(302);
+    expect(login.headers.get('location')).toBe('/portal-admin');
+
+    const home = await manager.get('/portal-admin');
+    expect(home.status).toBe(200);
+    const html = await home.text();
+    expect(html).toContain('Portal informativo');
+    expect(html).toContain('Noticias');
+    expect(html).not.toContain('href="/portal-admin/fotos"');
+
+    const news = await manager.get('/portal-admin/noticias');
+    expect(news.status).toBe(200);
+    expect(await news.text()).toContain('próxima etapa');
+    expect((await manager.get('/portal-admin/fotos')).status).toBe(403);
+
+    const sports = await manager.get('/admin');
+    expect(sports.status).toBe(302);
+    expect(sports.headers.get('location')).toContain('/admin/login?next=%2Fadmin');
+    expect((await manager.get('/admin/torneos')).status).toBe(302);
+
+    const logout = await manager.logoutPortal();
+    expect(logout.status).toBe(302);
+    expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect((await manager.get('/portal-admin')).status).toBe(302);
+  });
+
+  it('ADMIN conserva acceso deportivo y no se desvía del acceso habitual', async () => {
+    const admin = client();
+    const login = await admin.loginAdmin(ADMIN_PASSWORD);
+    expect(login.status).toBe(302);
+    expect(login.headers.get('location')).toBe('/admin');
+    expect((await admin.get('/admin')).status).toBe(200);
+    expect((await admin.get('/portal-admin')).status).toBe(302);
   });
 });
 

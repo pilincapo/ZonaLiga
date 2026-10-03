@@ -1,6 +1,9 @@
 // Autenticación del panel: contraseña única (secret de Cloudflare)
 // + sesión con cookie firmada HMAC-SHA256.
 
+import type { SessionRole } from './portalAccess.ts';
+export type { SessionRole } from './portalAccess.ts';
+
 const SESSION_COOKIE = 'zl_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 días
 
@@ -72,21 +75,29 @@ function fromHex(hex: string): Uint8Array | null {
 }
 
 /** Cookie de sesión: "exp:<unix>.<nonce-hex>", firmada. */
-export async function createSessionToken(secret: string): Promise<string> {
+export async function createSessionToken(secret: string, role: SessionRole = 'ADMIN'): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
   const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)));
-  return sign(`exp:${exp}.${nonce}`, secret);
+  // Las sesiones ADMIN conservan el formato histórico y siguen siendo válidas.
+  const payload = role === 'ADMIN' ? `exp:${exp}.${nonce}` : `role:${role}:${exp}.${nonce}`;
+  return sign(payload, secret);
+}
+
+/** Devuelve el rol incluido en una sesión firmada, o null si expiró/no es válida. */
+export async function getSessionRole(token: string | undefined, secret: string): Promise<SessionRole | null> {
+  if (!token) return null;
+  const payload = await verify(token, secret);
+  if (!payload) return null;
+  const legacy = /^exp:(\d+)\.[0-9a-f]+$/.exec(payload);
+  const community = /^role:COMMUNITY_MANAGER:(\d+)\.[0-9a-f]+$/.exec(payload);
+  const exp = Number(legacy?.[1] ?? community?.[1]);
+  if (!Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000)) return null;
+  return community ? 'COMMUNITY_MANAGER' : 'ADMIN';
 }
 
 /** Devuelve true si el token de sesión es válido y no expiró. */
 export async function verifySessionToken(token: string | undefined, secret: string): Promise<boolean> {
-  if (!token) return false;
-  const payload = await verify(token, secret);
-  if (!payload) return false;
-  const m = /^exp:(\d+)\.[0-9a-f]+$/.exec(payload);
-  if (!m) return false;
-  const exp = Number(m[1]);
-  return Number.isFinite(exp) && exp > Math.floor(Date.now() / 1000);
+  return (await getSessionRole(token, secret)) !== null;
 }
 
 export function sessionCookieHeader(token: string): string {

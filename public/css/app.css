@@ -2619,3 +2619,50 @@ html[data-theme='dark'] .dash-modal::backdrop { background: rgba(0, 0, 0, 0.6); 
   .h-cat { padding: 14px; }
   .h-keys > div { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* ---------- Portal informativo: shell de administración independiente ---------- */
+.portal-admin-body { min-height: 100vh; background: var(--bg, #f4f7f8); color: var(--text, #162536); }
+.portal-admin-shell { min-height: 100vh; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.portal-admin-side { display: flex; flex-direction: column; gap: 24px; padding: 22px 16px; background: #0d1b2a; color: #eef5f8; }
+.portal-admin-brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 18px; color: inherit; text-decoration: none; font-weight: 800; font-size: 1.08rem; border-bottom: 1px solid #ffffff1c; }
+.portal-brand-mark { width: 34px; height: 38px; display: block; }
+.portal-brand-mark svg { width: 100%; height: 100%; }
+.portal-admin-brand b { color: #21c063; }
+.portal-admin-brand small { display: block; margin-top: 3px; color: #9eafbd; font-size: .72rem; font-weight: 500; }
+.portal-admin-nav { display: grid; gap: 5px; }
+.portal-side-link { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: 9px; color: #c6d1d9; text-decoration: none; font-size: .9rem; }
+.portal-nav-mark { width: 8px; height: 8px; border: 1.5px solid currentColor; border-radius: 50%; opacity: .8; }
+.portal-side-link.active .portal-nav-mark { background: #21c063; border-color: #21c063; }
+.portal-side-link:hover, .portal-side-link.active { background: #ffffff13; color: #fff; }
+.portal-side-link.active { box-shadow: inset 3px 0 #21c063; }
+.portal-admin-side-foot { margin-top: auto; display: grid; gap: 8px; border-top: 1px solid #ffffff1c; padding: 16px 8px 0; }
+.portal-admin-side-foot a { color: #bdcbd4; text-decoration: none; font-size: .86rem; }
+.portal-admin-side-foot a:hover { color: white; }
+.portal-admin-main { min-width: 0; }
+.portal-admin-top { min-height: 66px; display: flex; align-items: center; justify-content: space-between; padding: 12px clamp(18px, 4vw, 48px); background: var(--surface, #fff); border-bottom: 1px solid var(--border, #e0e7eb); font-size: .9rem; font-weight: 600; }
+.portal-admin-top a { color: var(--accent-dark, #087b40); text-decoration: none; }
+.portal-admin-content { max-width: 1100px; margin: 0 auto; padding: clamp(24px, 5vw, 54px); }
+.portal-admin-heading { margin-bottom: 28px; }
+html[data-theme='dark'] .portal-admin-shell { --bg: #0a0d12; --surface: #131a22; --border: #243244; --text: #eaf0f6; --muted: #93a7bc; --accent-dark: #16a34a; }
+.portal-admin-eyebrow { color: var(--accent-dark, #087b40); font-size: .72rem; letter-spacing: .12em; font-weight: 800; }
+.portal-admin-heading h1 { margin: 8px 0; font-size: clamp(1.7rem, 3vw, 2.2rem); }
+.portal-admin-heading p { max-width: 680px; color: var(--muted, #61717e); line-height: 1.6; }
+.portal-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.portal-card { display: grid; gap: 10px; padding: 18px; color: var(--text, #162536); text-decoration: none; background: var(--surface, #fff); border: 1px solid var(--border, #e0e7eb); border-radius: 13px; box-shadow: 0 4px 14px #152b3b08; }
+.portal-card:hover { border-color: #21c063; transform: translateY(-1px); }
+.portal-card-ico { color: var(--accent-dark, #087b40); font-size: .82rem; }
+.portal-placeholder-mark { font-size: 1.5rem; font-weight: 800; line-height: 1; }
+.portal-card > span:last-child { color: var(--muted, #61717e); font-size: .82rem; }
+.portal-placeholder { display: flex; align-items: flex-start; gap: 14px; padding: 22px; background: var(--surface, #fff); border: 1px solid var(--border, #e0e7eb); border-radius: 13px; }
+.portal-placeholder-mark { color: var(--accent-dark, #087b40); }
+.portal-placeholder p { margin: 6px 0 0; color: var(--muted, #61717e); line-height: 1.55; }
+.portal-admin-boundary { margin-top: 28px; color: var(--muted, #61717e); font-size: .82rem; }
+@media (max-width: 760px) {
+  .portal-admin-shell { grid-template-columns: 1fr; }
+  .portal-admin-side { gap: 12px; padding: 12px; }
+  .portal-admin-brand { padding-bottom: 12px; }
+  .portal-admin-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .portal-side-link { padding: 9px 8px; font-size: .82rem; }
+  .portal-admin-side-foot { grid-template-columns: 1fr 1fr; margin-top: 0; padding-top: 12px; }
+  .portal-admin-top { min-height: 54px; }
+}

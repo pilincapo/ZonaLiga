@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { Env } from './types.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { delegateRoutes } from './routes/delegate.ts';
+import { portalAdminRoutes } from './routes/portalAdmin.ts';
 import { responderCacheado, ttlSegundos } from './lib/cache.ts';
 import * as pub from './ui/public.ts';
 import * as live from './ui/live.ts';
@@ -12,6 +13,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.route('/admin', adminRoutes);
 app.route('/delegado', delegateRoutes);
+app.route('/portal-admin', portalAdminRoutes);
 
 /* ---------- Público ----------
  *

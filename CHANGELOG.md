@@ -13,6 +13,20 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.3] — 2026-10-03 — Base del portal informativo
+
+### Nuevo
+
+- **Acceso separado para administrar el portal público**: la clave `COMMUNITY_MANAGER_PASSWORD` usa el inicio de sesión y la sesión firmada existentes. Por defecto abre solo `/portal-admin`, sin acceso a la administración deportiva.
+- El nuevo panel tiene navegación propia para Inicio, Noticias, Fotos, Destacados, El complejo, Información del torneo y Configuración. Las secciones editoriales muestran qué estará disponible en una próxima etapa; todavía no cargan contenido ni archivos.
+- Los seis permisos `PORTAL_*` se configuran aparte. El acceso deportivo opcional se habilita por separado con `COMMUNITY_MANAGER_SPORTS_ADMIN`; no se agregaron tablas ni roles deportivos.
+
+### Mejora
+
+- La administración deportiva existente conserva sus rutas, diseño y sesiones `ADMIN`.
+
+---
+
 ## [0.4.2] — 2026-10-02 — Cuota de base de datos: caché e índices
 
 ### Nuevo
