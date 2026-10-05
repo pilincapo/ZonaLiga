@@ -64,6 +64,8 @@ import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow, zoneBadg
 import { disciplineForMatch, teamDisciplineNotice } from './admin.ts';
 import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
+import { datosPortada } from '../lib/portalPortada.ts';
+import { bloqueNoticias, bloquesPortada, heroPortada } from './portalPortada.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
 import type { Match, Team, Tournament } from '../lib/types.ts';
 import { layout, shareBar, emptyNote, type NavItem, type NavGroup } from './components.ts';
@@ -117,10 +119,11 @@ function roundLabel(round: number | null, crossoverRounds?: ReadonlySet<number>)
 /* ============================== HOME ============================== */
 
 export async function homePage(db: D1Database, origin: string, slugParam?: string): Promise<string> {
-  const [tournaments, stats, view] = await Promise.all([
+  const [tournaments, stats, view, datos] = await Promise.all([
     listTournaments(db),
     tournamentStats(db),
     loadTournamentView(db, { slug: slugParam, scorers: 5 }),
+    datosPortada(db),
   ]);
   const t = view?.tournament ?? null;
   // El torneo se propaga solo si el hincha lo eligió (?t=slug). Si la portada
@@ -130,30 +133,23 @@ export async function homePage(db: D1Database, origin: string, slugParam?: strin
   const body = view
     ? await tournamentHomeBody(view, origin, torneosInner, tSlug)
     : `<section class="block">${torneosInner}</section>\n${await emptyHomeBody(db)}`;
+  // Orden de la portada: identidad y foto del complejo, noticias destacadas,
+  // lo deportivo (próximos partidos, resultados, posiciones), fotos, complejo
+  // e información del torneo.
   const inner = `
-${heroBand(t)}
+${heroPortada(datos, t)}
+${bloqueNoticias(datos)}
 ${body}
+${bloquesPortada(datos, t)}
 ${howToBlock()}`;
-  return layout({ title: 'ZonaLiga — Inicio', active: 'home', nav: PUBLIC_NAV, mas: PUBLIC_NAV_MAS, tSlug, body: inner });
-}
-
-/** Banda del hero con buscador (sin tarjetitas: lo que ofrece ZonaLiga ya lo cuenta el bloque final). */
-function heroBand(t: Tournament | null): string {
-  const sub = t
-    ? `Seguí en vivo <strong>${esc(t.name)}</strong>${t.season ? ` (temporada ${esc(t.season)})` : ''}:${' '}fixture, resultados, tabla de posiciones y goleadores, siempre al día.`
-    : 'Organizá, gestioná y seguí tu liga de fútbol amateur de forma simple y rápida: resultados, fixture, tablas y mucho más.';
-  return `<section class="hero-band">
-  <div class="hero-main">
-    <div class="hero-kicker">Fútbol amateur</div>
-    <h1>Tu liga, <span class="hl">en un solo lugar</span></h1>
-    <p class="hero-sub">${sub}</p>
-    <form class="search-bar" action="/buscar" method="get" role="search">
-      <span class="search-icon">${icon('search', 20)}</span>
-      <input type="search" name="q" placeholder="Buscar equipo, jugador o torneo…" aria-label="Buscar" required>
-      <button class="btn btn-primary" type="submit">Buscar</button>
-    </form>
-  </div>
-</section>`;
+  return layout({
+    title: `${datos.config?.nombre?.trim() || 'ZonaLiga'} — Inicio`,
+    active: 'home',
+    nav: PUBLIC_NAV,
+    mas: PUBLIC_NAV_MAS,
+    tSlug,
+    body: inner,
+  });
 }
 
 const TOURNAMENT_BADGE: Record<string, { cls: string; label: string }> = {

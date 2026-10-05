@@ -8,14 +8,13 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  /**
+   * Bucket de imágenes del portal. Es PRIVADO: las imágenes se sirven desde el
+   * Worker en /i/{id} (ver src/routes/portalImagenes.ts), que primero comprueba
+   * que el recurso padre esté publicado.
+   */
   R2_PUBLIC_BUCKET?: R2Bucket;
   ADMIN_PASSWORD?: string;
-  /**
-   * Dominio público del bucket de R2, usado para construir la URL pública de los
-   * archivos subidos (no para leerlos: eso lo hace el binding R2_PUBLIC_BUCKET).
-   * Ejemplo: "123456.r2.dev".
-   */
-  R2_PUBLIC_BUCKET_DOMAIN?: string;
   /**
    * Segundos que se guarda en caché cada página pública (ver src/lib/cache.ts).
    * Con "0" la caché queda apagada. El objetivo es que el presupuesto diario de

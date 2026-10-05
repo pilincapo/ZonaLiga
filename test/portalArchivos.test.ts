@@ -17,12 +17,11 @@ import { adminRoutes } from '../src/routes/admin.ts';
 import { portalAdminRoutes } from '../src/routes/portalAdmin.ts';
 import { portalImagenesRoutes } from '../src/routes/portalImagenes.ts';
 import { createSessionToken, sessionCookieHeader } from '../src/lib/auth.ts';
-import { mimePorMagicBytes, nombreSeguro, urlR2, subirArchivo } from '../src/lib/portalArchivos.ts';
+import { mimePorMagicBytes, nombreSeguro, urlArchivoPropio, subirArchivo } from '../src/lib/portalArchivos.ts';
 import { crearNoticia } from '../src/lib/portalContent.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SECRET = 'secret-test-archivos';
-const DOMINIO = 'cuenta.r2.dev';
 
 /* ---------- SQLite real con las migraciones del proyecto ---------- */
 
@@ -169,8 +168,8 @@ describe('validación de imágenes', () => {it('reconoce los formatos permitidos
     expect(nombreSeguro('config.hero', 'jpg')).toMatch(/^config\/hero\/[a-f0-9]+\.jpg$/);
   });
 
-  it('la url pública de R2 se arma con el dominio del bucket', () => {
-    expect(urlR2(DOMINIO, 'config/hero/abc.jpg')).toBe(`https://${DOMINIO}/config/hero/abc.jpg`);
+  it('la url pública de un archivo propio pasa por el Worker, no por el bucket', () => {
+    expect(urlArchivoPropio(42)).toBe('/i/42');
   });
 });
 
@@ -189,10 +188,10 @@ describe('servicio público de imágenes', () => {
 
   it('404 si la noticia padre es borrador, y sirve cuando se publica', async () => {
     const bucket = r2Falso();
-    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket, R2_PUBLIC_BUCKET_DOMAIN: DOMINIO };
+    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket };
     const a = app(e as Env);
     const noticiaId = await crearNoticia(db, { titulo: 'Foto del complejo', resumen: '', contenido: 'x', imagen: '', autor: '', published_at: null, destacada: false, status: 'draft' });
-    const archivo = await subirArchivo(db, bucket as unknown as R2Bucket, DOMINIO, 'noticia.imagen_principal', noticiaId, bytesDe('image/png'));
+    const archivo = await subirArchivo(db, bucket as unknown as R2Bucket, 'noticia.imagen_principal', noticiaId, bytesDe('image/png'));
 
     // Borrador: ni existe para el público.
     expect((await a.request(`/i/${archivo.archivo_id}`, {}, e as Env)).status).toBe(404);
@@ -242,7 +241,7 @@ describe('servicio público de imágenes', () => {
 describe('subir imagen de una noticia desde el panel', () => {
   it('sube el archivo a R2, guarda el registro y publica la URL', async () => {
     const bucket = r2Falso();
-    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket, R2_PUBLIC_BUCKET_DOMAIN: DOMINIO };
+    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket };
     const a = app(e as Env);
     const cookie = await usuarioYCookie(['PORTAL_NOTICIAS']);
     const id = await crearNoticia(db, { titulo: 'Con foto', resumen: '', contenido: 'x', imagen: '', autor: '', published_at: null, destacada: false, status: 'published' });
@@ -256,7 +255,8 @@ describe('subir imagen de una noticia desde el panel', () => {
     expect(res.status).toBe(302);
 
     const fila = sqlite.prepare('SELECT * FROM portal_noticias WHERE id = ?1').get(id) as { imagen: string };
-    expect(fila.imagen).toMatch(/^https:\/\/cuenta\.r2\.dev\/noticia\/imagen\//);
+    // La URL guardada es la del Worker: el bucket nunca se expone.
+    expect(fila.imagen).toMatch(/^\/i\/\d+$/);
     const arch = sqlite.prepare('SELECT key_r2 FROM portal_archivos WHERE padre_id = ?1').get(id) as { key_r2: string };
     expect(bucket.objetos.has(arch.key_r2)).toBe(true);
 
@@ -267,7 +267,7 @@ describe('subir imagen de una noticia desde el panel', () => {
 
   it('guarda un enlace externo sin tocar R2', async () => {
     const bucket = r2Falso();
-    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket, R2_PUBLIC_BUCKET_DOMAIN: DOMINIO };
+    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket };
     const a = app(e as Env);
     const cookie = await usuarioYCookie(['PORTAL_NOTICIAS']);
     const id = await crearNoticia(db, { titulo: 'Foto link', resumen: '', contenido: 'x', imagen: '', autor: '', published_at: null, destacada: false, status: 'published' });
@@ -285,7 +285,7 @@ describe('subir imagen de una noticia desde el panel', () => {
 
   it('rechaza un archivo que no es imagen y lo dice', async () => {
     const bucket = r2Falso();
-    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket, R2_PUBLIC_BUCKET_DOMAIN: DOMINIO };
+    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket };
     const a = app(e as Env);
     const cookie = await usuarioYCookie(['PORTAL_NOTICIAS']);
     const id = await crearNoticia(db, { titulo: 'No imagen', resumen: '', contenido: 'x', imagen: '', autor: '', published_at: null, destacada: false, status: 'draft' });
@@ -299,11 +299,11 @@ describe('subir imagen de una noticia desde el panel', () => {
 
   it('quitar la imagen borra el archivo y deja el campo vacío', async () => {
     const bucket = r2Falso();
-    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket, R2_PUBLIC_BUCKET_DOMAIN: DOMINIO };
+    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket };
     const a = app(e as Env);
     const cookie = await usuarioYCookie(['PORTAL_NOTICIAS']);
     const id = await crearNoticia(db, { titulo: 'A quitar', resumen: '', contenido: 'x', imagen: '', autor: '', published_at: null, destacada: false, status: 'published' });
-    await subirArchivo(db, bucket as unknown as R2Bucket, DOMINIO, 'noticia.imagen_principal', id, bytesDe('image/png'));
+    await subirArchivo(db, bucket as unknown as R2Bucket, 'noticia.imagen_principal', id, bytesDe('image/png'));
     expect(bucket.objetos.size).toBe(1);
 
     const res = await a.request(`/portal-admin/noticias/${id}/imagen`, form({ accion: 'quitar' }, cookie), e as Env);
@@ -315,7 +315,7 @@ describe('subir imagen de una noticia desde el panel', () => {
 
   it('sin permiso de noticias, la subida responde 403', async () => {
     const bucket = r2Falso();
-    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket, R2_PUBLIC_BUCKET_DOMAIN: DOMINIO };
+    const e = { ...env(), R2_PUBLIC_BUCKET: bucket as unknown as R2Bucket };
     const a = app(e as Env);
     const cookie = await usuarioYCookie(['PORTAL_FOTOS']);
     const id = await crearNoticia(db, { titulo: 'Sin permiso', resumen: '', contenido: 'x', imagen: '', autor: '', published_at: null, destacada: false, status: 'draft' });

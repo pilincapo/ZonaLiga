@@ -1,42 +1,26 @@
 // Imágenes públicas del portal.
 //
-// Ruta /i/{archivo_id}: entrega la imagen pública asociada a un archivo del
-// portal SOLO si el recurso padre está publicado. Si la imagen es externa,
-// redirige (302) a esa URL. Si la imagen está en R2, la sirve con cache headers.
-// Si R2 no está disponible, responde 503 controlado.
+// Ruta /i/{archivo_id}: entrega la imagen SOLO si el archivo está en la vista
+// `portal_archivos_publicos`, que ya exige que su recurso padre esté publicado.
+// Si la imagen es un enlace externo, redirige (302) a esa URL. Si está en R2, la
+// sirve con caché larga. Si R2 no está disponible, responde 503 controlado.
 //
 // No duplica datos: cada archivo vive en portal_archivos (metadatos) y el
-// recurso padre (noticia, galería, página) decide si es público.
+// recurso padre (noticia, galería, foto o página) decide si es público.
 
 import { Hono } from 'hono';
 import type { Env } from '../types.ts';
-import { obtenerArchivoPorId } from '../lib/portalArchivos.ts';
-import { obtenerNoticiaPublica, obtenerGaleriaPublica } from '../lib/portalContent.ts';
+import { archivoEsPublico, obtenerArchivoPorId } from '../lib/portalArchivos.ts';
 
 type PortalImagenesEnv = { Bindings: Env; Variables: Record<string, never> };
 
 export const portalImagenesRoutes = new Hono<PortalImagenesEnv>();
 
-/** ¿Está publicada la página de `portal_pages` con ese id? */
-async function paginaPublica(db: D1Database, id: number): Promise<boolean> {
-  const row = await db
-    .prepare("SELECT id FROM portal_pages WHERE id = ?1 AND status = 'published'")
-    .bind(id)
-    .first<{ id: number }>();
-  return row != null;
-}
-
-/**
- * El archivo solo se sirve si su padre está publicado. Si el padre no existe o
- * está en borrador, se responde 404 (no 403: no queremos confirmar que existe).
- */
-async function padrePublicado(db: D1Database, tipo: string, padreId: number): Promise<boolean> {
-  if (tipo.startsWith('noticia')) return (await obtenerNoticiaPublica(db, padreId)) != null;
-  if (tipo.startsWith('galeria')) return (await obtenerGaleriaPublica(db, padreId)) != null;
-  if (tipo.startsWith('complejo')) return paginaPublica(db, padreId);
-  // Configuración (hero, logo): no tiene padre; depende de que esté marcada pública.
-  return false;
-}
+const NO_DISPONIBLE = (): Response =>
+  new Response('Imagen no disponible en este momento.', {
+    status: 503,
+    headers: { 'Cache-Control': 'no-store' },
+  });
 
 // Se monta en `app.route('/i', portalImagenesRoutes)`, así que la ruta final es /i/:id.
 portalImagenesRoutes.get('/:archivo_id', async (c) => {
@@ -45,26 +29,20 @@ portalImagenesRoutes.get('/:archivo_id', async (c) => {
 
   const archivo = await obtenerArchivoPorId(c.env.DB, archivoId);
   if (!archivo) return c.notFound();
-  if (!(await padrePublicado(c.env.DB, archivo.tipo, archivo.padre_id))) return c.notFound();
+  // Borrador o padre sin publicar: 404 (no 403: no queremos confirmar que existe).
+  if (!(await archivoEsPublico(c.env.DB, archivoId))) return c.notFound();
 
   // Imagen externa: mandamos al visitante a la URL original.
   if (archivo.url_externo) {
     const destino = esHttp(archivo.url_externo) ? archivo.url_externo : null;
-    if (destino) return c.redirect(destino, 302);
-    return c.notFound();
+    return destino ? c.redirect(destino, 302) : c.notFound();
   }
 
   // Imagen en R2: se sirve el objeto con caché larga (el nombre es único por
   // subida, así que la URL nunca cambia de contenido y no hace falta invalidar).
   if (archivo.key_r2) {
     const bucket = c.env.R2_PUBLIC_BUCKET;
-    if (!bucket) {
-      // Sin bucket configurado: no se inventa nada, se dice que no está disponible.
-      return new Response('Imagen no disponible en este momento.', {
-        status: 503,
-        headers: { 'Cache-Control': 'no-store' },
-      });
-    }
+    if (!bucket) return NO_DISPONIBLE();
     try {
       const objeto = await bucket.get(archivo.key_r2);
       if (!objeto) return c.notFound();
@@ -75,14 +53,11 @@ portalImagenesRoutes.get('/:archivo_id', async (c) => {
       return new Response(objeto.body, { status: 200, headers });
     } catch (e) {
       console.error('Error al leer imagen de R2:', e);
-      return new Response('Imagen no disponible en este momento.', {
-        status: 503,
-        headers: { 'Cache-Control': 'no-store' },
-      });
+      return NO_DISPONIBLE();
     }
   }
 
-  // Sin key de R2 ni url externa: si la url pública es http(s), redirigimos.
+  // Sin objeto en R2: si la url guardada es http(s), redirigimos.
   const directa = esHttp(archivo.url_publico) ? archivo.url_publico : null;
   return directa ? c.redirect(directa, 302) : c.notFound();
 });

@@ -92,11 +92,6 @@ export function noticiaFormPage(
     </div>
     <div class="form-row">
       <div class="field">
-        <label for="imagen">Imagen principal</label>
-        <input type="url" id="imagen" name="imagen" maxlength="2000" value="${val('imagen', noticia?.imagen ?? '')}" placeholder="https://…">
-        <p class="hint">Pegá el enlace de una imagen (http o https).</p>
-      </div>
-      <div class="field">
         <label for="autor">Autor</label>
         <input type="text" id="autor" name="autor" maxlength="120" value="${val('autor', noticia?.autor ?? '')}" placeholder="Ej: Comunicación">
       </div>

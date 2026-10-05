@@ -7,11 +7,15 @@
 // esté oculta en la interfaz.
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { Env } from '../types.ts';
 import { clearSessionCookieHeader, getSessionCookie, getSessionPrincipal, sessionSecret } from '../lib/auth.ts';
 import type { PortalPermission } from '../lib/portalAccess.ts';
 import { getPanelUserById, userPortalPermissions } from '../lib/users.ts';
 import { portalAdminPage } from '../ui/portalAdmin.ts';
+import { dashboardPage } from '../ui/portalDashboard.ts';
+import { destacadosPage } from '../ui/portalDestacados.ts';
+import { configuracionPage } from '../ui/portalConfiguracion.ts';
 import { noticiasListPage, noticiaFormPage } from '../ui/portalNoticias.ts';
 import { fotosListPage, galeriaFormPage } from '../ui/portalFotos.ts';
 import { complejoFormPage, torneoFormPage } from '../ui/portalPaginas.ts';
@@ -21,6 +25,7 @@ import {
   actualizarGaleria,
   actualizarImagen,
   actualizarNoticia,
+  actualizarPortadaGaleria,
   cambiarEstadoGaleria,
   cambiarEstadoNoticia,
   crearGaleria,
@@ -39,6 +44,7 @@ import {
   obtenerNoticia,
   obtenerPagina,
   quitarImagen,
+  setImagenComplejo,
   validarGaleria,
   validarImagenGaleria,
   validarNoticia,
@@ -46,8 +52,20 @@ import {
 } from '../lib/portalContent.ts';
 import { galeriaBody, complejoBody, informacionBody, noticiaBody } from '../ui/portalPublic.ts';
 import { portalFormImagen } from '../ui/portalFormImagen.ts';
-import { obtenerArchivoPorPadreYTipo, subirArchivo, eliminarArchivoPorTipoYTipo } from '../lib/portalArchivos.ts';
-import { validarUrlImagen } from '../lib/portalContent.ts';
+import { ASSET_VERSION } from '../ui/components.ts';
+import {
+  CONFIG_ID,
+  PAGINA_COMPLEJO_ID,
+  cargarImagen,
+  eliminarArchivo,
+  eliminarArchivoPorTipoYPadre,
+  esArchivoTipo,
+  obtenerArchivoPorPadreYTipo,
+  subirArchivo,
+  type ArchivoTipo,
+} from '../lib/portalArchivos.ts';
+import { guardarConfig, guardarPortada, leerConfig, leerIds, leerPortada, validarConfig } from '../lib/portalConfig.ts';
+import { resumenPortal } from '../lib/portalResumen.ts';
 
 type PortalEnv = {
   Bindings: Env;
@@ -72,11 +90,47 @@ const SECTIONS: Record<string, { section: Parameters<typeof portalAdminPage>[0];
 };
 
 /** Rutas que renderizan el shell de una sección sin contenido propio. */
-const SHELL_ROUTES: { path: string; route: string }[] = [
-  { path: '/portal-admin', route: '/' },
-  { path: '/portal-admin/destacados', route: '/destacados' },
-  { path: '/portal-admin/configuracion', route: '/configuracion' },
-];
+const IMAGENES_SIN_BUCKET =
+  'Las imágenes subidas todavía no están disponibles en este sitio. Usá un enlace externo por mientras.';
+
+/** Redirige con un mensaje (exito o error) a la pantalla desde la que se viene. */
+function conMensaje(destino: string, mensaje: string, esError = false): Response {
+  return new Response(null, {
+    status: 302,
+    headers: { location: `${destino}?${esError ? 'err' : 'msg'}=${encodeURIComponent(mensaje)}` },
+  });
+}
+
+/**
+ * Guarda una imagen del panel (noticia, galería, complejo o configuración).
+ * `campoUrl` es el nombre del campo del enlace externo que manda el formulario.
+ */
+async function postImagen(
+  c: Context<PortalEnv>,
+  opts: {
+    tipo: ArchivoTipo;
+    padreId: number;
+    campoUrl: string;
+    urlActual: string;
+    esPublico: boolean;
+    destino: string;
+    alGuardar: (url: string) => Promise<void>;
+  },
+): Promise<Response> {
+  const form = await c.req.parseBody({ all: true });
+  const bruto = form[opts.campoUrl];
+  const resultado = await cargarImagen(c.env.DB, {
+    tipo: opts.tipo,
+    padreId: opts.padreId,
+    archivo: form['accion'] === 'quitar' ? 'quitar' : form['archivo'],
+    url: typeof bruto === 'string' ? bruto : '',
+    urlActual: opts.urlActual,
+    esPublico: opts.esPublico,
+    bucket: c.env.R2_PUBLIC_BUCKET ?? null,
+  });
+  await opts.alGuardar(resultado.url);
+  return conMensaje(opts.destino, resultado.mensaje, resultado.error === true);
+}
 
 function portalPath(path: string): string {
   const normalized = path.replace(/\/$/, '') || '/';
@@ -124,14 +178,141 @@ portalAdminRoutes.use('*', async (c, next) => {
   return next();
 });
 
-/* ------------------------------ Shell base ------------------------------ */
+/* ------------------------------ Inicio (resumen) ------------------------------ */
 
-for (const { path, route } of SHELL_ROUTES) {
-  portalAdminRoutes.get(route, async (c) => {
-    const entry = SECTIONS[path]!;
-    return c.html(portalAdminPage(entry.section, c.get('portalPermissions')));
+portalAdminRoutes.get('/', async (c) => {
+  const [resumen, portada, config] = await Promise.all([
+    resumenPortal(c.env.DB),
+    leerPortada(c.env.DB),
+    leerConfig(c.env.DB),
+  ]);
+  const hero = portada.noticia_hero_id != null ? await obtenerNoticia(c.env.DB, portada.noticia_hero_id) : null;
+  return c.html(
+    dashboardPage({
+      permisos: c.get('portalPermissions'),
+      resumen,
+      hero: hero ? { id: hero.id, titulo: hero.titulo, publicada: hero.status === 'published' } : null,
+      config,
+    })
+  );
+});
+
+/* ------------------------------- Destacados ------------------------------- */
+
+portalAdminRoutes.get('/destacados', async (c) => {
+  const [noticias, galerias, portada] = await Promise.all([
+    listarNoticias(c.env.DB),
+    listarGalerias(c.env.DB),
+    leerPortada(c.env.DB),
+  ]);
+  return c.html(
+    destacadosPage({
+      permisos: c.get('portalPermissions'),
+      noticias,
+      galerias,
+      portada,
+      msg: c.req.query('msg'),
+      err: c.req.query('err'),
+    })
+  );
+});
+
+portalAdminRoutes.post('/destacados', async (c) => {
+  // `all: true`: las listas de destacados son checkboxes repetidos.
+  const form = await c.req.parseBody({ all: true });
+  const pedidos = { noticias: leerIds(form, 'destacadas'), galerias: leerIds(form, 'galerias') };
+  const heroCrudo = form['noticia_hero_id'];
+  const guardado = await guardarPortada(c.env.DB, {
+    noticia_hero_id: heroCrudo == null || heroCrudo === '' ? null : Number(heroCrudo),
+    noticias_destacadas: pedidos.noticias,
+    galerias_destacadas: pedidos.galerias,
   });
+  const descartados =
+    pedidos.noticias.length - guardado.noticias_destacadas.length +
+    (pedidos.galerias.length - guardado.galerias_destacadas.length) +
+    (portadaHeroPedido(heroCrudo) && guardado.noticia_hero_id == null ? 1 : 0);
+  return conMensaje(
+    '/portal-admin/destacados',
+    descartados > 0
+      ? 'Guardado. Se descartaron los destacados que ya no existen.'
+      : 'Destacados guardados'
+  );
+});
+
+/** ¿Se eligió una noticia como principal en el formulario? */
+function portadaHeroPedido(bruto: unknown): boolean {
+  return bruto != null && bruto !== '' && Number(bruto) > 0;
 }
+
+/* ----------------------------- Configuración ----------------------------- */
+
+portalAdminRoutes.get('/configuracion', async (c) => {
+  const [config, hero, logo] = await Promise.all([
+    leerConfig(c.env.DB),
+    obtenerArchivoPorPadreYTipo(c.env.DB, 'config.hero', CONFIG_ID),
+    obtenerArchivoPorPadreYTipo(c.env.DB, 'config.logo', CONFIG_ID),
+  ]);
+  const url = (a: typeof hero) => (a ? { url: a.url_publico, id: a.archivo_id } : null);
+  return c.html(
+    configuracionPage({
+      permisos: c.get('portalPermissions'),
+      config,
+      hero: url(hero),
+      logo: url(logo),
+      bucketDisponible: c.env.R2_PUBLIC_BUCKET != null,
+      msg: c.req.query('msg'),
+      err: c.req.query('err'),
+    })
+  );
+});
+
+portalAdminRoutes.post('/configuracion', async (c) => {
+  const form = await c.req.parseBody({ all: true });
+  const v = validarConfig(form);
+  if (!v.ok || !v.value) {
+    const [config, hero, logo] = await Promise.all([
+      leerConfig(c.env.DB),
+      obtenerArchivoPorPadreYTipo(c.env.DB, 'config.hero', CONFIG_ID),
+      obtenerArchivoPorPadreYTipo(c.env.DB, 'config.logo', CONFIG_ID),
+    ]);
+    const url = (a: typeof hero) => (a ? { url: a.url_publico, id: a.archivo_id } : null);
+    return c.html(
+      configuracionPage({
+        permisos: c.get('portalPermissions'),
+        config,
+        hero: url(hero),
+        logo: url(logo),
+        bucketDisponible: c.env.R2_PUBLIC_BUCKET != null,
+        err: v.error ?? 'Revisá los datos del formulario',
+      }),
+      400
+    );
+  }
+  await guardarConfig(c.env.DB, v.value);
+  return conMensaje(
+    '/portal-admin/configuracion',
+    v.value.status === 'published' ? 'Configuración publicada' : 'Configuración guardada como borrador'
+  );
+});
+
+portalAdminRoutes.post('/configuracion/imagen', async (c) => {
+  const tipo = c.req.query('tipo');
+  if (!esArchivoTipo(tipo) || (tipo !== 'config.hero' && tipo !== 'config.logo')) {
+    return conMensaje('/portal-admin/configuracion', 'Esa imagen no existe en la configuración', true);
+  }
+  const config = await leerConfig(c.env.DB);
+  const actual = await obtenerArchivoPorPadreYTipo(c.env.DB, tipo, CONFIG_ID);
+  return postImagen(c, {
+    tipo,
+    padreId: CONFIG_ID,
+    campoUrl: `${tipo}__url_externo`,
+    urlActual: actual?.url_publico ?? '',
+    esPublico: config.status === 'published',
+    destino: '/portal-admin/configuracion',
+    // La imagen del portal no vive en una columna: se lee por tipo y padre.
+    alGuardar: async () => {},
+  });
+});
 
 /* ------------------------------- Noticias ------------------------------- */
 
@@ -148,8 +329,12 @@ portalAdminRoutes.post('/noticias', async (c) => {
   const form = await c.req.parseBody();
   const v = validarNoticia(form);
   if (!v.ok) return c.html(noticiaFormPage(null, c.get('portalPermissions'), { valores: form, err: v.error }), 400);
-  const id = await crearNoticia(c.env.DB, v.value);
-  return c.redirect(`/portal-admin/noticias?msg=${encodeURIComponent(v.value.status === 'published' ? 'Noticia publicada' : 'Noticia guardada como borrador')}`);
+  // La imagen se sube en su propio formulario: nunca viene en este.
+  const id = await crearNoticia(c.env.DB, { ...v.value, imagen: '' });
+  return conMensaje(
+    '/portal-admin/noticias',
+    v.value.status === 'published' ? 'Noticia publicada' : 'Noticia guardada como borrador'
+  );
 });
 
 portalAdminRoutes.get('/noticias/:id', async (c) => {
@@ -165,7 +350,7 @@ portalAdminRoutes.get('/noticias/:id', async (c) => {
     archivoId: archivo?.archivo_id ?? null,
     urlActual: archivo ? archivo.url_publico : noticia.imagen || null,
     esExterno: archivo ? archivo.url_externo != null : noticia.imagen !== '',
-    puedeSubir: true,
+    puedeSubir: c.env.R2_PUBLIC_BUCKET != null,
     help: 'Pegá el enlace de una imagen que ya está en internet, o subí un archivo desde tu dispositivo.',
   });
   return c.html(noticiaFormPage(noticia, c.get('portalPermissions'), { err: c.req.query('err'), contentExtra: imagenField }));
@@ -180,74 +365,40 @@ portalAdminRoutes.get('/noticias/:id', async (c) => {
 portalAdminRoutes.post('/noticias/:id/imagen', async (c) => {
   const id = Number(c.req.param('id'));
   const noticia = await obtenerNoticia(c.env.DB, id);
-  if (!noticia) return c.redirect('/portal-admin/noticias?err=' + encodeURIComponent('Esa noticia no existe'));
-
-  const form = await c.req.parseBody({ all: true });
-  const volver = (msg: string, esError = false) =>
-    c.redirect(`/portal-admin/noticias/${id}?${esError ? 'err' : 'msg'}=${encodeURIComponent(msg)}`);
-
-  const archivo = form['archivo'];
-  const urlCruda = form['noticia.imagen_principal__url_externo'];
-  const url = typeof urlCruda === 'string' ? urlCruda.trim() : '';
-
-  // 1) Quitar la imagen (sube el botón "Quitar imagen" del bloque).
-  if (form['accion'] === 'quitar') {
-    await eliminarArchivoPorTipoYTipo(c.env.DB, c.env.R2_PUBLIC_BUCKET ?? null, 'noticia.imagen_principal', id);
-    await c.env.DB.prepare('UPDATE portal_noticias SET imagen = ?1 WHERE id = ?2').bind('', id).run();
-    return volver('Imagen quitada');
-  }
-
-  // 2) Archivo del dispositivo → R2.
-  if (archivo instanceof File && archivo.size > 0) {
-    if (!c.env.R2_PUBLIC_BUCKET || !c.env.R2_PUBLIC_BUCKET_DOMAIN) {
-      return volver('Las imágenes subidas todavía no están disponibles en este sitio. Usá un enlace externo por ahora.', true);
-    }
-    try {
-      const buffer = await archivo.arrayBuffer();
-      await subirArchivo(
-        c.env.DB,
-        c.env.R2_PUBLIC_BUCKET,
-        c.env.R2_PUBLIC_BUCKET_DOMAIN,
-        'noticia.imagen_principal',
-        id,
-        buffer,
-        archivo.type || undefined,
-        noticia.status === 'published' ? 1 : 0
-      );
-    } catch (e) {
-      console.error('No se pudo subir la imagen:', e);
-      return volver(e instanceof Error ? e.message : 'No se pudo subir la imagen', true);
-    }
-    // El campo imagen guarda la URL que se sirve (la del bucket).
-    const nuevo = await obtenerArchivoPorPadreYTipo(c.env.DB, 'noticia.imagen_principal', id);
-    await c.env.DB.prepare('UPDATE portal_noticias SET imagen = ?1 WHERE id = ?2').bind(nuevo?.url_publico ?? '', id).run();
-    return volver('Imagen cargada');
-  }
-
-  // 3) Enlace externo (o el que ya estaba, si el campo vino vacío).
-  if (url !== '') {
-    const v = validarUrlImagen(url);
-    if (!v.ok) return volver(v.error, true);
-    await c.env.DB.prepare('DELETE FROM portal_archivos WHERE tipo = ?1 AND padre_id = ?2')
-      .bind('noticia.imagen_principal', id).run();
-    await c.env.DB.prepare('UPDATE portal_noticias SET imagen = ?1 WHERE id = ?2').bind(v.value, id).run();
-    return volver('Imagen actualizada con el enlace externo');
-  }
-
-  return volver('No se recibió una imagen nueva');
+  if (!noticia) return conMensaje('/portal-admin/noticias', 'Esa noticia no existe', true);
+  return postImagen(c, {
+    tipo: 'noticia.imagen_principal',
+    padreId: id,
+    campoUrl: 'noticia.imagen_principal__url_externo',
+    urlActual: noticia.imagen,
+    esPublico: noticia.status === 'published',
+    destino: `/portal-admin/noticias/${id}`,
+    alGuardar: async (url) => {
+      await c.env.DB.prepare('UPDATE portal_noticias SET imagen = ?1 WHERE id = ?2').bind(url, id).run();
+    },
+  });
 });
 
 portalAdminRoutes.post('/noticias/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const noticia = await obtenerNoticia(c.env.DB, id);
-  if (!noticia) return c.redirect('/portal-admin/noticias?err=' + encodeURIComponent('Esa noticia no existe'));
+  if (!noticia) return conMensaje('/portal-admin/noticias', 'Esa noticia no existe', true);
   const form = await c.req.parseBody();
   const v = validarNoticia(form);
   if (!v.ok) return c.html(noticiaFormPage(noticia, c.get('portalPermissions'), { valores: form, err: v.error }), 400);
-  const estado: EstadoContenido = typeof form['status'] === 'string' && form['status'] === 'published' ? 'published' : 'draft';
-  await actualizarNoticia(c.env.DB, id, { ...v.value, status: estado });
-  return c.redirect(`/portal-admin/noticias?msg=${encodeURIComponent(estado === 'published' ? 'Noticia publicada' : 'Noticia guardada como borrador')}`);
+  const estado: EstadoContenido = estadoDeForm(form);
+  // La imagen se sube en su propio formulario: acá se conserva la que hay.
+  await actualizarNoticia(c.env.DB, id, { ...v.value, imagen: noticia.imagen, status: estado });
+  return conMensaje(
+    '/portal-admin/noticias',
+    estado === 'published' ? 'Noticia publicada' : 'Noticia guardada como borrador'
+  );
 });
+
+/** Estado que salió del botón que se apretó (publicar o guardar borrador). */
+function estadoDeForm(form: Record<string, unknown>): EstadoContenido {
+  return form['status'] === 'published' ? 'published' : 'draft';
+}
 
 portalAdminRoutes.post('/noticias/:id/publicar', async (c) => {
   await cambiarEstadoNoticia(c.env.DB, Number(c.req.param('id')), 'published');
@@ -298,24 +449,67 @@ portalAdminRoutes.post('/fotos', async (c) => {
 portalAdminRoutes.get('/fotos/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const galeria = await obtenerGaleria(c.env.DB, id);
-  if (!galeria) return c.redirect('/portal-admin/fotos?err=' + encodeURIComponent('Esa galería no existe'));
-  const imagenes = await listarImagenes(c.env.DB, id);
-  return c.html(galeriaFormPage(galeria, imagenes, c.get('portalPermissions'), { msg: c.req.query('msg'), err: c.req.query('err') }));
+  if (!galeria) return conMensaje('/portal-admin/fotos', 'Esa galería no existe', true);
+  const [imagenes, portada] = await Promise.all([
+    listarImagenes(c.env.DB, id),
+    obtenerArchivoPorPadreYTipo(c.env.DB, 'galeria.portada', id),
+  ]);
+  const imagenField = galeria
+    ? portalFormImagen({
+        accionUrl: `/portal-admin/fotos/${id}/portada`,
+        clase: 'portal-img',
+        tipoArchivo: 'galeria.portada',
+        archivoId: portada?.archivo_id ?? null,
+        urlActual: portada ? portada.url_publico : galeria.portada || null,
+        esExterno: portada ? portada.url_externo != null : galeria.portada !== '',
+        puedeSubir: c.env.R2_PUBLIC_BUCKET != null,
+        etiquetaQuitar: 'portada de la galería',
+        help: 'Si no ponés ninguna, se usa la primera foto de la galería.',
+      })
+    : '';
+  return c.html(
+    galeriaFormPage(galeria, imagenes, c.get('portalPermissions'), {
+      msg: c.req.query('msg'),
+      err: c.req.query('err'),
+      contentExtra: imagenField,
+      bucketDisponible: c.env.R2_PUBLIC_BUCKET != null,
+    })
+  );
+});
+
+/** Imagen de portada de la galería (subida a R2 o enlace externo). */
+portalAdminRoutes.post('/fotos/:id/portada', async (c) => {
+  const id = Number(c.req.param('id'));
+  const galeria = await obtenerGaleria(c.env.DB, id);
+  if (!galeria) return conMensaje('/portal-admin/fotos', 'Esa galería no existe', true);
+  return postImagen(c, {
+    tipo: 'galeria.portada',
+    padreId: id,
+    campoUrl: 'galeria.portada__url_externo',
+    urlActual: galeria.portada,
+    esPublico: galeria.status === 'published',
+    destino: `/portal-admin/fotos/${id}`,
+    alGuardar: (url) => actualizarPortadaGaleria(c.env.DB, id, url),
+  });
 });
 
 portalAdminRoutes.post('/fotos/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const galeria = await obtenerGaleria(c.env.DB, id);
-  if (!galeria) return c.redirect('/portal-admin/fotos?err=' + encodeURIComponent('Esa galería no existe'));
+  if (!galeria) return conMensaje('/portal-admin/fotos', 'Esa galería no existe', true);
   const form = await c.req.parseBody();
   const v = validarGaleria(form);
   if (!v.ok) {
     const imagenes = await listarImagenes(c.env.DB, id);
     return c.html(galeriaFormPage(galeria, imagenes, c.get('portalPermissions'), { valores: form, err: v.error }), 400);
   }
-  const estado: EstadoContenido = typeof form['status'] === 'string' && form['status'] === 'published' ? 'published' : 'draft';
-  await actualizarGaleria(c.env.DB, id, { ...v.value, status: estado });
-  return c.redirect(`/portal-admin/fotos/${id}?msg=${encodeURIComponent(estado === 'published' ? 'Galería publicada' : 'Galería guardada como borrador')}`);
+  const estado = estadoDeForm(form);
+  // La portada se sube en su propio formulario: acá se conserva la que hay.
+  await actualizarGaleria(c.env.DB, id, { ...v.value, portada: galeria.portada, status: estado });
+  return conMensaje(
+    `/portal-admin/fotos/${id}`,
+    estado === 'published' ? 'Galería publicada' : 'Galería guardada como borrador'
+  );
 });
 
 portalAdminRoutes.post('/fotos/:id/publicar', async (c) => {
@@ -329,8 +523,18 @@ portalAdminRoutes.post('/fotos/:id/despublicar', async (c) => {
 });
 
 portalAdminRoutes.post('/fotos/:id/eliminar', async (c) => {
-  await eliminarGaleria(c.env.DB, Number(c.req.param('id')));
-  return c.redirect('/portal-admin/fotos?msg=' + encodeURIComponent('Galería eliminada'));
+  const id = Number(c.req.param('id'));
+  const galeria = await obtenerGaleria(c.env.DB, id);
+  if (!galeria) return conMensaje('/portal-admin/fotos', 'Esa galería no existe', true);
+  // Primero se borran los archivos de R2: después ya no queda registro de ellos.
+  const bucket = c.env.R2_PUBLIC_BUCKET ?? null;
+  const imagenes = await listarImagenes(c.env.DB, id);
+  for (const img of imagenes) {
+    if (img.archivo_id != null) await eliminarArchivo(c.env.DB, bucket, img.archivo_id);
+  }
+  await eliminarArchivoPorTipoYPadre(c.env.DB, bucket, 'galeria.portada', id);
+  await eliminarGaleria(c.env.DB, id);
+  return conMensaje('/portal-admin/fotos', 'Galería eliminada');
 });
 
 portalAdminRoutes.get('/fotos/:id/vista-previa', async (c) => {
@@ -341,25 +545,62 @@ portalAdminRoutes.get('/fotos/:id/vista-previa', async (c) => {
   return c.html(previewHtml('fotos', galeriaBody(galeria, imagenes), galeria.status));
 });
 
+/**
+ * Agrega una foto a la galería: un archivo del dispositivo (que va a R2) o un
+ * enlace de internet. La foto se crea primero para tener su id (que es el padre
+ * del archivo en R2) y se completa la URL después; si la subida falla, la fila
+ * se borra y no queda nada a medio hacer.
+ */
 portalAdminRoutes.post('/fotos/:id/imagenes', async (c) => {
   const id = Number(c.req.param('id'));
   const galeria = await obtenerGaleria(c.env.DB, id);
-  if (!galeria) return c.redirect('/portal-admin/fotos?err=' + encodeURIComponent('Esa galería no existe'));
-  const form = await c.req.parseBody();
+  if (!galeria) return conMensaje('/portal-admin/fotos', 'Esa galería no existe', true);
+  const destino = `/portal-admin/fotos/${id}`;
+  const form = await c.req.parseBody({ all: true });
+  const archivo = form['archivo'];
+  const caption = typeof form['caption'] === 'string' ? form['caption'] : '';
+
+  if (archivo instanceof File && archivo.size > 0) {
+    const bucket = c.env.R2_PUBLIC_BUCKET;
+    if (!bucket) return conMensaje(destino, IMAGENES_SIN_BUCKET, true);
+    const fotoId = await agregarImagen(c.env.DB, id, '', caption);
+    try {
+      const buffer = await archivo.arrayBuffer();
+      const guardado = await subirArchivo(
+        c.env.DB,
+        bucket,
+        'galeria.foto',
+        fotoId,
+        buffer,
+        archivo.type || undefined,
+        galeria.status === 'published' ? 1 : 0
+      );
+      await c.env.DB
+        .prepare('UPDATE portal_gallery_images SET url = ?1, archivo_id = ?2 WHERE id = ?3')
+        .bind(guardado.url_publico, guardado.archivo_id, fotoId)
+        .run();
+      return conMensaje(destino, 'Foto cargada');
+    } catch (e) {
+      console.error('No se pudo subir la foto:', e);
+      await quitarImagen(c.env.DB, fotoId);
+      return conMensaje(destino, e instanceof Error ? e.message : 'No se pudo subir la foto', true);
+    }
+  }
+
   const v = validarImagenGaleria(form);
-  if (!v.ok) return c.redirect(`/portal-admin/fotos/${id}?err=${encodeURIComponent(v.error)}`);
+  if (!v.ok) return conMensaje(destino, v.error, true);
   await agregarImagen(c.env.DB, id, v.value.url, v.value.caption);
-  return c.redirect(`/portal-admin/fotos/${id}?msg=${encodeURIComponent('Foto agregada')}`);
+  return conMensaje(destino, 'Foto agregada');
 });
 
 portalAdminRoutes.post('/fotos/:id/imagenes/:imgId', async (c) => {
   const id = Number(c.req.param('id'));
   const form = await c.req.parseBody();
   const v = validarImagenGaleria(form);
-  if (!v.ok) return c.redirect(`/portal-admin/fotos/${id}?err=${encodeURIComponent(v.error)}`);
+  if (!v.ok) return conMensaje(`/portal-admin/fotos/${id}`, v.error, true);
   // Permite corregir el enlace y el pie de una foto existente.
   await actualizarImagen(c.env.DB, Number(c.req.param('imgId')), v.value.url, v.value.caption);
-  return c.redirect(`/portal-admin/fotos/${id}?msg=${encodeURIComponent('Foto actualizada')}`);
+  return conMensaje(`/portal-admin/fotos/${id}`, 'Foto actualizada');
 });
 
 portalAdminRoutes.post('/fotos/:id/imagenes/:imgId/mover', async (c) => {
@@ -367,20 +608,57 @@ portalAdminRoutes.post('/fotos/:id/imagenes/:imgId/mover', async (c) => {
   const form = await c.req.parseBody();
   const dir = form['dir'] === 'up' ? 'up' : 'down';
   await moverImagen(c.env.DB, id, Number(c.req.param('imgId')), dir);
-  return c.redirect(`/portal-admin/fotos/${id}?msg=${encodeURIComponent('Orden actualizado')}`);
+  return conMensaje(`/portal-admin/fotos/${id}`, 'Orden actualizado');
 });
 
 portalAdminRoutes.post('/fotos/:id/imagenes/:imgId/eliminar', async (c) => {
   const id = Number(c.req.param('id'));
-  await quitarImagen(c.env.DB, Number(c.req.param('imgId')));
-  return c.redirect(`/portal-admin/fotos/${id}?msg=${encodeURIComponent('Foto quitada')}`);
+  // Si la foto estaba subida, se borra también el archivo de R2.
+  const archivoId = await quitarImagen(c.env.DB, Number(c.req.param('imgId')));
+  if (archivoId != null) await eliminarArchivo(c.env.DB, c.env.R2_PUBLIC_BUCKET ?? null, archivoId);
+  return conMensaje(`/portal-admin/fotos/${id}`, 'Foto quitada');
 });
 
 /* ------------------------------ Páginas ------------------------------ */
 
 portalAdminRoutes.get('/complejo', async (c) => {
   const pagina = await obtenerPagina(c.env.DB, 'complejo');
-  return c.html(complejoFormPage(pagina, c.get('portalPermissions'), { msg: c.req.query('msg'), err: c.req.query('err') }));
+  const imagen = await obtenerArchivoPorPadreYTipo(c.env.DB, 'complejo.imagen', PAGINA_COMPLEJO_ID);
+  const imagenField = portalFormImagen({
+    accionUrl: '/portal-admin/complejo/imagen',
+    clase: 'portal-img',
+    tipoArchivo: 'complejo.imagen',
+    archivoId: imagen?.archivo_id ?? null,
+    urlActual: imagen ? imagen.url_publico : (pagina ? ((pagina.data as { imagen?: string }).imagen ?? '') || null : null),
+    esExterno: imagen ? imagen.url_externo != null : Boolean((pagina?.data as { imagen?: string } | undefined)?.imagen),
+    puedeSubir: c.env.R2_PUBLIC_BUCKET != null,
+    etiquetaQuitar: 'imagen del complejo',
+    help: 'Es la foto de cabecera de la página pública del complejo.',
+  });
+  return c.html(
+    complejoFormPage(pagina, c.get('portalPermissions'), {
+      msg: c.req.query('msg'),
+      err: c.req.query('err'),
+      contentExtra: imagenField,
+    })
+  );
+});
+
+/** Imagen de cabecera del complejo (subida a R2 o enlace externo). */
+portalAdminRoutes.post('/complejo/imagen', async (c) => {
+  const pagina = await obtenerPagina(c.env.DB, 'complejo');
+  const actual = (pagina ? ((pagina.data as { imagen?: string }).imagen ?? '') : '');
+  return postImagen(c, {
+    tipo: 'complejo.imagen',
+    padreId: PAGINA_COMPLEJO_ID,
+    campoUrl: 'complejo.imagen__url_externo',
+    urlActual: actual,
+    esPublico: pagina?.status === 'published',
+    destino: '/portal-admin/complejo',
+    alGuardar: async (url) => {
+      await setImagenComplejo(c.env.DB, url);
+    },
+  });
 });
 
 portalAdminRoutes.post('/complejo', async (c) => {
@@ -388,9 +666,15 @@ portalAdminRoutes.post('/complejo', async (c) => {
   // (inst_nombre, inst_detalle) y sin esto Hono se queda solo con el último.
   const form = await c.req.parseBody({ all: true });
   const data = leerComplejoForm(form);
+  // La imagen se sube en su propio formulario: acá se conserva la que hay.
+  const actual = await obtenerPagina(c.env.DB, 'complejo');
+  data.imagen = actual ? ((actual.data as { imagen?: string }).imagen ?? '') : '';
   const status = estadoPagina(form);
   await guardarPagina(c.env.DB, 'complejo', data, status);
-  return c.redirect(`/portal-admin/complejo?msg=${encodeURIComponent(status === 'published' ? 'Página publicada' : 'Página guardada como borrador')}`);
+  return conMensaje(
+    '/portal-admin/complejo',
+    status === 'published' ? 'Página publicada' : 'Página guardada como borrador'
+  );
 });
 
 portalAdminRoutes.get('/complejo/vista-previa', async (c) => {
@@ -409,7 +693,10 @@ portalAdminRoutes.post('/torneo', async (c) => {
   const data = leerTorneoForm(form);
   const status = estadoPagina(form);
   await guardarPagina(c.env.DB, 'torneo', data, status);
-  return c.redirect(`/portal-admin/torneo?msg=${encodeURIComponent(status === 'published' ? 'Página publicada' : 'Página guardada como borrador')}`);
+  return conMensaje(
+    '/portal-admin/torneo',
+    status === 'published' ? 'Página publicada' : 'Página guardada como borrador'
+  );
 });
 
 portalAdminRoutes.get('/torneo/vista-previa', async (c) => {
@@ -452,7 +739,7 @@ function previewHtml(section: 'noticias' | 'fotos' | 'complejo' | 'torneo', body
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
-<link rel="stylesheet" href="/css/app.css?v=67">
+<link rel="stylesheet" href="/css/app.css?v=${ASSET_VERSION}">
 </head>
 <body>
 <div class="portal-preview-bar">

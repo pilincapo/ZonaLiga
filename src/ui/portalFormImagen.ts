@@ -25,8 +25,12 @@ export interface PortalFormImagenOpts {
   urlActual: string | null;
   /** Si la imagen actual viene de un enlace externo. */
   esExterno?: boolean;
-  /** Si se puede subir un archivo desde el dispositivo. */
+  /** Si se puede subir un archivo desde el dispositivo (hay bucket configurado). */
   puedeSubir?: boolean;
+  /** Título del bloque. */
+  titulo?: string;
+  /** Qué se está quitando, en la pregunta de confirmación. */
+  etiquetaQuitar?: string;
   /** Texto del botón de carga. */
   labelCargar?: string;
   /** Ayuda bajo el campo de enlace. */
@@ -45,29 +49,31 @@ export function portalFormImagen(opts: PortalFormImagenOpts): string {
          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="2.4"/><circle cx="8.6" cy="8.6" r="1.7"/><path d="M20.5 18.5l-4.4-4.4" stroke-linecap="round"/></svg>
          <span>Sin imagen</span></div>`;
 
+  const quitar = url
+    ? `<button class="btn btn-ghost btn-sm" type="submit" name="accion" value="quitar" onclick="return confirm('¿Quitar ${esc(opts.etiquetaQuitar ?? 'la imagen')}?')">Quitar imagen</button>`
+    : '';
+
+  const archivo = opts.puedeSubir
+    ? `<div class="${clase}__campo">
+    <label for="${clase}-file">Subir un archivo</label>
+    <input type="file" id="${clase}-file" name="archivo" accept="image/jpeg,image/png,image/webp,image/gif">
+    <p class="hint">JPG, PNG, WebP o GIF, hasta 8 MB.</p>
+  </div>`
+    : `<p class="hint">En este sitio todavía no se pueden subir archivos: usá el enlace de una imagen que ya esté en internet.</p>`;
+
   return `
 <form class="${clase}" method="post" action="${escUrl(opts.accionUrl)}" enctype="multipart/form-data">
-  <h2 class="${clase}__title">Imagen</h2>
+  <h2 class="${clase}__title">${esc(opts.titulo ?? 'Imagen')}</h2>
   ${preview}
   <div class="${clase}__campo">
     <label for="${clase}-url">Enlace de la imagen</label>
     <input type="url" id="${clase}-url" name="${esc(opts.tipoArchivo)}__url_externo" value="${escUrl(url)}" maxlength="2000" placeholder="https://…">
     <p class="hint">${esc(opts.help ?? 'Pegá el enlace de una imagen, o subí un archivo desde tu dispositivo.')}</p>
   </div>
-  ${
-    opts.puedeSubir
-      ? `<div class="${clase}__campo">
-    <label for="${clase}-file">Subir un archivo</label>
-    <input type="file" id="${clase}-file" name="archivo" accept="image/jpeg,image/png,image/webp,image/gif">
-    <p class="hint">JPG, PNG, WebP o GIF, hasta 8 MB.</p>
-  </div>
+  ${archivo}
   <div class="${clase}__acciones">
-    <button class="btn btn-primary btn-sm" type="submit">Guardar imagen</button>
-    <button class="btn btn-ghost btn-sm" type="submit" name="accion" value="quitar" onclick="return confirm('¿Quitar la imagen de esta noticia?')">Quitar imagen</button>
-  </div>`
-      : `<div class="${clase}__acciones">
-    <button class="btn btn-primary btn-sm" type="submit">Guardar enlace</button>
-  </div>`
-  }
+    <button class="btn btn-primary btn-sm" type="submit">${esc(opts.labelCargar ?? 'Guardar imagen')}</button>
+    ${quitar}
+  </div>
 </form>`;
 }

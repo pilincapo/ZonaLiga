@@ -12,6 +12,14 @@ database_id = "8f8b91c7-7473-4d50-88fd-d996dbd2583e"
 directory = "./public"
 binding = "ASSETS"
 
+# Imágenes del portal (Fase 18.3). El bucket es PRIVADO a propósito: las
+# imágenes se sirven siempre desde el Worker en /i/{id}, que primero verifica
+# que el recurso padre esté publicado. Así un borrador no es accesible ni por
+# URL directa, y no hace falta exponer el bucket en Internet.
+[[r2_buckets]]
+binding = "R2_PUBLIC_BUCKET"
+bucket_name = "zona-liga-imagenes"
+
 [vars]
 # Cuánto se guarda en caché cada página pública (ver src/lib/cache.ts).
 # Un minuto alcanza: las posiciones y el fixture cambian cuando se carga un

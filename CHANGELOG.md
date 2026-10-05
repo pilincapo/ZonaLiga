@@ -13,6 +13,34 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.7] — 2026-10-05 — Portal con fotos reales y portada nueva (Fase 18.3 completa)
+
+### Nuevo
+
+- **Las imágenes se suben desde el panel en todos lados**: noticias, fotos de galería, portada de galería, imagen del complejo, imagen principal del portal y logo. Es elegir el archivo en el dispositivo y listo. Los enlaces de internet siguen funcionando igual, así que nada de lo cargado antes se rompe.
+- **La imagen principal del portal ya se usa de verdad**: es el fondo de la portada de `/`. Si no hay ninguna, se usa la foto del complejo; si tampoco, queda el fondo de marca.
+- **Sección "Destacados"** (Portal → Destacados): se elige qué noticia es la principal de la portada y qué noticias y galerías salen destacadas. Lo que está en borrador nunca aparece en el sitio, aunque quede tildado.
+- **Sección "Configuración"** (Portal → Configuración): nombre del portal, descripción, contacto (WhatsApp y teléfono), redes, texto del pie y qué se muestra en la portada. Todo se valida en el servidor (los enlaces tienen que empezar con `https://`).
+- **Resumen del portal** en la pantalla de inicio del panel: cuántas noticias y galerías hay publicadas, cuántas en borrador, cuántas imágenes tiene el sitio, qué está destacado en la portada y si la configuración está publicada, con avisos concretos de lo que falta.
+- **Portada nueva**: arranca con el hero del complejo y la identidad ZonaLiga, sigue con las noticias destacadas, los próximos partidos, los últimos resultados y las posiciones, y cierra con las últimas fotos, el complejo y la información del torneo. Cada bloque aparece solo si hay contenido: no hay secciones vacías ni textos de relleno.
+- **Base de datos**: nueva migración que vincula cada foto subida de galería con su archivo, para poder borrarla junto con la foto sin dejar basura en el almacenamiento.
+
+### Mejora
+
+- **Las imágenes quedan mejor todavía**: al subir una imagen nueva se borra la anterior del almacenamiento (no quedan archivos huérfanos) y al eliminar una foto o una galería también se borra su imagen.
+- **Editar el texto ya no borra la imagen**: los formularios de noticia, galería y complejo conservaban el campo de imagen y al guardar lo pisaban. Ahora la imagen se maneja en su propio bloque.
+- **Páginas públicas del portal másprofesional**: cabeceras navy con fotografía en Noticias, Fotos, El complejo e Información del torneo, tarjetas de datos con ícono, mejor legibilidad en el teléfono y sin scroll horizontal a 360 px.
+
+### Arreglo
+
+- El pie del sitio se desbordaba a lo ancho en teléfonos de 360 px.
+- Las casillas de permisos y de destacados se leían amontonadas: ahora son una opción por fila.
+
+### Infraestructura
+
+- **Bucket de imágenes creado**: `zona-liga-imagenes` en Cloudflare R2. Es privado a propósito: las imágenes se sirven siempre desde el sitio (`/i/{id}`), que primero verifica que estén publicadas, así que un borrador no es accesible ni por URL directa.
+
+---
 ## [0.4.6] — 2026-10-05 — Imágenes del portal (primera parte de la Fase 18.3)
 
 ### Nuevo

@@ -49,6 +49,8 @@ export interface ImagenGaleria {
   url: string;
   caption: string;
   orden: number;
+  /** Archivo de R2 que backs esta foto, si se subió en vez de enlazarse. */
+  archivo_id: number | null;
 }
 
 /** Campos del Complejo (página 'complejo'). */
@@ -524,6 +526,27 @@ export async function eliminarGaleria(db: D1Database, id: number): Promise<void>
   ]);
 }
 
+/** Cambia la URL de la imagen de portada de una galería. */
+export async function actualizarPortadaGaleria(db: D1Database, id: number, portada: string): Promise<void> {
+  await db
+    .prepare("UPDATE portal_galleries SET portada = ?1, updated_at = datetime('now') WHERE id = ?2")
+    .bind(portada, id)
+    .run();
+}
+
+/**
+ * Cambia solo la imagen de la página del complejo, sin tocar el resto del
+ * contenido editorial (la imagen se sube en su propio formulario, aparte del
+ * texto, para no perder lo que se está escribiendo).
+ */
+export async function setImagenComplejo(db: D1Database, imagen: string): Promise<boolean> {
+  const res = await db
+    .prepare("UPDATE portal_pages SET data = json_set(data, '$.imagen', ?1), updated_at = datetime('now') WHERE slug = 'complejo'")
+    .bind(imagen)
+    .run();
+  return Number(res.meta.changes ?? 0) > 0;
+}
+
 /* ------------------------------ Imágenes ------------------------------ */
 
 function mapImagen(row: Record<string, unknown>): ImagenGaleria {
@@ -533,6 +556,7 @@ function mapImagen(row: Record<string, unknown>): ImagenGaleria {
     url: String(row['url'] ?? ''),
     caption: String(row['caption'] ?? ''),
     orden: Number(row['orden'] ?? 0),
+    archivo_id: row['archivo_id'] == null ? null : Number(row['archivo_id']),
   };
 }
 
@@ -544,19 +568,36 @@ export async function listarImagenes(db: D1Database, galleryId: number): Promise
   return (results ?? []).map(mapImagen);
 }
 
-export async function agregarImagen(db: D1Database, galleryId: number, url: string, caption: string): Promise<void> {
+export async function agregarImagen(
+  db: D1Database,
+  galleryId: number,
+  url: string,
+  caption: string,
+  archivoId: number | null = null,
+): Promise<number> {
   const max = await db
     .prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM portal_gallery_images WHERE gallery_id = ?1')
     .bind(galleryId)
     .first<{ m: number }>();
-  await db
-    .prepare('INSERT INTO portal_gallery_images (gallery_id, url, caption, orden) VALUES (?1, ?2, ?3, ?4)')
-    .bind(galleryId, url, caption, Number(max?.m ?? 0) + 1)
+  const res = await db
+    .prepare('INSERT INTO portal_gallery_images (gallery_id, url, caption, orden, archivo_id) VALUES (?1, ?2, ?3, ?4, ?5)')
+    .bind(galleryId, url, caption, Number(max?.m ?? 0) + 1, archivoId)
     .run();
+  return Number(res.meta.last_row_id ?? 0);
 }
 
-export async function quitarImagen(db: D1Database, imageId: number): Promise<void> {
+export async function obtenerImagen(db: D1Database, imageId: number): Promise<ImagenGaleria | null> {
+  if (!Number.isInteger(imageId) || imageId <= 0) return null;
+  const row = await db.prepare('SELECT * FROM portal_gallery_images WHERE id = ?1').bind(imageId).first<Record<string, unknown>>();
+  return row ? mapImagen(row) : null;
+}
+
+/** Quita la foto y devuelve el archivo de R2 que tenía asociado (o null). */
+export async function quitarImagen(db: D1Database, imageId: number): Promise<number | null> {
+  const img = await obtenerImagen(db, imageId);
+  if (!img) return null;
   await db.prepare('DELETE FROM portal_gallery_images WHERE id = ?1').bind(imageId).run();
+  return img.archivo_id;
 }
 
 /** Mueve una imagen un lugar (up/down) dentro de su galería. */

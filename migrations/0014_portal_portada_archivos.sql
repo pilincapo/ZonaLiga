@@ -7,7 +7,8 @@
 --   · portal_archivos: metadatos de las imágenes (subidas a R2 o enlazadas por
 --     URL externa). El binario NUNCA va a D1; acá solo datos y la clave del
 --     objeto. `url_publico` es siempre la dirección que se sirve: si el archivo
---     es externo coincide con `url_externo`; si es de R2, es la URL del bucket.
+--     es externo coincide con `url_externo`; si es de R2, es la ruta del Worker
+--     (`/i/{archivo_id}`), porque el bucket es privado.
 --   · portal_configuracion: datos públicos del portal (nombre, descripción,
 --     contacto, redes, pie) con su propio estado de publicación, para que la
 --     configuración no se mezcle con las páginas de contenido.
@@ -29,6 +30,15 @@ INSERT OR IGNORE INTO portal_portada (portada_id) VALUES (1);
 -- servicio /i/{id} y la lectura de la portada igual filtran por publicado.
 
 -- ------------------------------ archivos -----------------------------
+--
+-- `padre_id` es el id del recurso dueño, con una salvedad por tipo:
+--   · noticia.imagen_principal / galeria.portada → id de la noticia o galería.
+--   · complejo.imagen  → 1 (la página de slug 'complejo'; portal_pages usa el
+--     slug como clave, así que se la identifica con una constante estable).
+--   · galeria.foto     → id de la FILA de portal_gallery_images (una foto por
+--     archivo), para que una galería pueda tener muchas fotos subidas.
+--   · config.hero / config.logo → 1 (fila única de portal_configuracion).
+--
 
 CREATE TABLE portal_archivos (
   archivo_id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,9 +100,19 @@ WHERE a.es_publico = 1
     (a.tipo = 'noticia.imagen_principal'
       AND EXISTS (SELECT 1 FROM portal_noticias n WHERE n.id = a.padre_id AND n.status = 'published'))
     OR
-    (a.tipo IN ('galeria.portada', 'galeria.foto')
+    (a.tipo = 'galeria.portada'
       AND EXISTS (SELECT 1 FROM portal_galleries g WHERE g.id = a.padre_id AND g.status = 'published'))
     OR
     (a.tipo = 'complejo.imagen'
-      AND EXISTS (SELECT 1 FROM portal_pages p WHERE p.id = a.padre_id AND p.status = 'published'))
+      AND EXISTS (SELECT 1 FROM portal_pages p WHERE p.slug = 'complejo' AND p.status = 'published'))
+    OR
+    (a.tipo = 'galeria.foto'
+      AND EXISTS (
+        SELECT 1 FROM portal_gallery_images i
+        JOIN portal_galleries g ON g.id = i.gallery_id
+        WHERE i.id = a.padre_id AND g.status = 'published'
+      ))
+    OR
+    (a.tipo IN ('config.hero', 'config.logo')
+      AND EXISTS (SELECT 1 FROM portal_configuracion c WHERE c.status = 'published'))
   );
