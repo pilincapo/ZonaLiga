@@ -276,10 +276,10 @@ function bloquePie(datos: DatosPortada): string {
 </section>`;
 }
 
-/** Todos los bloques del portal, en el orden en que van en la portada. */
+/** Bloques del portal que van después del cuerpo deportivo (el bloque de
+ * noticias se renderiza aparte, en homePage, antes del deportivo). */
 export function bloquesPortada(datos: DatosPortada, t: Tournament | null): string {
   return [
-    bloqueNoticias(datos),
     bloqueFotos(datos),
     bloqueComplejo(datos),
     bloqueInformacion(datos),

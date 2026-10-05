@@ -20,7 +20,7 @@ import { agregarImagen, crearGaleria, crearNoticia, guardarPagina, listarImagene
 import { guardarConfig, guardarPortada, leerConfig, leerPortada, validarConfig, type PortalConfig } from '../src/lib/portalConfig.ts';
 import { resumenPortal } from '../src/lib/portalResumen.ts';
 import { datosPortada } from '../src/lib/portalPortada.ts';
-import { bloqueComplejo, bloqueFotos, bloqueInformacion, bloqueNoticias, heroPortada } from '../src/ui/portalPortada.ts';
+import { bloqueComplejo, bloqueFotos, bloqueInformacion, bloqueNoticias, bloquesPortada, heroPortada } from '../src/ui/portalPortada.ts';
 import { dashboardPage } from '../src/ui/portalDashboard.ts';
 import { PORTAL_PERMISSIONS } from '../src/lib/portalAccess.ts';
 
@@ -570,6 +570,38 @@ it('los bloques no se muestran vacíos ni con texto de relleno', () => {
     expect(bloqueFotos(vacio)).toBe('');
     expect(bloqueComplejo(vacio)).toBe('');
     expect(bloqueInformacion(vacio)).toBe('');
+  });
+
+  it('la portada no repite el bloque de noticias (homePage lo renderiza aparte)', () => {
+    const noticia = {
+      id: 1,
+      titulo: 'Arrancó la Copa',
+      resumen: 'Primera fecha jugada.',
+      contenido: 'Texto.',
+      imagen: '',
+      status: 'published' as const,
+      destacada: false,
+      published_at: '2026-10-02',
+      autor: 'Prensa',
+      created_at: '2026-10-02',
+      updated_at: '2026-10-02',
+    };
+    const datos = {
+      config: null,
+      identidad: { hero: '', logo: '' },
+      hero: noticia,
+      noticias: [noticia],
+      galerias: [],
+      fotos: [],
+      complejo: null,
+      torneo: null,
+    };
+    // bloquesPortada ya NO incluye el bloque de noticias: si lo incluyera,
+    // la portada renderizaría la sección "Noticias" dos veces.
+    expect(bloquesPortada(datos, null)).not.toContain('<h2>Noticias</h2>');
+    // El bloque se sigue renderizando una vez desde homePage.
+    const portada = `${bloqueNoticias(datos)}${bloquesPortada(datos, null)}`;
+    expect(portada.split('<h2>Noticias</h2>').length - 1).toBe(1);
   });
 
   it('si se desactiva "mostrar fotos", la portada no las muestra', async () => {
