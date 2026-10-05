@@ -539,7 +539,10 @@ describe.skipIf(!has)('e2e: administración del portal (Fase 18.1)', () => {
 
     const news = await manager.get('/portal-admin/noticias');
     expect(news.status).toBe(200);
-    expect(await news.text()).toContain('próxima etapa');
+    const newsHtml = await news.text();
+    // Fase 18.2: la sección ya tiene contenido real, no un placeholder.
+    expect(newsHtml).toContain('Nueva noticia');
+    expect(newsHtml).toContain('Todavía no hay noticias');
   });
 
   it('2) Community Manager sin permisos deportivos no entra a /admin', async () => {
@@ -4556,5 +4559,226 @@ describe.skipIf(!has)('e2e: ayuda del panel (documentación)', () => {
 
     // La ayuda de la propia página Ayuda no se muestra (ahí está todo).
     expect(await (await admin.get('/admin/ayuda')).text()).not.toContain('Qué puedo hacer aquí');
+  });
+});
+describe.skipIf(!has)('e2e: contenido del portal (Fase 18.2)', () => {
+  const CM_EDITOR = 'cm.contenido';
+  const CM_EDITOR_PASSWORD = 'cm-contenido-pw-2026';
+  // Usuarios creados por el bloque de la Fase 18.1 (mismo servidor y base).
+  const CM_PORTAL = 'cm.portal';
+  const CM_PORTAL_PASSWORD = 'cm-portal-pw-2026';
+  const CM_DEPORTES = 'cm.deportes';
+  const CM_DEPORTES_PASSWORD = 'cm-deportes-pw-2026';
+
+  /** Extrae el id más reciente de una sección del panel (lista ordenada por id desc). */
+  function ultimoId(html: string, seccion: 'noticias' | 'fotos'): number {
+    const m = new RegExp(`/portal-admin/${seccion}/(\\d+)`).exec(html);
+    return m ? Number(m[1]) : 0;
+  }
+
+  it('el administrador crea un editor con los cuatro permisos de contenido', async () => {
+    const admin = client();
+    await admin.loginAdmin(ADMIN_PASSWORD);
+    const res = await admin.post('/admin/accesos', {
+      username: CM_EDITOR,
+      name: 'Contenido',
+      password: CM_EDITOR_PASSWORD,
+      permission: ['PORTAL_NOTICIAS', 'PORTAL_FOTOS', 'PORTAL_COMPLEJO', 'PORTAL_TORNEO'],
+    });
+    expect(res.status).toBe(302);
+  });
+
+  it('1) noticia: borrador no se ve en el sitio, publicada sí, y se puede editar y eliminar', async () => {
+    const editor = client();
+    expect((await editor.loginUser(CM_EDITOR, CM_EDITOR_PASSWORD)).status).toBe(302);
+
+    // Crear como borrador.
+    const crear = await editor.post('/portal-admin/noticias', {
+      titulo: 'Noticia E2E del portal',
+      resumen: 'Resumen de prueba',
+      contenido: 'Primer párrafo.\n\nSegundo párrafo.',
+      autor: 'Comunicación',
+      status: 'draft',
+    });
+    expect(crear.status).toBe(302);
+    expect(decodeURIComponent(crear.headers.get('location') ?? '')).toContain('borrador');
+
+    const panel = await (await editor.get('/portal-admin/noticias')).text();
+    const id = ultimoId(panel, 'noticias');
+    expect(id).toBeGreaterThan(0);
+
+    // El público no la ve: ni en el listado ni en su URL.
+    expect(await (await fetch(`${BASE}/noticias`)).text()).not.toContain('Noticia E2E del portal');
+    expect((await fetch(`${BASE}/noticias/${id}`)).status).toBe(404);
+
+    // Vista previa accesible para el editor aunque sea borrador.
+    const preview = await editor.get(`/portal-admin/noticias/${id}/vista-previa`);
+    expect(preview.status).toBe(200);
+    expect(await preview.text()).toContain('NO se ve en el sitio');
+
+    // Publicar.
+    expect((await editor.post(`/portal-admin/noticias/${id}/publicar`)).status).toBe(302);
+    const lista = await (await fetch(`${BASE}/noticias`)).text();
+    expect(lista).toContain('Noticia E2E del portal');
+    const detalle = await fetch(`${BASE}/noticias/${id}`);
+    expect(detalle.status).toBe(200);
+    expect(await detalle.text()).toContain('Segundo párrafo.');
+
+    // Editar el contenido.
+    await editor.post(`/portal-admin/noticias/${id}`, {
+      titulo: 'Noticia E2E editada',
+      contenido: 'Contenido nuevo.',
+      status: 'published',
+    });
+    expect(await (await fetch(`${BASE}/noticias/${id}`)).text()).toContain('Contenido nuevo.');
+
+    // Despublicar la saca del sitio.
+    expect((await editor.post(`/portal-admin/noticias/${id}/despublicar`)).status).toBe(302);
+    expect((await fetch(`${BASE}/noticias/${id}`)).status).toBe(404);
+    expect(await (await fetch(`${BASE}/noticias`)).text()).not.toContain('Noticia E2E editada');
+
+    // Eliminar.
+    expect((await editor.post(`/portal-admin/noticias/${id}/eliminar`)).status).toBe(302);
+    expect(await (await editor.get('/portal-admin/noticias')).text()).not.toContain('Noticia E2E editada');
+  });
+
+  it('2) galería: crear, agregar fotos, publicar y verla en el sitio', async () => {
+    const editor = client();
+    await editor.loginUser(CM_EDITOR, CM_EDITOR_PASSWORD);
+
+    const crear = await editor.post('/portal-admin/fotos', {
+      titulo: 'Galería E2E',
+      descripcion: 'Fotos de prueba',
+      fecha: '2026-10-03',
+      status: 'draft',
+    });
+    expect(crear.status).toBe(302);
+    const panel = await (await editor.get('/portal-admin/fotos')).text();
+    const id = ultimoId(panel, 'fotos');
+    expect(id).toBeGreaterThan(0);
+
+    // Borrador: invisible para el público.
+    expect(await (await fetch(`${BASE}/fotos`)).text()).not.toContain('Galería E2E');
+    expect((await fetch(`${BASE}/fotos/${id}`)).status).toBe(404);
+
+    // Agregar dos fotos.
+    for (const url of ['https://cdn.ejemplo.com/e2e-1.jpg', 'https://cdn.ejemplo.com/e2e-2.jpg']) {
+      const res = await editor.post(`/portal-admin/fotos/${id}/imagenes`, { url, caption: 'Foto E2E' });
+      expect(res.status).toBe(302);
+    }
+    const edit = await (await editor.get(`/portal-admin/fotos/${id}`)).text();
+    expect(edit).toContain('https://cdn.ejemplo.com/e2e-1.jpg');
+    expect(edit).toContain('Fotos (2)');
+
+    // Publicar y verificar el sitio público.
+    expect((await editor.post(`/portal-admin/fotos/${id}/publicar`)).status).toBe(302);
+    const lista = await (await fetch(`${BASE}/fotos`)).text();
+    expect(lista).toContain('Galería E2E');
+    expect(lista).toContain('2 fotos');
+    const detalle = await fetch(`${BASE}/fotos/${id}`);
+    expect(detalle.status).toBe(200);
+    expect(await detalle.text()).toContain('e2e-1.jpg');
+
+    // Despublicar y eliminar.
+    await editor.post(`/portal-admin/fotos/${id}/despublicar`);
+    expect((await fetch(`${BASE}/fotos/${id}`)).status).toBe(404);
+    await editor.post(`/portal-admin/fotos/${id}/eliminar`);
+    expect(await (await fetch(`${BASE}/fotos`)).text()).not.toContain('Galería E2E');
+  });
+
+  it('3) El Complejo: editar la página y controlar su publicación', async () => {
+    const editor = client();
+    await editor.loginUser(CM_EDITOR, CM_EDITOR_PASSWORD);
+
+    // Borrador: el público ve el aviso de preparación, no el contenido.
+    const borrador = await editor.post('/portal-admin/complejo', {
+      nombre: 'Complejo E2E',
+      direccion: 'Calle Falsa 123',
+      inst_nombre: ['Cancha 1', 'Vestuarios'],
+      inst_detalle: ['Sintética', 'Con duchas'],
+      status: 'draft',
+    });
+    expect(borrador.status).toBe(302);
+    const oculto = await (await fetch(`${BASE}/el-complejo`)).text();
+    expect(oculto).not.toContain('Complejo E2E');
+    expect(oculto).toContain('en preparación');
+
+    // Publicar.
+    await editor.post('/portal-admin/complejo', {
+      nombre: 'Complejo E2E',
+      direccion: 'Calle Falsa 123',
+      inst_nombre: ['Cancha 1', 'Vestuarios'],
+      inst_detalle: ['Sintética', 'Con duchas'],
+      status: 'published',
+    });
+    const publico = await (await fetch(`${BASE}/el-complejo`)).text();
+    expect(publico).toContain('Complejo E2E');
+    expect(publico).toContain('Calle Falsa 123');
+    expect(publico).toContain('Cancha 1');
+  });
+
+  it('4) Información del torneo: editar la página y controlar su publicación', async () => {
+    const editor = client();
+    await editor.loginUser(CM_EDITOR, CM_EDITOR_PASSWORD);
+
+    const res = await editor.post('/portal-admin/torneo', {
+      presentacion: 'Presentación E2E del torneo',
+      dias_juego: 'sábados y domingos',
+      doc_titulo: ['Reglamento E2E'],
+      doc_url: ['https://docs.ejemplo.com/reglamento.pdf'],
+      status: 'published',
+    });
+    expect(res.status).toBe(302);
+    const publico = await (await fetch(`${BASE}/informacion`)).text();
+    expect(publico).toContain('Presentación E2E del torneo');
+    expect(publico).toContain('sábados y domingos');
+    expect(publico).toContain('Reglamento E2E');
+    // Nada de datos deportivos acá: eso sigue en fixture y posiciones.
+    // Se mira solo el contenido de la página: el layout del sitio nombra el
+    // fixture en su descripción y en el pie, y eso no es de esta sección.
+    const contenido = publico.split('<main class="container">')[1]?.split('</main>')[0] ?? '';
+    expect(contenido).toContain('Presentación E2E del torneo');
+    expect(contenido).not.toContain('fixture');
+
+    // Volver a borrador lo saca del sitio.
+    await editor.post('/portal-admin/torneo', { presentacion: 'Presentación E2E del torneo', status: 'draft' });
+    const oculto = await (await fetch(`${BASE}/informacion`)).text();
+    expect(oculto).not.toContain('Presentación E2E del torneo');
+  });
+
+  it('5) sin permiso, la URL directa de cualquier sección responde 403 (GET y POST)', async () => {
+    // cm.portal solo tiene PORTAL_NOTICIAS.
+    const soloNoticias = client();
+    await soloNoticias.loginUser(CM_PORTAL, CM_PORTAL_PASSWORD);
+    for (const path of ['/portal-admin/fotos', '/portal-admin/complejo', '/portal-admin/torneo']) {
+      expect((await soloNoticias.get(path)).status, `${path} debe ser 403`).toBe(403);
+    }
+    const postSinPermiso = await soloNoticias.post('/portal-admin/complejo', { nombre: 'Hacker', status: 'published' });
+    expect(postSinPermiso.status).toBe(403);
+    expect(await postSinPermiso.text()).toContain('No tenés permiso');
+    // El público no recibió nada de ese intento.
+    expect(await (await fetch(`${BASE}/el-complejo`)).text()).not.toContain('Hacker');
+
+    // cm.deportes no tiene ningún permiso de portal.
+    const sinPortal = client();
+    await sinPortal.loginUser(CM_DEPORTES, CM_DEPORTES_PASSWORD);
+    for (const path of ['/portal-admin/noticias', '/portal-admin/noticias/nueva', '/portal-admin/fotos']) {
+      expect((await sinPortal.get(path)).status, `${path} debe ser 403`).toBe(403);
+    }
+    const postNoticias = await sinPortal.post('/portal-admin/noticias', { titulo: 'Intruso', status: 'published' });
+    expect(postNoticias.status).toBe(403);
+  });
+
+  it('6) las páginas públicas nuevas responden con el layout del sitio', async () => {
+    for (const path of ['/noticias', '/fotos', '/el-complejo', '/informacion']) {
+      const res = await fetch(`${BASE}${path}`);
+      expect(res.status, `${path} debe responder 200`).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('ZonaLiga');
+      expect(html).toContain('Posiciones'); // nav del sitio
+    }
+    // Rutas inexistentes siguen dando 404.
+    expect((await fetch(`${BASE}/noticias/999999`)).status).toBe(404);
+    expect((await fetch(`${BASE}/fotos/999999`)).status).toBe(404);
   });
 });

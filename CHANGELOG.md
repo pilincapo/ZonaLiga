@@ -13,6 +13,29 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.5] — 2026-10-05 — Contenido administrable del portal (Fase 18.2)
+
+### Nuevo
+
+- **Noticias para el portal.** Desde **Portal → Noticias** se escribe, edita y publica: título, resumen, contenido, imagen principal (por enlace), autor y fecha. Cada noticia es borrador o publicada, se puede destacar para que salga arriba y tiene vista previa antes de publicarse. Lo que está en borrador no existe para el público: ni aparece en el listado ni se abre su dirección.
+- **Fotos y galerías.** Se crea una galería con título, descripción y fecha, y después se cargan las fotos por enlace con su pie de foto. Se ordenan con las flechas (subir/bajar) y cada galería se publica o se despublica como una unidad. En el sitio, el listado muestra cuántas fotos tiene cada una y la galería las abre en grande.
+- **El Complejo.** Página con nombre, descripción, dirección, teléfono, WhatsApp, horarios, cómo llegar, información útil, imagen del lugar y la lista de instalaciones (por ejemplo, cada cancha con su detalle).
+- **Información del torneo.** Página con presentación, días y horarios de juego, contacto, información para equipos, Links de reglamento y documentos, e información adicional. Es solo informativa: los datos del torneo (fixture, posiciones, goleadores) siguen viniendo del panel deportivo y no se editan desde acá.
+- **Las cuatro páginas nuevas en el sitio público**: Noticias, Fotos, El Complejo e Información del torneo, con el mismo diseño y la navegación de siempre. Si una página todavía no se publicó, se lo avisa al visitante ("en preparación") en lugar de mostrarla a medias.
+- **Permisos por sección, verificados en el servidor.** Cada sección de `/portal-admin` pide su permiso (`PORTAL_NOTICIAS`, `PORTAL_FOTOS`, `PORTAL_COMPLEJO`, `PORTAL_TORNEO`): si alguien no lo tiene, la URL directa responde 403 aunque la haya escrito a mano, tanto para ver como para guardar.
+- **Las imágenes se cargan por enlace (URL), no subiendo archivos.** Es el mismo criterio que ya se usaba para el escudo de los equipos: no hay almacenamiento de archivos nuevo ni servicios externos.
+
+### Mejora
+
+- **Las páginas públicas del portal usan la misma caché que el resto del sitio**, así que no hacen más trabajo de servidor que las otras: 60 segundos de vida en producción.
+
+### Arreglo
+
+- **Al crear o editar un usuario, ahora se guardan TODOS los permisos tildados.** Antes, en **Accesos**, tildar dos o más permisos guardaba únicamente el último: la persona se quedaba sin acceso a las secciones que el administrador le quería dar.
+- **En El Complejo y en Información del torneo ahora se guardan todas las instalaciones y todos los documentos** que se cargan en una fila, no solo el último.
+
+---
+
 ## [0.4.4] — 2026-10-03 — Usuarios propios del panel (corrección de 18.1)
 
 ### Nuevo

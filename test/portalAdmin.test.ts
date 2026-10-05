@@ -14,11 +14,16 @@ describe('shell de /portal-admin', () => {
     expect(html).toContain('separado de la administración deportiva');
   });
 
-  it('solo muestra secciones permitidas y genera una pantalla placeholder', () => {
+  it('solo muestra secciones permitidas y refleja el contenido de cada una', () => {
     const html = portalAdminPage('noticias', new Set(['PORTAL_NOTICIAS']));
     expect(html).toContain('href="/portal-admin/noticias"');
     expect(html).not.toContain('href="/portal-admin/fotos"');
-    expect(html).toContain('La carga y edición de noticias estará disponible');
+    // Fase 18.2: Noticias ya no es un placeholder, describe su contenido real.
+    expect(html).toContain('Creá, editá, publicá y destacá');
+    // Una sección sin implementar conserva el aviso de próxima etapa.
+    const pendiente = portalAdminPage('destacados', new Set(['PORTAL_DESTACADOS']));
+    expect(pendiente).toContain('Próximamente');
+    expect(pendiente).toContain('próxima etapa');
   });
 
   it('un usuario sin ningún permiso de portal ve el shell pero nada que administrar', () => {

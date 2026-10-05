@@ -274,7 +274,9 @@ adminRoutes.get('/accesos', async (c) => {
 });
 
 adminRoutes.post('/accesos', async (c) => {
-  const form = await c.req.parseBody();
+  // `all: true` hace que los checkboxes repetidos (`permission`) lleguen como
+  // lista; sin esto Hono se queda solo con el último marcado.
+  const form = await c.req.parseBody({ all: true });
   const permissions = parsePanelPermissions(permissionValues(form));
   let username: string;
   try {
@@ -299,7 +301,7 @@ adminRoutes.post('/accesos', async (c) => {
 
 adminRoutes.post('/accesos/:id/permisos', async (c) => {
   const id = Number(c.req.param('id'));
-  const form = await c.req.parseBody();
+  const form = await c.req.parseBody({ all: true });
   const permissions = parsePanelPermissions(permissionValues(form));
   const user = await getPanelUserById(c.env.DB, id);
   if (!user) return c.redirect('/admin/accesos?err=' + encodeURIComponent('Ese usuario no existe'));

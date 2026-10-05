@@ -22,16 +22,19 @@ export const PORTAL_NAV: PortalNavItem[] = [
 
 type PortalSection = 'inicio' | 'noticias' | 'fotos' | 'destacados' | 'complejo' | 'torneo' | 'configuracion';
 
+/** Secciones que todavía muestran el aviso de "próximamente". */
+const PLACEHOLDER = new Set<PortalSection>(['destacados', 'configuracion']);
+
 const SECTION_COPY: Record<PortalSection, { title: string; detail: string }> = {
   inicio: {
     title: 'Inicio',
     detail: 'Desde acá vas a poder administrar la información pública de la liga, sin tocar fixture, resultados ni reglas deportivas.',
   },
-  noticias: { title: 'Noticias', detail: 'La carga y edición de noticias estará disponible en una próxima etapa.' },
-  fotos: { title: 'Fotos', detail: 'La administración de galerías y fotos estará disponible en una próxima etapa.' },
+  noticias: { title: 'Noticias', detail: 'Creá, editá, publicá y destacá las noticias que se ven en el portal.' },
+  fotos: { title: 'Fotos', detail: 'Galerías del portal: crear, editar, ordenar las fotos y publicarlas.' },
   destacados: { title: 'Destacados', detail: 'La selección de contenido destacado estará disponible en una próxima etapa.' },
-  complejo: { title: 'El complejo', detail: 'La información del complejo estará disponible en una próxima etapa.' },
-  torneo: { title: 'Información del torneo', detail: 'La información pública del torneo estará disponible en una próxima etapa.' },
+  complejo: { title: 'El complejo', detail: 'La información institucional que se muestra en la página pública del complejo.' },
+  torneo: { title: 'Información del torneo', detail: 'El contenido editorial de la página de información: no toca la configuración deportiva.' },
   configuracion: { title: 'Configuración', detail: 'La configuración del portal estará disponible en una próxima etapa.' },
 };
 
@@ -45,35 +48,50 @@ const SECTION_PATH: Record<string, string> = {
   configuracion: '/portal-admin/configuracion',
 };
 
+/** Secciones con contenido real (ya no son un placeholder). */
+const IMPLEMENTADAS = new Set<PortalSection>(['noticias', 'fotos', 'complejo', 'torneo']);
+
+/** Mensaje de éxito / error arriba del contenido (mismo estilo que /admin). */
+export function portalFlash(kind: 'error' | 'success', message: string | undefined): string {
+  if (!message) return '';
+  return `<div class="${kind === 'error' ? 'error-box' : 'success-box'}">${esc(message)}</div>`;
+}
+
 export function portalAdminPage(
   section: PortalSection,
-  permissions: ReadonlySet<PortalPermission>
+  permissions: ReadonlySet<PortalPermission>,
+  opts: { title?: string; detail?: string; content?: string; msg?: string; err?: string } = {}
 ): string {
   const selected = SECTION_COPY[section];
+  const title = opts.title ?? selected.title;
+  const detail = opts.detail ?? selected.detail;
   const nav = PORTAL_NAV.filter((item) => !item.permission || permissions.has(item.permission));
   const links = nav
     .map((item) => `<a class="portal-side-link${item.href === SECTION_PATH[section] ? ' active' : ''}" href="${escUrl(item.href)}"><span class="portal-nav-mark" aria-hidden="true"></span><span>${esc(item.label)}</span></a>`)
     .join('');
   const cards = PORTAL_NAV
     .filter((item) => item.permission && permissions.has(item.permission))
-    .map((item) => `<a class="portal-card" href="${escUrl(item.href)}"><span class="portal-card-ico" aria-hidden="true">●</span><strong>${esc(item.label)}</strong><span>Próximamente</span></a>`)
+    .map((item) => {
+      const seccion = item.href.replace('/portal-admin/', '') as PortalSection;
+      const estado = IMPLEMENTADAS.has(seccion) ? 'Configurar →' : 'Próximamente';
+      return `<a class="portal-card" href="${escUrl(item.href)}"><span class="portal-card-ico" aria-hidden="true">●</span><strong>${esc(item.label)}</strong><span>${estado}</span></a>`;
+    })
     .join('');
-  const content = section === 'inicio'
-    ? `<section class="portal-cards">${cards}</section>`
-    : `<div class="portal-placeholder"><span class="portal-placeholder-mark" aria-hidden="true">…</span><div><strong>Próximamente</strong><p>${esc(selected.detail)}</p></div></div>`;
+  const placeholder = `<div class="portal-placeholder"><span class="portal-placeholder-mark" aria-hidden="true">…</span><div><strong>Próximamente</strong><p>${esc(selected.detail)}</p></div></div>`;
+  const content = opts.content ?? (section === 'inicio' ? `<section class="portal-cards">${cards}</section>` : placeholder);
 
   return `<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(selected.title)} · Administración del portal — ZonaLiga</title>
+<title>${esc(title)} · Administración del portal — ZonaLiga</title>
 <meta name="theme-color" content="#0d1b2a">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
-<link rel="stylesheet" href="/css/app.css?v=66">
+<link rel="stylesheet" href="/css/app.css?v=67">
 <script>(function(){try{if(window.matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark')}catch(e){}})();</script>
 </head>
 <body class="portal-admin-body">
@@ -86,7 +104,8 @@ export function portalAdminPage(
   <main class="portal-admin-main">
     <header class="portal-admin-top"><span>Administración del portal</span><a href="/" target="_blank" rel="noopener">Ver portal ↗</a></header>
     <section class="portal-admin-content">
-      <div class="portal-admin-heading"><span class="portal-admin-eyebrow">PORTAL INFORMATIVO</span><h1>${esc(selected.title)}</h1><p>${esc(selected.detail)}</p></div>
+      <div class="portal-admin-heading"><span class="portal-admin-eyebrow">PORTAL INFORMATIVO</span><h1>${esc(title)}</h1><p>${esc(detail)}</p></div>
+      ${portalFlash('success', opts.msg)}${portalFlash('error', opts.err)}
       ${content}
       <p class="portal-admin-boundary">Este espacio está separado de la administración deportiva del torneo.</p>
     </section>

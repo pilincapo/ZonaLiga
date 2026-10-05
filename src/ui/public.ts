@@ -75,6 +75,8 @@ export const PUBLIC_NAV: NavItem[] = [
   { href: '/posiciones', label: 'Posiciones', match: 'posiciones' },
   { href: '/equipos', label: 'Equipos', match: 'equipos' },
   { href: '/goleadores', label: 'Estadísticas', match: 'goleadores' },
+  { href: '/noticias', label: 'Noticias', match: 'noticias' },
+  { href: '/fotos', label: 'Fotos', match: 'fotos' },
 ];
 
 /**
@@ -84,6 +86,8 @@ export const PUBLIC_NAV: NavItem[] = [
 export const PUBLIC_NAV_MAS: NavGroup = {
   label: 'Más',
   items: [
+    { href: '/el-complejo', label: 'El complejo', match: 'complejo' },
+    { href: '/informacion', label: 'Información', match: 'informacion' },
     { href: '/historial', label: 'Historial', match: 'historial' },
     { href: '/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
     { href: '/buscar', label: 'Buscar', match: 'buscar' },

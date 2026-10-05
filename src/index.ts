@@ -8,6 +8,9 @@ import { portalAdminRoutes } from './routes/portalAdmin.ts';
 import { responderCacheado, ttlSegundos } from './lib/cache.ts';
 import * as pub from './ui/public.ts';
 import * as live from './ui/live.ts';
+import * as portal from './ui/portalPublic.ts';
+import * as portalContenido from './lib/portalContent.ts';
+import { completarGaleriasPublicas } from './lib/portalGalerias.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -57,6 +60,34 @@ app.get('/historial', async (c) => c.html(await pub.historyPage(c.env.DB)));
 app.get('/suspensiones', async (c) => c.html(await pub.suspensionsPage(c.env.DB, c.req.query('t'))));
 
 app.get('/buscar', async (c) => c.html(await pub.searchPage(c.env.DB, c.req.query('q'))));
+
+/* ---------- Portal informativo (Fase 18.2) ----------
+ *
+ * Contenido editorial administrado desde /portal-admin. Solo se listan y
+ * muestran items PUBLICADOS: la consulta filtra en la base. Van después del
+ * middleware de caché, igual que el resto del sitio público.
+ */
+app.get('/noticias', async (c) => c.html(portal.noticiasListPage(await portalContenido.listarNoticiasPublicadas(c.env.DB))));
+
+app.get('/noticias/:id', async (c) => {
+  const noticia = await portalContenido.obtenerNoticiaPublica(c.env.DB, Number(c.req.param('id')));
+  if (!noticia) return c.notFound();
+  return c.html(portal.noticiaPage(noticia));
+});
+
+app.get('/fotos', async (c) => c.html(portal.fotosListPage(await completarGaleriasPublicas(c.env.DB))));
+
+app.get('/fotos/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  const galeria = await portalContenido.obtenerGaleriaPublica(c.env.DB, id);
+  if (!galeria) return c.notFound();
+  const imagenes = await portalContenido.listarImagenes(c.env.DB, id);
+  return c.html(portal.galeriaPage(galeria, imagenes));
+});
+
+app.get('/el-complejo', async (c) => c.html(portal.complejoPage(await portalContenido.obtenerPaginaPublica(c.env.DB, 'complejo'))));
+
+app.get('/informacion', async (c) => c.html(portal.informacionPage(await portalContenido.obtenerPaginaPublica(c.env.DB, 'torneo'))));
 
 /** Novedades: qué cambió en cada versión (no usa base de datos). */
 app.get('/changelog', (c) => {
