@@ -45,6 +45,9 @@ import {
   type EstadoContenido,
 } from '../lib/portalContent.ts';
 import { galeriaBody, complejoBody, informacionBody, noticiaBody } from '../ui/portalPublic.ts';
+import { portalFormImagen } from '../ui/portalFormImagen.ts';
+import { obtenerArchivoPorPadreYTipo, subirArchivo, eliminarArchivoPorTipoYTipo } from '../lib/portalArchivos.ts';
+import { validarUrlImagen } from '../lib/portalContent.ts';
 
 type PortalEnv = {
   Bindings: Env;
@@ -150,9 +153,88 @@ portalAdminRoutes.post('/noticias', async (c) => {
 });
 
 portalAdminRoutes.get('/noticias/:id', async (c) => {
-  const noticia = await obtenerNoticia(c.env.DB, Number(c.req.param('id')));
+  const id = Number(c.req.param('id'));
+  const noticia = await obtenerNoticia(c.env.DB, id);
   if (!noticia) return c.redirect('/portal-admin/noticias?err=' + encodeURIComponent('Esa noticia no existe'));
-  return c.html(noticiaFormPage(noticia, c.get('portalPermissions'), { err: c.req.query('err') }));
+  // Bloque de imagen: archivo propio en R2 si lo hay, o el enlace externo actual.
+  const archivo = await obtenerArchivoPorPadreYTipo(c.env.DB, 'noticia.imagen_principal', id);
+  const imagenField = portalFormImagen({
+    accionUrl: `/portal-admin/noticias/${id}/imagen`,
+    clase: 'portal-img',
+    tipoArchivo: 'noticia.imagen_principal',
+    archivoId: archivo?.archivo_id ?? null,
+    urlActual: archivo ? archivo.url_publico : noticia.imagen || null,
+    esExterno: archivo ? archivo.url_externo != null : noticia.imagen !== '',
+    puedeSubir: true,
+    help: 'Pegá el enlace de una imagen que ya está en internet, o subí un archivo desde tu dispositivo.',
+  });
+  return c.html(noticiaFormPage(noticia, c.get('portalPermissions'), { err: c.req.query('err'), contentExtra: imagenField }));
+});
+
+/**
+ * Imagen principal de la noticia (Fase 18.3). Acepta las dos cosas:
+ *   · un archivo del dispositivo (multipart) → se sube a R2;
+ *   · un enlace externo → se guarda como referencia, sin tocar R2.
+ * El permiso lo exige el guardia de sección (/portal-admin/noticias → PORTAL_NOTICIAS).
+ */
+portalAdminRoutes.post('/noticias/:id/imagen', async (c) => {
+  const id = Number(c.req.param('id'));
+  const noticia = await obtenerNoticia(c.env.DB, id);
+  if (!noticia) return c.redirect('/portal-admin/noticias?err=' + encodeURIComponent('Esa noticia no existe'));
+
+  const form = await c.req.parseBody({ all: true });
+  const volver = (msg: string, esError = false) =>
+    c.redirect(`/portal-admin/noticias/${id}?${esError ? 'err' : 'msg'}=${encodeURIComponent(msg)}`);
+
+  const archivo = form['archivo'];
+  const urlCruda = form['noticia.imagen_principal__url_externo'];
+  const url = typeof urlCruda === 'string' ? urlCruda.trim() : '';
+
+  // 1) Quitar la imagen (sube el botón "Quitar imagen" del bloque).
+  if (form['accion'] === 'quitar') {
+    await eliminarArchivoPorTipoYTipo(c.env.DB, c.env.R2_PUBLIC_BUCKET ?? null, 'noticia.imagen_principal', id);
+    await c.env.DB.prepare('UPDATE portal_noticias SET imagen = ?1 WHERE id = ?2').bind('', id).run();
+    return volver('Imagen quitada');
+  }
+
+  // 2) Archivo del dispositivo → R2.
+  if (archivo instanceof File && archivo.size > 0) {
+    if (!c.env.R2_PUBLIC_BUCKET || !c.env.R2_PUBLIC_BUCKET_DOMAIN) {
+      return volver('Las imágenes subidas todavía no están disponibles en este sitio. Usá un enlace externo por ahora.', true);
+    }
+    try {
+      const buffer = await archivo.arrayBuffer();
+      await subirArchivo(
+        c.env.DB,
+        c.env.R2_PUBLIC_BUCKET,
+        c.env.R2_PUBLIC_BUCKET_DOMAIN,
+        'noticia.imagen_principal',
+        id,
+        buffer,
+        archivo.type || undefined,
+        noticia.status === 'published' ? 1 : 0
+      );
+    } catch (e) {
+      console.error('No se pudo subir la imagen:', e);
+      return volver(e instanceof Error ? e.message : 'No se pudo subir la imagen', true);
+    }
+    // El campo imagen guarda la URL que se sirve (la del bucket).
+    const nuevo = await obtenerArchivoPorPadreYTipo(c.env.DB, 'noticia.imagen_principal', id);
+    await c.env.DB.prepare('UPDATE portal_noticias SET imagen = ?1 WHERE id = ?2').bind(nuevo?.url_publico ?? '', id).run();
+    return volver('Imagen cargada');
+  }
+
+  // 3) Enlace externo (o el que ya estaba, si el campo vino vacío).
+  if (url !== '') {
+    const v = validarUrlImagen(url);
+    if (!v.ok) return volver(v.error, true);
+    await c.env.DB.prepare('DELETE FROM portal_archivos WHERE tipo = ?1 AND padre_id = ?2')
+      .bind('noticia.imagen_principal', id).run();
+    await c.env.DB.prepare('UPDATE portal_noticias SET imagen = ?1 WHERE id = ?2').bind(v.value, id).run();
+    return volver('Imagen actualizada con el enlace externo');
+  }
+
+  return volver('No se recibió una imagen nueva');
 });
 
 portalAdminRoutes.post('/noticias/:id', async (c) => {

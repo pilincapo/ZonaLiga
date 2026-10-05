@@ -13,6 +13,25 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.6] — 2026-10-05 — Imágenes del portal (primera parte de la Fase 18.3)
+
+### Nuevo
+
+- **Las imágenes de las noticias se pueden subir desde el panel**, sin pegar un enlace: en la edición de una noticia hay un bloque de imagen con "Subir un archivo" (JPG, PNG, WebP o GIF, hasta 8 MB) y, si ya había una, también "Quitar imagen". El enlace externo sigue funcionando igual, así que nada de lo cargado antes se rompe.
+- **Las imágenes se validan de verdad**: se mira el contenido del archivo (no lo que dice el navegador), se rechazan los que no son imágenes y los que pasan los 8 MB, y cada archivo se guarda con un nombre generado por el sistema (nunca el nombre que el usuario tenía en su dispositivo).
+- **Nueva ruta `/i/{id}` para servir las imágenes**: entrega el archivo solo si la noticia, galería o página a la que pertenece está publicada. Si es un enlace externo, manda al visitante a ese enlace; si es un archivo propio, lo sirve con caché larga. Un borrador nunca muestra su foto, ni aunque se conozca el número.
+- **Base de datos**: nueva migración con las tablas de portada (qué noticia es la principal y qué noticias y galerías salen destacadas) y de archivos (datos de cada imagen, sin guardar la imagen en la base).
+
+### Arreglo
+
+- Quitar o reemplazar una imagen limpia el archivo anterior del almacenamiento, así que no quedan imágenes huérfanas.
+
+### Pendiente de infraestructura
+
+- La subida de archivos necesita un bucket de imágenes en Cloudflare (R2) configurado en la cuenta. Mientras no exista, el panel lo avisa y se puede seguir usando el enlace externo; el resto del portal funciona igual.
+
+---
+
 ## [0.4.5] — 2026-10-05 — Contenido administrable del portal (Fase 18.2)
 
 ### Nuevo

@@ -64,7 +64,7 @@ ${items || '<div class="portal-placeholder"><span class="portal-placeholder-mark
 export function noticiaFormPage(
   noticia: Noticia | null,
   permissions: Perms,
-  opts: { valores?: Record<string, unknown>; err?: string } = {}
+  opts: { valores?: Record<string, unknown>; err?: string; contentExtra?: string } = {}
 ): string {
   const v = opts.valores;
   const val = (campo: string, actual: string): string =>
@@ -115,7 +115,8 @@ export function noticiaFormPage(
     </div>
     <p class="hint" style="margin-top:10px">${noticia?.status === 'published' ? 'Esta noticia está publicada: los cambios se ven en el sitio en unos segundos.' : 'Mientras sea borrador, no se ve en el sitio público.'}</p>
   </form>
-</div></section>`;
+</div></section>
+${opts.contentExtra ? `<div class="card form-card" style="max-width:760px;margin-top:16px"><div class="card-body">${opts.contentExtra}</div></div>` : ''}`;
 
   return portalAdminPage('noticias', permissions, {
     title: noticia ? 'Editar noticia' : 'Nueva noticia',

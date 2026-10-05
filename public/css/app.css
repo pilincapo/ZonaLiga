@@ -2829,3 +2829,69 @@ html[data-theme='dark'] .portal-admin-shell { --bg: #0a0d12; --surface: #131a22;
   .portal-item-actions { justify-content: flex-start; }
   .portal-img-caption { min-width: 100%; }
 }
+/* ---------------- Bloque de imagen del portal (Fase 18.3) ---------------- */
+
+.portal-img { display: flex; flex-direction: column; gap: 12px; }
+.portal-img__title { font-size: 1rem; font-weight: 700; margin: 0 0 4px; }
+
+.portal-img__preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.portal-img__preview img {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  background: var(--surface);
+}
+.portal-img__preview--empty {
+  flex-direction: column;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.portal-img__badge {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(13, 27, 42, 0.78);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.portal-img__campo { display: flex; flex-direction: column; gap: 4px; }
+.portal-img__campo label { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+.portal-img__campo input[type='url'],
+.portal-img__campo input[type='file'] {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* objetivo táctil cómodo en móvil */
+  min-height: 44px;
+}
+.portal-img__campo input[type='file'] { padding: 8px 10px; }
+.portal-img__campo input:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+
+.portal-img__acciones { display: flex; flex-wrap: wrap; gap: 8px; }
+.portal-img__acciones .btn { min-height: 40px; }
+
+@media (max-width: 420px) {
+  .portal-img__preview { min-height: 140px; }
+  .portal-img__acciones .btn { flex: 1 1 100%; justify-content: center; }
+}
