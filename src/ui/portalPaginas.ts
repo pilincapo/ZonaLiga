@@ -9,15 +9,11 @@ import type { PortalPermission } from '../lib/portalAccess.ts';
 
 type Perms = ReadonlySet<PortalPermission>;
 
-function filaImagen(preview: string): string {
-  return `<div class="field"><label>Enlace</label><input type="url" name="url" value="${escUrl(preview)}" placeholder="https://…" maxlength="2000"></div>`;
-}
-
 /** Formulario de El Complejo. */
 export function complejoFormPage(
   pagina: PaginaContenido | null,
   permissions: Perms,
-  opts: { err?: string; msg?: string } = {}
+  opts: { err?: string; msg?: string; contentExtra?: string } = {}
 ): string {
   const data = (pagina?.data ?? { instalaciones: [] }) as ComplejoData;
   const instalaciones = (data.instalaciones ?? [])
@@ -68,11 +64,6 @@ export function complejoFormPage(
       <label for="info_util">Información útil</label>
       <textarea id="info_util" name="info_util" rows="3" maxlength="4000" placeholder="Reglas del complejo, qué llevar, contacto de emergencias…">${esc(data.info_util)}</textarea>
     </div>
-    <div class="field">
-      <label for="imagen">Imagen principal</label>
-      <input type="url" id="imagen" name="imagen" maxlength="2000" value="${escUrl(data.imagen)}" placeholder="https://…">
-      <p class="hint">Foto de cabecera de la página pública.</p>
-    </div>
 
     <h2 style="font-size:1rem;margin:18px 0 6px">Instalaciones</h2>
     <p class="hint" style="margin-bottom:8px">Canchas y espacios del complejo. Podés sumar las que necesites.</p>
@@ -95,6 +86,7 @@ export function complejoFormPage(
     <p class="hint" style="margin-top:10px">${pagina?.status === 'published' ? 'La página está publicada: los cambios se ven en el sitio en unos segundos.' : 'Mientras sea borrador, la página pública muestra un aviso de que la información está en preparación.'}</p>
   </form>
 </div></section>
+${opts.contentExtra ? `<div class="card form-card" style="max-width:760px;margin-top:16px"><div class="card-body">${opts.contentExtra}</div></div>` : ''}
 ${REPEAT_SCRIPT}`;
 
   return portalAdminPage('complejo', permissions, { content, msg: opts.msg, err: opts.err });

@@ -1,7 +1,7 @@
 // Shell independiente para administrar la información del portal.
 
 import { esc, escUrl } from '../lib/html.ts';
-import { BRAND_SVG } from './components.ts';
+import { ASSET_VERSION, BRAND_SVG } from './components.ts';
 import type { PortalPermission } from '../lib/portalAccess.ts';
 
 export interface PortalNavItem {
@@ -22,20 +22,17 @@ export const PORTAL_NAV: PortalNavItem[] = [
 
 type PortalSection = 'inicio' | 'noticias' | 'fotos' | 'destacados' | 'complejo' | 'torneo' | 'configuracion';
 
-/** Secciones que todavía muestran el aviso de "próximamente". */
-const PLACEHOLDER = new Set<PortalSection>(['destacados', 'configuracion']);
-
 const SECTION_COPY: Record<PortalSection, { title: string; detail: string }> = {
   inicio: {
     title: 'Inicio',
-    detail: 'Desde acá vas a poder administrar la información pública de la liga, sin tocar fixture, resultados ni reglas deportivas.',
+    detail: 'Resumen de la información pública de la liga: qué hay publicado, qué falta y dónde tocarlo. Sin tocar fixture, resultados ni reglas deportivas.',
   },
   noticias: { title: 'Noticias', detail: 'Creá, editá, publicá y destacá las noticias que se ven en el portal.' },
   fotos: { title: 'Fotos', detail: 'Galerías del portal: crear, editar, ordenar las fotos y publicarlas.' },
-  destacados: { title: 'Destacados', detail: 'La selección de contenido destacado estará disponible en una próxima etapa.' },
+  destacados: { title: 'Destacados', detail: 'Elegí la noticia principal de la portada y lo que sale destacado en ella.' },
   complejo: { title: 'El complejo', detail: 'La información institucional que se muestra en la página pública del complejo.' },
   torneo: { title: 'Información del torneo', detail: 'El contenido editorial de la página de información: no toca la configuración deportiva.' },
-  configuracion: { title: 'Configuración', detail: 'La configuración del portal estará disponible en una próxima etapa.' },
+  configuracion: { title: 'Configuración', detail: 'Nombre, imágenes, contacto, redes y qué se muestra en la portada.' },
 };
 
 const SECTION_PATH: Record<string, string> = {
@@ -48,8 +45,15 @@ const SECTION_PATH: Record<string, string> = {
   configuracion: '/portal-admin/configuracion',
 };
 
-/** Secciones con contenido real (ya no son un placeholder). */
-const IMPLEMENTADAS = new Set<PortalSection>(['noticias', 'fotos', 'complejo', 'torneo']);
+/** Secciones con contenido real. */
+const IMPLEMENTADAS = new Set<PortalSection>([
+  'noticias',
+  'fotos',
+  'destacados',
+  'complejo',
+  'torneo',
+  'configuracion',
+]);
 
 /** Mensaje de éxito / error arriba del contenido (mismo estilo que /admin). */
 export function portalFlash(kind: 'error' | 'success', message: string | undefined): string {
@@ -78,7 +82,8 @@ export function portalAdminPage(
     })
     .join('');
   const placeholder = `<div class="portal-placeholder"><span class="portal-placeholder-mark" aria-hidden="true">…</span><div><strong>Próximamente</strong><p>${esc(selected.detail)}</p></div></div>`;
-  const content = opts.content ?? (section === 'inicio' ? `<section class="portal-cards">${cards}</section>` : placeholder);
+  const content =
+    opts.content ?? (section === 'inicio' ? `<section class="portal-cards">${cards}</section>` : placeholder);
 
   return `<!doctype html>
 <html lang="es">
@@ -91,7 +96,7 @@ export function portalAdminPage(
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
-<link rel="stylesheet" href="/css/app.css?v=67">
+<link rel="stylesheet" href="/css/app.css?v=${ASSET_VERSION}">
 <script>(function(){try{if(window.matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark')}catch(e){}})();</script>
 </head>
 <body class="portal-admin-body">

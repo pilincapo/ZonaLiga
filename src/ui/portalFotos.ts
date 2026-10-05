@@ -72,7 +72,7 @@ export function galeriaFormPage(
   galeria: Galeria | null,
   imagenes: ImagenGaleria[],
   permissions: Perms,
-  opts: { valores?: Record<string, unknown>; err?: string; msg?: string } = {}
+  opts: { valores?: Record<string, unknown>; err?: string; msg?: string; contentExtra?: string; bucketDisponible?: boolean } = {}
 ): string {
   const v = opts.valores;
   const val = (campo: string, actual: string): string =>
@@ -91,11 +91,6 @@ export function galeriaFormPage(
       <textarea id="descripcion" name="descripcion" rows="2" maxlength="600" placeholder="Qué se ve en esta galería">${val('descripcion', galeria?.descripcion ?? '')}</textarea>
     </div>
     <div class="form-row">
-      <div class="field">
-        <label for="portada">Imagen de portada</label>
-        <input type="url" id="portada" name="portada" maxlength="2000" value="${val('portada', galeria?.portada ?? '')}" placeholder="https://…">
-        <p class="hint">Si no se carga, se usa la primera foto de la galería.</p>
-      </div>
       <div class="field">
         <label for="fecha">Fecha</label>
         <input type="date" id="fecha" name="fecha" value="${val('fecha', galeria?.fecha ?? '')}">
@@ -140,16 +135,27 @@ export function galeriaFormPage(
     imagenesHtml = `
 <section class="card" style="max-width:760px;margin-top:16px"><div class="card-body">
   <h2 style="font-size:1rem;margin-bottom:10px">Fotos (${imagenes.length})</h2>
-  <form method="post" action="/portal-admin/fotos/${galeria.id}/imagenes" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
-    <div class="field" style="flex:2;min-width:220px;margin:0">
-      <label for="img-url">Nueva foto (enlace)</label>
-      <input type="url" id="img-url" name="url" required maxlength="2000" placeholder="https://…">
+  <form method="post" action="/portal-admin/fotos/${galeria.id}/imagenes" enctype="multipart/form-data" style="display:grid;gap:10px;margin-bottom:14px">
+    <div class="form-row">
+      <div class="field" style="margin:0">
+        <label for="img-url">Nueva foto (enlace)</label>
+        <input type="url" id="img-url" name="url" maxlength="2000" placeholder="https://…">
+      </div>
+      <div class="field" style="margin:0">
+        <label for="img-caption">Pie (opcional)</label>
+        <input type="text" id="img-caption" name="caption" maxlength="200" placeholder="Ej: Gol del segundo tiempo">
+      </div>
     </div>
-    <div class="field" style="flex:1;min-width:160px;margin:0">
-      <label for="img-caption">Pie (opcional)</label>
-      <input type="text" id="img-caption" name="caption" maxlength="200" placeholder="Ej: Gol del segundo tiempo">
-    </div>
-    <button class="btn btn-primary" type="submit">Agregar</button>
+    ${
+      opts.bucketDisponible
+        ? `<div class="field" style="margin:0">
+      <label for="img-file">O subí un archivo</label>
+      <input type="file" id="img-file" name="archivo" accept="image/jpeg,image/png,image/webp,image/gif">
+      <p class="hint">JPG, PNG, WebP o GIF, hasta 8 MB.</p>
+    </div>`
+        : ''
+    }
+    <div><button class="btn btn-primary" type="submit">Agregar foto</button></div>
   </form>
   ${filas || '<p class="hint">Esta galería todavía no tiene fotos. Pegá el enlace de una imagen arriba para empezar.</p>'}
 </div></section>`;
@@ -160,7 +166,7 @@ export function galeriaFormPage(
     detail: galeria
       ? 'Cargá las fotos, ordenalas con las flechas y publicá cuando esté lista.'
       : 'Creá la galería primero: después le agregás las fotos.',
-    content: meta + imagenesHtml,
+    content: meta + (opts.contentExtra ? `<div class="card form-card" style="max-width:760px;margin-top:16px"><div class="card-body">${opts.contentExtra}</div></div>` : '') + imagenesHtml,
     msg: opts.msg,
     err: opts.err,
   });
