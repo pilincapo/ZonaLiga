@@ -390,6 +390,22 @@ describe.skipIf(!has)('e2e: sesión admin', () => {
       expect(decodeURIComponent(regen3.headers.get('location') ?? '')).toContain('Sin choques');
     } finally {
       await admin.post(`/admin/torneos/${tournamentId}`, fullConfig);
+      // El "clash" de adentro dejó un partido de la fecha 2 en el día y el
+      // slot de la fecha 1. Regenerar con shift 0 no mueve el día, así que sin
+      // este paso el choque se arrastraba: el regenerar cruce rearmaba la
+      // fecha 2 pisando la fecha 1 y el test siguiente veía "Choques" en vez
+      // del flash de "Verificado". Se devuelven los días originales de la
+      // fecha 2 (leídos de la página antes de tocar nada) y se re-slotea.
+      const backDays: Record<string, string> = { tournament_id: tournamentId, round: '2' };
+      for (const id of r2Ids) {
+        backDays[`d_${id}`] = new RegExp(`name="d_${id}" value="([\\d-]+)"`).exec(page)?.[1] ?? '';
+      }
+      await admin.post('/admin/fechas/guardar', backDays);
+      await admin.post('/admin/fechas/regenerar', {
+        tournament_id: tournamentId,
+        round: '2',
+        shift_days: '0',
+      });
       await admin.post('/admin/fechas/regenerar', {
         tournament_id: tournamentId,
         round: '1',

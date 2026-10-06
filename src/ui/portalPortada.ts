@@ -132,9 +132,22 @@ export function bloqueNoticias(datos: DatosPortada): string {
 
 /* -------------------------------- Fotos -------------------------------- */
 
-function fotoCelda(f: { id: number; gallery_id: number; url: string; caption: string }): string {
-  return `<a class="ph-foto" href="/fotos/${f.gallery_id}" title="${esc(f.caption || 'Ver la galería')}">
-  <img src="${escUrl(f.url)}" alt="${esc(f.caption)}" loading="lazy">
+/**
+ * Una celda de "Últimas fotos": miniatura apaisada con el epígrafe y la fecha
+ * debajo. La fecha sale de las galerías que la portada ya trajo (no es una
+ * consulta nueva); si la foto viene de una galería que no está en esa lista,
+ * simplemente no se muestra la fecha en lugar de inventar una.
+ */
+function fotoCelda(
+  f: { id: number; gallery_id: number; url: string; caption: string },
+  fechas: ReadonlyMap<number, string>
+): string {
+  const titulo = f.caption.trim();
+  const fecha = fechas.get(f.gallery_id) ?? '';
+  return `<a class="ph-foto" href="/fotos/${f.gallery_id}" title="${esc(titulo || 'Ver la galería')}">
+  <span class="ph-foto__media"><img src="${escUrl(f.url)}" alt="${esc(titulo)}" loading="lazy"></span>
+  ${titulo ? `<strong class="ph-foto__cap">${esc(titulo)}</strong>` : ''}
+  ${fecha ? `<span class="ph-foto__date">${esc(fecha)}</span>` : ''}
 </a>`;
 }
 
@@ -142,7 +155,10 @@ function fotoCelda(f: { id: number; gallery_id: number; url: string; caption: st
 export function bloqueFotos(datos: DatosPortada): string {
   if (datos.config && !datos.config.mostrar_fotos) return '';
   if (datos.fotos.length === 0) return '';
-  const celdas = datos.fotos.map(fotoCelda).join('');
+  const fechas = new Map(
+    datos.galerias.map((g) => [g.id, g.fecha ? formatDateShort(g.fecha) : ''] as const)
+  );
+  const celdas = datos.fotos.map((f) => fotoCelda(f, fechas)).join('');
   return `<section class="block">
   <div class="ph-head">
     <div>

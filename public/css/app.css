@@ -3284,14 +3284,37 @@ html[data-theme='dark'] .portal-admin-shell { --bg: #0a0d12; --surface: #131a22;
   .ph-pie { flex-direction: column; align-items: flex-start; }
 }
 
-/* Teléfonos chicos (360-390 px): nada se corta ni desborda. */
+/* Teléfonos chicos (360-390 px): hero más compacto, sin perder el título ni el buscador.
+   El chip del torneo pasa a 2 columnas para no partirse en 4 líneas.
+   El buscador sube un poco y el padding del hero se aprieta.
+   No se oculta información: quedan título, descripción, chip y buscador.
+   El escritorio (>400px) no se modifica.
+*/
 @media (max-width: 400px) {
-  .ph-hero h1 { font-size: 1.85rem; }
-  .ph-hero__torneo { display: grid; gap: 2px; }
-  .ph-hero__search { flex-wrap: wrap; }
-  .ph-hero__search input { min-width: 0; }
+  .ph-hero {
+    padding-top: 22px;
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+  }
+  .ph-hero__inner { max-width: 100%; }
+  .ph-hero h1 { font-size: 1.42rem; margin-top: 10px; margin-bottom: 6px; }
+  .ph-hero__sub { font-size: .78rem; line-height: 1.42; max-width: 100%; margin-bottom: 10px; color: var(--text, #eef4fa); }
+  .ph-hero__torneo {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 6px;
+    margin-top: 10px;
+    padding: 7px 10px;
+    align-items: baseline;
+  }
+  .ph-hero__torneo-label { font-size: .64rem; letter-spacing: .08em; }
+  .ph-hero__torneo strong { font-size: .92rem; }
+  .ph-hero__torneo span:last-child { font-size: .74rem; }
+  .ph-hero__search { margin-top: 10px; flex-wrap: wrap; }
+  .ph-hero__search input { font-size: .84rem; padding: 7px 10px; min-width: 0; }
+  .ph-hero__search button { padding: 7px 12px; font-size: .82rem; }
   .ph-info-grid { grid-template-columns: minmax(0, 1fr); }
-  .ph-dato { font-size: .88rem; }
+  .ph-dato { font-size: .84rem; }
   .ph-fotos { gap: 8px; }
 }
 /* ============================================================
@@ -3404,7 +3427,10 @@ html[data-theme='dark'] .portal-admin-shell { --bg: #0a0d12; --surface: #131a22;
 
 /* ---------------- Complejo / torneo ---------------- */
 
-.pp { max-width: 900px; }
+/* Estas dos fichas van dentro del mismo contenedor que el hero y que el resto
+   del portal: sin ancho propio, el cuerpo queda alineado con la cabecera en
+   vez de flotando en el medio (medía 900px contra los 1148 del hero). */
+.pp { max-width: none; }
 
 /* ---------------- Responsive ---------------- */
 
@@ -3458,4 +3484,708 @@ html[data-theme='dark'] .portal-admin-shell { --bg: #0a0d12; --surface: #131a22;
   border-radius: 12px;
   background: #ffffff1a;
   padding: 4px;
+}
+
+/* ============================================================
+   Portal público — lenguaje visual ZonaLiga
+   Ámbito: body.shell-public. El panel (/admin, /portal-admin)
+   usa body.shell-admin y conserva su propio estilo.
+   ============================================================ */
+
+body.shell-public {
+  /* Paleta: azul ZonaLiga como color principal; verde/azul para estados. */
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-dark: #1e40af;
+  --accent-soft: #e8f0fe;
+  --accent-ring: rgba(37, 99, 235, 0.18);
+
+  --bg: #f1f5f9;
+  --bg-band: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef2f7;
+  --border: #e3e9f2;
+  --border-strong: #cfd9e6;
+  /* Texto: el gris claro anterior (#8798ab) daba 2,9:1 sobre blanco y se
+     lavaba. Estos tres tonos superan 4,5:1 (WCAG AA para texto chico). */
+  --text: #0f1d2d;
+  --muted: #46566a;
+  --faint: #5b6b7f;
+
+  --radius: 12px;
+  --radius-sm: 9px;
+  --radius-xs: 7px;
+  --shadow: 0 1px 2px rgba(15, 29, 45, 0.04), 0 6px 16px -12px rgba(15, 29, 45, 0.18);
+  --shadow-sm: 0 1px 2px rgba(15, 29, 45, 0.05);
+  --shadow-lg: 0 12px 28px -16px rgba(15, 29, 45, 0.28);
+
+  --navy: #0d1f3a;
+  --navy-2: #14294a;
+}
+
+html[data-theme='dark'] body.shell-public {
+  --accent: #60a5fa;
+  --accent-strong: #93c5fd;
+  --accent-dark: #bfdbfe;
+  --accent-soft: rgba(96, 165, 250, 0.14);
+  --accent-ring: rgba(96, 165, 250, 0.3);
+  --bg: #0a1220;
+  --bg-band: #0d1626;
+  --surface: #101a2a;
+  --surface-2: #16233a;
+  --surface-3: #1c2b45;
+  --border: #22314b;
+  --border-strong: #33465f;
+
+  /* Texto del tema oscuro: sin redefinir estos tres tokens, todo lo que usa
+     var(--text) se quedaba en azul marino oscuro sobre azul marino oscuro y
+     los títulos, las tablas y los botones desaparecían. */
+  --text: #e8eef7;
+  --muted: #a9b8cd;
+  --faint: #93a4bd;
+
+  --navy: #0a1526;
+  --navy-2: #122038;
+}
+
+/* ---------- Ancho y header ---------- */
+
+body.shell-public .container { max-width: 1180px; }
+
+body.shell-public .site-header {
+  background: var(--navy);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 1px 14px rgba(8, 15, 30, 0.28);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+body.shell-public .site-header .container { height: 58px; gap: 16px; }
+body.shell-public .brand-word { color: #fff; }
+body.shell-public .nav { gap: 4px; }
+body.shell-public .nav a {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+body.shell-public .nav a:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
+body.shell-public .nav a.active { color: #fff; }
+body.shell-public .nav a.active::after {
+  background: #4d8bff;
+  height: 3px;
+  border-radius: 3px;
+  bottom: 2px;
+}
+body.shell-public .nav-drop { color: rgba(255, 255, 255, 0.76); font-size: 0.875rem; font-weight: 600; }
+body.shell-public .nav-drop.active,
+body.shell-public .nav-drop:hover { color: #fff; }
+body.shell-public .nav-pop a { color: var(--text); }
+body.shell-public #navToggle { color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+
+/* ---------- Heroes (portada y páginas del portal) ---------- */
+
+body.shell-public .ph-hero,
+body.shell-public .px-hero {
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  padding: 0;
+}
+/* La portada manda: su hero es la primera foto de la liga, así que va más
+   alto que el de las páginas interiores. */
+body.shell-public .ph-hero { min-height: 380px; }
+body.shell-public .px-hero { min-height: 296px; }
+body.shell-public .ph-hero__inner,
+body.shell-public .px-hero__inner { padding: 38px 36px; }
+body.shell-public .ph-hero__inner > h1 {
+  font-size: clamp(2.2rem, 5.8vw, 4.375rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+}
+body.shell-public .px-hero__inner h1 {
+  font-size: clamp(2rem, 4.8vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+body.shell-public .ph-hero__sub,
+body.shell-public .px-hero__sub { max-width: 62ch; font-size: 1rem; color: rgba(255, 255, 255, 0.86); }
+body.shell-public .ph-hero__kicker,
+body.shell-public .px-hero__kicker {
+  display: inline-block;
+  background: rgba(37, 99, 235, 0.9);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+body.shell-public .ph-hero__torneo {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+body.shell-public .ph-hero__torneo-label { color: #a8c8ff; }
+body.shell-public .ph-hero__torneo > span:not(.ph-hero__torneo-label) { color: #c3d4e4; }
+body.shell-public .px-hero::after,
+body.shell-public .ph-hero::after {
+  background: linear-gradient(100deg, rgba(6, 15, 30, 0.94) 0%, rgba(9, 22, 42, 0.82) 46%, rgba(9, 22, 42, 0.42) 100%);
+}
+
+/* ---------- Secciones y tarjetas ---------- */
+
+body.shell-public section.block { margin-top: 18px; }
+body.shell-public .card { border-radius: var(--radius); }
+body.shell-public .card-head { padding: 12px 16px; }
+body.shell-public .card-head h2 { font-size: 1.02rem; font-weight: 800; letter-spacing: -0.015em; }
+body.shell-public .card-head .muted { font-size: 0.8rem; }
+body.shell-public .card-head a { color: var(--accent-strong); font-weight: 700; font-size: 0.82rem; }
+
+body.shell-public .ph-head { margin: 22px 0 12px; }
+body.shell-public .ph-head h2 { font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em; }
+body.shell-public .ph-head__sub { color: var(--muted); font-size: 0.875rem; }
+body.shell-public .ph-head__more { color: var(--accent-strong); font-weight: 700; font-size: 0.85rem; }
+
+/* ---------- Accesos rápidos (portada) ---------- */
+
+.ph-accesos {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.ph-acceso {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'ico txt' 'cta cta';
+  column-gap: 12px;
+  row-gap: 3px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.ph-acceso:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow-lg); }
+
+.ph-acceso__ico {
+  grid-area: ico;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.ph-acceso__txt { grid-area: txt; display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.ph-acceso__txt strong {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.ph-acceso__txt span {
+  font-size: 0.74rem;
+  line-height: 1.3;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ph-acceso__cta { grid-area: cta; font-size: 0.75rem; line-height: 1.25; font-weight: 700; color: var(--accent-strong); }
+
+/* ---------- Panel deportivo de la portada ---------- */
+/* Un solo panel de tres columnas, como en la maqueta: la noticia destacada,
+   los partidos y resultados al centro, y la tabla de posiciones al derecha.
+   Las columnas se arman con los datos que ya traía la portada. */
+body.shell-public .ph-panel {
+  display: grid;
+  margin-top: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+body.shell-public .ph-panel--2 { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+body.shell-public .ph-panel--3 { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.3fr) minmax(0, 1fr); }
+body.shell-public .ph-panel__col { padding: 18px; min-width: 0; }
+body.shell-public .ph-panel__col + .ph-panel__col { border-left: 1px solid var(--border); }
+body.shell-public .ph-panel .block { margin-top: 0; }
+body.shell-public .ph-panel .section-head { margin-top: 0; }
+body.shell-public .ph-panel .card { border: none; box-shadow: none; background: transparent; border-radius: 0; }
+body.shell-public .ph-panel .ph-head { margin-top: 0; }
+body.shell-public .ph-panel__col > .block + .block {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+body.shell-public .ph-panel .ph-news-grid { grid-template-columns: minmax(0, 1fr); }
+
+/* ---------- Noticias ---------- */
+
+body.shell-public .pn-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 296px;
+  gap: 18px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+/* Listado editorial: una sola columna con la miniatura a la izquierda, como
+   en la maqueta. Todas las miniaturas miden lo mismo (236x177), también las
+   noticias sin foto, que antes dejaban una franja de 84px y rompían el ritmo. */
+body.shell-public .pn-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+body.shell-public .pn-card {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+body.shell-public .pn-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow-lg); }
+body.shell-public .pn-media,
+body.shell-public .pn-media-empty {
+  aspect-ratio: 4 / 3;
+  height: auto;
+  background: var(--surface-3);
+}
+body.shell-public .pn-media-empty {
+  background: linear-gradient(135deg, var(--surface-2), var(--surface-3));
+}
+body.shell-public .pf-media-empty {
+  aspect-ratio: 4 / 3;
+  height: auto;
+  background: linear-gradient(135deg, var(--surface-2), var(--surface-3));
+}
+body.shell-public .pn-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+body.shell-public .pn-body { padding: 16px 18px; }
+body.shell-public .pn-meta { font-size: 0.76rem; color: var(--faint); gap: 8px; }
+body.shell-public .pn-card h2 { font-size: 1.05rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; margin: 8px 0 6px; }
+body.shell-public .pn-card h2 a { color: var(--text); text-decoration: none; }
+body.shell-public .pn-card h2 a:hover { color: var(--accent-strong); }
+body.shell-public .pn-card p { color: var(--muted); font-size: 0.88rem; }
+body.shell-public .pn-more { color: var(--accent-strong); font-weight: 700; font-size: 0.84rem; }
+
+body.shell-public .pn-aside {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  position: sticky;
+  top: 78px;
+}
+body.shell-public .pn-aside__title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+body.shell-public .pn-aside__list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+body.shell-public .pn-aside__list a { display: flex; gap: 10px; text-decoration: none; align-items: flex-start; }
+body.shell-public .pn-aside__thumb {
+  flex: 0 0 auto;
+  width: 58px;
+  height: 44px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+body.shell-public .pn-aside__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+body.shell-public .pn-aside__txt strong {
+  display: block;
+  font-size: 0.86rem;
+  line-height: 1.3;
+  color: var(--text);
+  font-weight: 700;
+}
+body.shell-public .pn-aside__list a:hover strong { color: var(--accent-strong); }
+body.shell-public .pn-aside__txt time { font-size: 0.75rem; color: var(--faint); }
+
+/* ---------- Nota de noticia ---------- */
+
+body.shell-public .pn-article {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px 30px;
+  margin-top: 16px;
+  max-width: 860px;
+}
+body.shell-public .pn-article h1 { font-size: clamp(1.5rem, 3.6vw, 2.2rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; }
+body.shell-public .pn-article-lead { color: var(--muted); font-size: 1.02rem; }
+body.shell-public .pn-hero-img { border-radius: var(--radius); aspect-ratio: 16 / 9; object-fit: cover; width: 100%; }
+body.shell-public .pn-prose p { color: var(--text); line-height: 1.7; }
+
+/* ---------- Fotos de la portada ("Últimas fotos") ----------
+   Miniatura apaisada con el epígrafe debajo, como en la maqueta. El enlace
+   ya no lleva proporción propia: la lleva la imagen interior, para que el
+   texto no quede recortado. */
+body.shell-public .ph-fotos { gap: 14px; }
+body.shell-public .ph-foto {
+  aspect-ratio: auto;
+  display: block;
+  text-decoration: none;
+  min-width: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+}
+body.shell-public .ph-foto__media {
+  display: block;
+  aspect-ratio: 12 / 5;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-3);
+}
+body.shell-public .ph-foto__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.22s ease;
+}
+body.shell-public .ph-foto:hover .ph-foto__media img { transform: scale(1.05); }
+body.shell-public .ph-foto__cap {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+}
+body.shell-public .ph-foto:hover .ph-foto__cap { color: var(--accent-strong); }
+body.shell-public .ph-foto__date {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--faint);
+}
+
+/* ---------- Fotos ---------- */
+
+body.shell-public .pf-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+body.shell-public .pf-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+body.shell-public .pf-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow-lg); }
+body.shell-public .pf-media { aspect-ratio: 4 / 3; background: var(--surface-3); }
+body.shell-public .pf-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+body.shell-public .pf-body { padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 3px; }
+body.shell-public .pf-body strong { font-size: 1rem; font-weight: 800; letter-spacing: -0.015em; color: var(--text); }
+body.shell-public .pf-body span { font-size: 0.78rem; color: var(--faint); }
+body.shell-public .pf-more { color: var(--accent-strong); font-weight: 700; font-size: 0.84rem; margin-top: 4px; }
+body.shell-public .pf-figs { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-top: 16px; }
+body.shell-public .pf-fig { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
+body.shell-public .pf-fig img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+body.shell-public .pf-fig figcaption { padding: 10px 12px; font-size: 0.82rem; color: var(--muted); }
+
+/* ---------- Complejo / Información ---------- */
+
+body.shell-public .px-datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+body.shell-public .px-dato {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+}
+body.shell-public .px-dato__ico {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+}
+body.shell-public .px-dato strong { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+body.shell-public .px-dato__valor { font-size: 0.9rem; color: var(--text); }
+
+/* La ficha del complejo y la del torneo van al ancho del contenedor: ver la
+   regla base de .pp, donde ya no hay ancho propio. */
+body.shell-public .pp {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px 24px;
+  margin-top: 16px;
+}
+body.shell-public .pp-head h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.02em; }
+body.shell-public .pp-block { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+body.shell-public .pp-block h3 { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); }
+body.shell-public .pp-inst-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+body.shell-public .pp-inst {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+body.shell-public .pp-docs a { color: var(--accent-strong); font-weight: 600; text-decoration: none; }
+body.shell-public .pp-docs a:hover { text-decoration: underline; }
+
+/* ---------- Complejo (bloque de portada) ---------- */
+
+/* La tarjeta del complejo venía con los colores del fondo oscuro (título en
+   blanco, textos claros, kicker verde). Sobre la tarjeta blanca el título
+   quedaba blanco sobre blanco: hay que repintarla para el tema claro. */
+body.shell-public .ph-complejo {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+body.shell-public .ph-complejo h2 { color: var(--text); }
+body.shell-public .ph-complejo__desc { color: var(--muted); }
+body.shell-public .ph-complejo__foto { border-radius: var(--radius); overflow: hidden; background: var(--surface-3); }
+body.shell-public .ph-complejo__kicker {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+body.shell-public .ph-complejo .ph-dato { color: var(--text); }
+body.shell-public .ph-complejo .ph-dato__ico { background: var(--accent-soft); color: var(--accent-strong); }
+body.shell-public .ph-complejo .ph-dato strong { color: var(--faint); }
+body.shell-public .ph-complejo .btn-outline { border-color: var(--border-strong); color: var(--text); }
+body.shell-public .ph-complejo .btn-outline:hover { background: var(--surface-3); }
+html[data-theme='dark'] body.shell-public .ph-complejo {
+  background: var(--surface-dark);
+  border-color: var(--border-dark);
+  box-shadow: var(--shadow-dark);
+  color: var(--text-dark);
+}
+html[data-theme='dark'] body.shell-public .ph-complejo h2 { color: var(--text-dark); }
+html[data-theme='dark'] body.shell-public .ph-complejo__desc { color: var(--muted-dark); }
+html[data-theme='dark'] body.shell-public .ph-complejo__kicker { color: var(--accent-strong-dark); }
+html[data-theme='dark'] body.shell-public .ph-complejo .ph-dato { color: var(--text-dark); }
+html[data-theme='dark'] body.shell-public .ph-complejo .ph-dato__ico { background: var(--accent-soft-dark); color: var(--accent-strong-dark); }
+html[data-theme='dark'] body.shell-public .ph-complejo .ph-dato strong { color: var(--faint-dark); }
+html[data-theme='dark'] body.shell-public .ph-complejo .btn-outline { border-color: var(--border-dark); color: var(--text-dark); }
+html[data-theme='dark'] body.shell-public .ph-complejo .btn-outline:hover { background: var(--surface-3-dark); }
+body.shell-public .ph-info-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+body.shell-public .ph-info-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+}
+body.shell-public .ph-info-item__ico { color: var(--accent-strong); background: var(--accent-soft); border-radius: 9px; width: 32px; height: 32px; }
+
+/* ---------- Tablas, chips y badges ---------- */
+
+body.shell-public table thead th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+body.shell-public table td { border-bottom: 1px solid var(--border); }
+
+/* Badges: el verde y el ámbar siguen marcando estados (en curso, destacada),
+   pero con sus propios tonos para que no dependan de la paleta anterior. */
+body.shell-public .badge.green,
+body.shell-public .badge.ok { background: #e7f8ef; color: #15803d; }
+body.shell-public .badge.blue { background: #e6effe; color: #1d4ed8; }
+body.shell-public .badge.amber { background: #fdf3e0; color: #b45309; }
+html[data-theme='dark'] body.shell-public .badge.green,
+html[data-theme='dark'] body.shell-public .badge.ok { background: rgba(34, 197, 94, 0.16); color: #86efac; }
+html[data-theme='dark'] body.shell-public .badge.blue { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+html[data-theme='dark'] body.shell-public .badge.amber { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+
+/* ---------- Tiles de números y posiciones: paleta azul ZonaLiga ----------
+   Venían en verde/azul/violeta/naranja del tema anterior. Ahora los cuatro
+   tiles y los tres primeros puestos usan la familia azul, sin perder el
+   orden de intensidad que los diferenciaba. */
+body.shell-public .stat-card.st-green { --tile: #1e40af; --tile-soft: #e8f0fe; }
+body.shell-public .stat-card.st-blue { --tile: #1d4ed8; --tile-soft: #dbe7fd; }
+body.shell-public .stat-card.st-violet { --tile: #2563eb; --tile-soft: #eef4ff; }
+body.shell-public .stat-card.st-amber { --tile: #0d1f3a; --tile-soft: #e8eef7; }
+body.shell-public .stat-card .stat-ico { background: var(--tile-soft); color: var(--tile); }
+body.shell-public .stat-card .stat-num { color: var(--tile); }
+body.shell-public .stat-lbl { color: var(--muted); }
+html[data-theme='dark'] body.shell-public .stat-card.st-green { --tile: #93c5fd; --tile-soft: rgba(37, 99, 235, 0.24); }
+html[data-theme='dark'] body.shell-public .stat-card.st-blue { --tile: #bfdbfe; --tile-soft: rgba(29, 78, 216, 0.3); }
+html[data-theme='dark'] body.shell-public .stat-card.st-violet { --tile: #dbeafe; --tile-soft: rgba(37, 99, 235, 0.16); }
+html[data-theme='dark'] body.shell-public .stat-card.st-amber { --tile: #c7d9f5; --tile-soft: rgba(199, 217, 245, 0.14); }
+
+/* Primero, segundo y tercero: mismo tono de fondo que antes pero con el azul
+   de marca en los tres, del más intenso al más suave. */
+body.shell-public .pos-num.pod1,
+body.shell-public .zone-mini li:nth-child(1) .pos-num,
+body.shell-public .standings tbody tr:nth-child(1) .pos-num,
+body.shell-public table.scorers tbody tr:nth-child(1) .pos-num { background: #e8f0fe; color: #1e40af; }
+body.shell-public .pos-num.pod2,
+body.shell-public .zone-mini li:nth-child(2) .pos-num,
+body.shell-public .standings tbody tr:nth-child(2) .pos-num,
+body.shell-public table.scorers tbody tr:nth-child(2) .pos-num { background: #dbe7fd; color: #1d4ed8; }
+body.shell-public .pos-num.pod3,
+body.shell-public .zone-mini li:nth-child(3) .pos-num,
+body.shell-public .standings tbody tr:nth-child(3) .pos-num,
+body.shell-public table.scorers tbody tr:nth-child(3) .pos-num { background: #eef4ff; color: #1d4ed8; }
+html[data-theme='dark'] body.shell-public .pos-num.pod1,
+html[data-theme='dark'] body.shell-public .zone-mini li:nth-child(1) .pos-num,
+html[data-theme='dark'] body.shell-public .standings tbody tr:nth-child(1) .pos-num,
+html[data-theme='dark'] body.shell-public table.scorers tbody tr:nth-child(1) .pos-num { background: rgba(37, 99, 235, 0.28); color: #bfdbfe; }
+html[data-theme='dark'] body.shell-public .pos-num.pod2,
+html[data-theme='dark'] body.shell-public .zone-mini li:nth-child(2) .pos-num,
+html[data-theme='dark'] body.shell-public .standings tbody tr:nth-child(2) .pos-num,
+html[data-theme='dark'] body.shell-public table.scorers tbody tr:nth-child(2) .pos-num { background: rgba(29, 78, 216, 0.32); color: #93c5fd; }
+html[data-theme='dark'] body.shell-public .pos-num.pod3,
+html[data-theme='dark'] body.shell-public .zone-mini li:nth-child(3) .pos-num,
+html[data-theme='dark'] body.shell-public .standings tbody tr:nth-child(3) .pos-num,
+html[data-theme='dark'] body.shell-public table.scorers tbody tr:nth-child(3) .pos-num { background: rgba(37, 99, 235, 0.18); color: #93c5fd; }
+
+/* ---------- Botones ---------- */
+
+body.shell-public .btn-primary { background: var(--accent-strong); border-color: var(--accent-strong); }
+body.shell-public .btn-primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+body.shell-public .btn-outline { border-color: var(--border-strong); color: var(--text); }
+body.shell-public a:not(.btn) { color: var(--accent-strong); }
+
+/* ---------- Modo oscuro: red de seguridad ----------
+   Los tokens de texto ya están redefinidos arriba; esta lista cubre los
+   selectores que fijaban un color oscuro en la versión clara, para que no
+   quede texto ilegible ni en tablas, ni en botones, ni en números. */
+html[data-theme='dark'] body.shell-public .card-head h2,
+html[data-theme='dark'] body.shell-public .section-head h2,
+html[data-theme='dark'] body.shell-public .ph-head h2,
+html[data-theme='dark'] body.shell-public .pn-aside__title,
+html[data-theme='dark'] body.shell-public .pn-card h2 a,
+html[data-theme='dark'] body.shell-public .pn-article h1,
+html[data-theme='dark'] body.shell-public .pn-prose p,
+html[data-theme='dark'] body.shell-public .pp-head h2,
+html[data-theme='dark'] body.shell-public .pf-body strong,
+html[data-theme='dark'] body.shell-public .pn-aside__txt strong,
+html[data-theme='dark'] body.shell-public .ph-acceso__txt strong,
+html[data-theme='dark'] body.shell-public .ph-info-item strong,
+html[data-theme='dark'] body.shell-public .px-dato__valor,
+html[data-theme='dark'] body.shell-public .pp-inst strong,
+html[data-theme='dark'] body.shell-public .match-row strong,
+html[data-theme='dark'] body.shell-public .match-row .team-cell a,
+html[data-theme='dark'] body.shell-public .home-match a,
+html[data-theme='dark'] body.shell-public .zone-mini li a,
+html[data-theme='dark'] body.shell-public .zone-mini .pts,
+html[data-theme='dark'] body.shell-public table td,
+html[data-theme='dark'] body.shell-public .tcard-title,
+html[data-theme='dark'] body.shell-public .btn-outline,
+html[data-theme='dark'] body.shell-public .btn-ghost { color: var(--text); }
+html[data-theme='dark'] body.shell-public .card-head .muted,
+html[data-theme='dark'] body.shell-public .ph-head__sub,
+html[data-theme='dark'] body.shell-public .pn-card p,
+html[data-theme='dark'] body.shell-public .pn-article-lead,
+html[data-theme='dark'] body.shell-public .pf-fig figcaption,
+html[data-theme='dark'] body.shell-public .pp-inst span,
+html[data-theme='dark'] body.shell-public .ph-info-item p,
+html[data-theme='dark'] body.shell-public .section-head .sub,
+html[data-theme='dark'] body.shell-public .stat-lbl { color: var(--muted); }
+html[data-theme='dark'] body.shell-public .pn-meta,
+html[data-theme='dark'] body.shell-public .pn-aside__txt time,
+html[data-theme='dark'] body.shell-public .pf-body span,
+html[data-theme='dark'] body.shell-public .pn-article-meta,
+html[data-theme='dark'] body.shell-public .px-dato strong,
+html[data-theme='dark'] body.shell-public .pp-block h3,
+html[data-theme='dark'] body.shell-public .hm-when span,
+html[data-theme='dark'] body.shell-public .hm-vs,
+html[data-theme='dark'] body.shell-public .score-time,
+html[data-theme='dark'] body.shell-public .match-row .small { color: var(--faint); }
+/* El badge "En curso" del torneo es texto blanco sobre el acento; en el tema
+   oscuro el acento se vuelve claro, así que el texto tiene que pasar a oscuro. */
+html[data-theme='dark'] body.shell-public .tcard-img .tcard-badge { color: #0a1526; }
+html[data-theme='dark'] body.shell-public .tcard:hover .go { color: #0a1526; }
+
+/* ---------- Footer ---------- */
+
+body.shell-public .site-footer { background: var(--navy); border-top: 1px solid rgba(255, 255, 255, 0.08); }
+body.shell-public .site-footer a { color: rgba(255, 255, 255, 0.72); }
+body.shell-public .site-footer a:hover { color: #fff; }
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 1000px) {
+  .ph-accesos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.shell-public .pn-layout { grid-template-columns: minmax(0, 1fr); }
+  body.shell-public .pn-aside { position: static; }
+  /* El panel deportivo pasa a una columna: en el celu se lee mejor apilado. */
+  body.shell-public .ph-panel,
+  body.shell-public .ph-panel--2,
+  body.shell-public .ph-panel--3 { grid-template-columns: minmax(0, 1fr); }
+  body.shell-public .ph-panel__col + .ph-panel__col { border-left: none; border-top: 1px solid var(--border); }
+}
+
+@media (max-width: 760px) {
+  /* En el celu las noticias vuelven a apilarse con la foto arriba. */
+  body.shell-public .pn-card { grid-template-columns: minmax(0, 1fr); }
+  body.shell-public .pn-media,
+  body.shell-public .pn-media-empty { aspect-ratio: 16 / 9; }
+}
+
+@media (max-width: 620px) {
+  .ph-accesos { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  body.shell-public .ph-hero { min-height: 264px; }
+  body.shell-public .px-hero { min-height: 224px; }
+  body.shell-public .ph-hero__inner,
+  body.shell-public .px-hero__inner { padding: 30px 18px; }
+  body.shell-public .pn-article { padding: 20px 18px; }
+  body.shell-public .pp { padding: 18px 16px; }
+  body.shell-public .pn-grid,
+  body.shell-public .pf-grid,
+  body.shell-public .pf-figs,
+  body.shell-public .ph-fotos { grid-template-columns: minmax(0, 1fr); }
+  body.shell-public .px-datos { grid-template-columns: minmax(0, 1fr); }
+  /* El botón de menú se caía a una segunda fila y quedaba dibujado encima
+     del hero. Con una sola fila y sin wrap ya no puede pasar. */
+  body.shell-public .site-header .container {
+    flex-wrap: nowrap;
+    gap: 10px;
+    padding: 0 12px;
+  }
+  body.shell-public .brand { min-width: 0; flex-shrink: 1; }
+  body.shell-public .brand-word {
+    font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  body.shell-public .header-actions { flex: none; }
+  body.shell-public #navToggle { order: 4; flex: none; }
 }

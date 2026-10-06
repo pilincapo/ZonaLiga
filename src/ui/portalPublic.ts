@@ -55,13 +55,32 @@ function noticiaCard(n: Noticia): string {
 </article>`;
 }
 
-/** Listado público de noticias publicadas. */
+/** Listado público de noticias publicadas: listado editorial + destacadas. */
 export function noticiasListBody(noticias: Noticia[]): string {
   const head = cabecera('Portal informativo', 'Noticias', 'Todo lo que pasa en la liga, contado al día.');
   if (noticias.length === 0) {
     return `${head}<section class="block">${emptyNote('Todavía no hay noticias publicadas')}</section>`;
   }
-  return `${head}<section class="pn-grid">${noticias.map(noticiaCard).join('')}</section>`;
+  // "Destacadas" sale de las mismas noticias que ya trae la lista (las
+  // marcadas como destacadas): no es una consulta nueva.
+  const destacadas = noticias.filter((n) => n.destacada).slice(0, 4);
+  const aside = destacadas.length > 0
+    ? `<aside class="pn-aside">
+  <h2 class="pn-aside__title">Noticias destacadas</h2>
+  <ul class="pn-aside__list">${destacadas
+    .map(
+      (n) => `<li><a href="/noticias/${n.id}">
+    ${n.imagen ? `<span class="pn-aside__thumb"><img src="${escUrl(n.imagen)}" alt="" loading="lazy"></span>` : ''}
+    <span class="pn-aside__txt"><strong>${esc(n.titulo)}</strong><time>${esc(formatDateShort(n.published_at ?? ''))}</time></span>
+  </a></li>`
+    )
+    .join('')}</ul>
+</aside>`
+    : '';
+  return `${head}<div class="pn-layout">
+  <section class="pn-grid">${noticias.map(noticiaCard).join('')}</section>
+  ${aside}
+</div>`;
 }
 
 /** Página pública de una noticia (solo publicada). */

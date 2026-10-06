@@ -64,7 +64,8 @@ import { crest, teamCell, matchRow, statusTag, bracketColumn, eventRow, zoneBadg
 import { disciplineForMatch, teamDisciplineNotice } from './admin.ts';
 import { icon } from './icons.ts';
 import { listTournamentViews, loadTournamentView, type TournamentView } from '../lib/tournamentView.ts';
-import { datosPortada } from '../lib/portalPortada.ts';
+import { datosPortada, type DatosPortada } from '../lib/portalPortada.ts';
+import type { ComplejoData } from '../lib/portalContent.ts';
 import { bloqueNoticias, bloquesPortada, heroPortada } from './portalPortada.ts';
 import { CHANGELOG, latestEntry, type ChangelogItem } from '../changelog.ts';
 import type { Match, Team, Tournament } from '../lib/types.ts';
@@ -72,13 +73,14 @@ import { layout, shareBar, emptyNote, type NavItem, type NavGroup } from './comp
 
 export const PUBLIC_NAV: NavItem[] = [
   { href: '/', label: 'Inicio', match: 'home' },
-  { href: '/en-vivo', label: 'En vivo', match: 'envivo' },
+  { href: '/noticias', label: 'Noticias', match: 'noticias' },
+  { href: '/fotos', label: 'Fotos', match: 'fotos' },
+  { href: '/el-complejo', label: 'El complejo', match: 'complejo' },
   { href: '/fixture', label: 'Fixture', match: 'fixture' },
   { href: '/posiciones', label: 'Posiciones', match: 'posiciones' },
   { href: '/equipos', label: 'Equipos', match: 'equipos' },
-  { href: '/goleadores', label: 'Estadísticas', match: 'goleadores' },
-  { href: '/noticias', label: 'Noticias', match: 'noticias' },
-  { href: '/fotos', label: 'Fotos', match: 'fotos' },
+  { href: '/goleadores', label: 'Goleadores', match: 'goleadores' },
+  { href: '/en-vivo', label: 'En vivo', match: 'envivo' },
 ];
 
 /**
@@ -88,8 +90,7 @@ export const PUBLIC_NAV: NavItem[] = [
 export const PUBLIC_NAV_MAS: NavGroup = {
   label: 'Más',
   items: [
-    { href: '/el-complejo', label: 'El complejo', match: 'complejo' },
-    { href: '/informacion', label: 'Información', match: 'informacion' },
+    { href: '/informacion', label: 'Información del torneo', match: 'informacion' },
     { href: '/historial', label: 'Historial', match: 'historial' },
     { href: '/suspensiones', label: 'Suspensiones', match: 'suspensiones' },
     { href: '/buscar', label: 'Buscar', match: 'buscar' },
@@ -118,6 +119,51 @@ function roundLabel(round: number | null, crossoverRounds?: ReadonlySet<number>)
 
 /* ============================== HOME ============================== */
 
+/**
+ * Fila de accesos rápidos de la portada (4 tarjetas): Complejo, Próxima
+ * fecha, Torneo actual y Últimas fotos. Es composición: usa datos que la
+ * portada ya trae y enlaza a páginas que ya existen.
+ */
+function accesosRapidos(
+  datos: DatosPortada,
+  t: Tournament | null,
+  view: TournamentView | null
+): string {
+  if (!t) return '';
+  const prox = (view?.matches ?? []).find((m) => m.status === 'scheduled');
+  const complejo = datos.complejo as ComplejoData | null;
+  const proxima = prox
+    ? `${formatDateShort(prox.played_on ?? '')}${prox.round != null ? ` · Fecha ${prox.round}` : ''}`
+    : 'Fixture completo del torneo';
+  const tiles: { href: string; ico: Parameters<typeof icon>[0]; titulo: string; sub: string; cta: string }[] = [
+    {
+      href: '/el-complejo',
+      ico: 'pin',
+      titulo: 'El complejo',
+      sub: complejo?.nombre?.trim() || 'Cómo llegar, horarios e instalaciones',
+      cta: 'Cómo llegar',
+    },
+    { href: '/fixture', ico: 'calendar', titulo: 'Próxima fecha', sub: proxima, cta: 'Ver fixture' },
+    { href: '/equipos', ico: 'trophy', titulo: 'Torneo actual', sub: `${t.name} · ${t.season}`, cta: 'Ver equipos' },
+    {
+      href: '/fotos',
+      ico: 'ball',
+      titulo: 'Últimas fotos',
+      sub: datos.fotos.length > 0 ? `${datos.fotos.length} foto${datos.fotos.length === 1 ? '' : 's'}` : 'Imágenes de las últimas fechas',
+      cta: 'Ver galería',
+    },
+  ];
+  return `<section class="ph-accesos">${tiles
+    .map(
+      (x) => `<a class="ph-acceso" href="${escUrl(x.href)}">
+  <span class="ph-acceso__ico" aria-hidden="true">${icon(x.ico, 18)}</span>
+  <span class="ph-acceso__txt"><strong>${esc(x.titulo)}</strong><span>${esc(x.sub)}</span></span>
+  <span class="ph-acceso__cta">${esc(x.cta)} →</span>
+</a>`
+    )
+    .join('')}</section>`;
+}
+
 export async function homePage(db: D1Database, origin: string, slugParam?: string): Promise<string> {
   const [tournaments, stats, view, datos] = await Promise.all([
     listTournaments(db),
@@ -130,15 +176,19 @@ export async function homePage(db: D1Database, origin: string, slugParam?: strin
   // muestra el torneo activo por defecto, los enlaces quedan como siempre.
   const tSlug = slugParam && view ? view.tournament.slug : undefined;
   const torneosInner = tournamentCards(tournaments, stats, t?.slug);
+  // La noticia destacada es la primera columna del panel deportivo cuando hay
+  // torneo; si no lo hay, queda suelta como hasta ahora. Se renderiza una sola
+  // vez en cualquiera de los dos caminos.
+  const noticias = bloqueNoticias(datos);
   const body = view
-    ? await tournamentHomeBody(view, origin, torneosInner, tSlug)
-    : `<section class="block">${torneosInner}</section>\n${await emptyHomeBody(db)}`;
-  // Orden de la portada: identidad y foto del complejo, noticias destacadas,
-  // lo deportivo (próximos partidos, resultados, posiciones), fotos, complejo
-  // e información del torneo.
+    ? await tournamentHomeBody(view, origin, torneosInner, tSlug, noticias)
+    : `${noticias}\n<section class="block">${torneosInner}</section>\n${await emptyHomeBody(db)}`;
+  // Orden de la portada: identidad y foto del complejo, accesos rápidos,
+  // panel deportivo (noticias, próximos partidos, resultados y posiciones),
+  // fotos, complejo e información del torneo.
   const inner = `
 ${heroPortada(datos, t)}
-${bloqueNoticias(datos)}
+${accesosRapidos(datos, t, view)}
 ${body}
 ${bloquesPortada(datos, t)}
 ${howToBlock()}`;
@@ -250,7 +300,13 @@ function tLink(slug: string | undefined, path: string): string {
   return slug ? `${path}?t=${escUrl(slug)}` : path;
 }
 
-async function tournamentHomeBody(view: TournamentView, origin: string, torneosInner = '', tSlug?: string): Promise<string> {
+async function tournamentHomeBody(
+  view: TournamentView,
+  origin: string,
+  torneosInner = '',
+  tSlug?: string,
+  panelNoticias = ''
+): Promise<string> {
   const t = view.tournament;
   const matches = view.matches;
   const teams = view.teams;
@@ -406,10 +462,13 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
 
   // Portada limpia: las secciones sin datos todavía no se muestran (los
   // enlaces siguen en el menú). Los números del torneo van en tarjetas.
-  const blocks: string[] = [];
-  if (todayBanner) blocks.push(todayBanner);
+  //
+  // El cuerpo deportivo va dentro de un único panel de tres columnas, como en
+  // la maqueta: [noticia destacada] [próximos partidos + últimos resultados]
+  // [posiciones]. Es la misma data de siempre, sólo reacomodada en el espacio.
+  const colPartidos: string[] = [];
   if (upcomingHtml) {
-    blocks.push(`<section class="block">
+    colPartidos.push(`<section class="block">
   <div class="section-head">
     <div>
       <h2>Próxima fecha</h2>
@@ -420,24 +479,36 @@ async function tournamentHomeBody(view: TournamentView, origin: string, torneosI
   <div class="card">${upcomingHtml}${shareBar([{ label: '📲 Compartir por WhatsApp', href: shareHref }])}</div>
 </section>`);
   }
-  if (tableHtml) {
-    blocks.push(`<section class="block">
+  if (playedHtml) {
+    colPartidos.push(
+      `<section class="block"><div class="card">${sectionHead('Últimos resultados', tLink(tSlug, '/fixture'), 'Ver todos')}${playedHtml}</div></section>`
+    );
+  }
+  const colPosiciones = tableHtml
+    ? `<section class="block">
   <div class="section-head">
     <div><h2>Posiciones</h2><div class="sub">Los primeros de cada zona.</div></div>
     <a class="more" href="${escUrl(tLink(tSlug, '/posiciones'))}">Tabla completa →</a>
   </div>
   <div class="card"><div class="card-body">${tableHtml}</div></div>
-</section>`);
-  }
-  if (playedHtml) {
-    blocks.push(`<section class="block"><div class="card">${sectionHead('Últimos resultados', tLink(tSlug, '/fixture'), 'Ver todos')}${playedHtml}</div></section>`);
-  }
+</section>`
+    : '';
+
+  const columnas = [panelNoticias, colPartidos.join('\n'), colPosiciones].filter((c) => c.trim() !== '');
+  const panel = columnas.length
+    ? `<div class="ph-panel ph-panel--${columnas.length}">${columnas
+        .map((c) => `<div class="ph-panel__col">${c}</div>`)
+        .join('')}</div>`
+    : '';
+
+  const resto: string[] = [];
+  if (todayBanner) resto.push(todayBanner);
   if (scorersHtml) {
-    blocks.push(`<section class="block"><div class="card">${sectionHead('Goleadores', tLink(tSlug, '/goleadores'), 'Tabla completa')}${scorersHtml}</div></section>`);
+    resto.push(`<section class="block"><div class="card">${sectionHead('Goleadores', tLink(tSlug, '/goleadores'), 'Tabla completa')}${scorersHtml}</div></section>`);
   }
-  blocks.push(`<section class="block"><div class="card"><div class="card-body"><div class="stats-grid">${statCards}</div></div></div></section>`);
-  if (torneosInner) blocks.push(`<section class="block">${torneosInner}</section>`);
-  return blocks.join('\n');
+  resto.push(`<section class="block"><div class="card"><div class="card-body"><div class="stats-grid">${statCards}</div></div></div></section>`);
+  if (torneosInner) resto.push(`<section class="block">${torneosInner}</section>`);
+  return [panel, ...resto].filter(Boolean).join('\n');
 }
 
 /**
