@@ -4079,6 +4079,12 @@ html[data-theme='dark'] body.shell-public table.scorers tbody tr:nth-child(3) .p
 
 body.shell-public .btn-primary { background: var(--accent-strong); border-color: var(--accent-strong); }
 body.shell-public .btn-primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+/* En modo oscuro el acento es claro (pensado para texto sobre fondo oscuro),
+   pero .btn-primary lleva texto blanco fijo: blanco sobre #93c5fd daba 1.8:1.
+   El botón usa el azul fuerte de la identidad: 5.17:1 con blanco (AA), y el
+   hover 6.70:1. El resto de los botones y el tema claro no cambian. */
+html[data-theme='dark'] body.shell-public .btn-primary { background: #2563eb; border-color: #2563eb; }
+html[data-theme='dark'] body.shell-public .btn-primary:hover { background: #1d4ed8; border-color: #1d4ed8; }
 body.shell-public .btn-outline { border-color: var(--border-strong); color: var(--text); }
 body.shell-public a:not(.btn) { color: var(--accent-strong); }
 

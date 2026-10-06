@@ -13,6 +13,14 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.9] — 2026-10-06 — Botones legibles en modo oscuro
+
+### Arreglo
+
+- **Los botones azules del sitio se leen bien en modo oscuro**: "Panel", "Buscar" y "Compartir por WhatsApp" quedaban con texto blanco sobre un azul muy claro y era difícil leerlos. Ahora el botón usa el azul fuerte de ZonaLiga y el contraste pasa de 1.8 a 5.2 (mínimo recomendado: 4.5). El modo claro y el panel de administración no cambian.
+
+---
+
 ## [0.4.8] — 2026-10-06 — Rediseño visual del portal público
 
 ### Mejora
