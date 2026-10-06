@@ -13,6 +13,21 @@
 > Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/),
 > versionado SemVer (`MAJOR.MINOR.PATCH`).
 
+## [0.4.8] — 2026-10-06 — Rediseño visual del portal público
+
+### Mejora
+
+- **El sitio se ve renovado**: paleta azul ZonaLiga, header más compacto y bloques con más aire y mejor orden. El panel de administración no cambió.
+- **Portada más clara**: hero más grande con los accesos rápidos a El complejo, Próxima fecha, Torneo actual y Últimas fotos, y el bloque deportivo en un solo panel de tres columnas (noticia destacada, partidos y posiciones). En el teléfono pasa a una columna.
+- **Menú nuevo**: Inicio, Noticias, Fotos, El complejo, Fixture, Posiciones, Equipos, Goleadores y En vivo, con "Información del torneo" dentro de "Más".
+- **Noticias con la destacada al costado**: el listado ahora tiene una columna lateral con las noticias destacadas y las fotos de todas las notas quedan con el mismo tamaño.
+- **"Últimas fotos" cuenta la historia**: cada miniatura es apaisada y debajo muestra el título de la foto y el día de la galería.
+- **El complejo e Información del torneo ocupan todo el ancho**, igual que el resto de las páginas.
+- **Textos más fáciles de leer**: subimos el contraste de fechas y textos secundarios y arreglamos el modo oscuro, donde varios títulos y números quedaban casi invisibles.
+- **En el celular**: la hamburguesa del menú queda siempre dentro de la barra azul, el hero de la portada es más corto sin perder el título ni el buscador, y no hay scroll horizontal a 360, 390 ni 768 px.
+
+---
+
 ## [0.4.7] — 2026-10-05 — Portal con fotos reales y portada nueva (Fase 18.3 completa)
 
 ### Nuevo
